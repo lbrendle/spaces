@@ -1,0 +1,396 @@
+/* ── Workspaces view ─────────────────────────────────────────── */
+/*
+ * workspaces.css is imported from WorkspacesView.tsx, which App.tsx pulls in
+ * BEFORE "./App.css" — so anything that overrides a shared primitive
+ * (.chip, .btn, .banner) is written with the workspace class in the selector
+ * so it wins on specificity rather than on stylesheet order.
+ *
+ * Focus is App.css's. This file used to draw four rings of its own — three of
+ * them a bare 2px --accent box-shadow with no gap, which on a card reads as a
+ * glow rather than as a ring.
+ *
+ * Colors are tokens only; every tint comes from a *-soft / *-border /
+ * diff-* token so light themes read as light.
+ */
+
+/* ── a project is a heading and its checkouts ────────────────── */
+
+/*
+ * Each project was a filled, bordered, shadowed card containing a grid of
+ * filled, bordered cards. The outer one is now a heading and a rule — scoped by
+ * :has(.ws-isolate), which only this view renders, so nothing else that uses
+ * .dash-card is touched.
+ */
+.dash-body:has(.ws-isolate) {
+  gap: var(--space-6);
+}
+.dash-body:has(.ws-isolate) > .dash-card {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.dash-body:has(.ws-isolate) > .dash-card + .dash-card {
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-soft);
+}
+
+.ws-isolate {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 400;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease);
+}
+.ws-isolate:hover { color: var(--text); }
+.ws-isolate input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ws-isolate-caption {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  margin: calc(var(--space-1) * -1) 0 var(--space-5);
+  max-width: var(--measure);
+}
+
+/* Something changed under the reader's feet, so it keeps its fill. */
+.ws-isolate-note {
+  color: var(--yellow);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  margin: calc(var(--space-1) * -1) 0 var(--space-5);
+  padding: var(--space-2) var(--space-4);
+  background: var(--yellow-soft);
+  border: 1px solid var(--yellow-border);
+  border-radius: var(--radius-sm);
+}
+
+/* ── workspace cards ─────────────────────────────────────────── */
+
+/*
+ * These earn their boundary: a checkout is a branch, a set of counts and a row
+ * of destructive actions, laid out in a wrapping grid where nothing else says
+ * where one ends. They no longer lift on hover — a grid of records is not a
+ * stack of things you pick up.
+ */
+.ws-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.ws-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  transition: border-color var(--dur) var(--ease);
+}
+/* a checkout stopped mid-merge should be impossible to miss */
+.ws-card:has(> div > .ws-stat.merging) {
+  border-color: var(--yellow-border);
+}
+
+.ws-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.ws-card-id {
+  flex: 1;
+  min-width: 0;
+}
+.ws-card-title {
+  font-weight: 700;
+  font-size: var(--fs);
+  letter-spacing: var(--ls-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* branch name reads as a monospace chip, not body copy */
+.ws-branch {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: var(--space-2);
+  padding: 1px var(--space-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* ── stat pills ──────────────────────────────────────────────── */
+
+.ws-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.chip.ws-stat {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  background: var(--bg-inset);
+  border-color: var(--border-soft);
+}
+.chip.ws-stat.dirty {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: var(--yellow-border);
+}
+.chip.ws-stat.ahead {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: var(--green-border);
+}
+.chip.ws-stat.merging {
+  font-weight: 600;
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: var(--yellow-border);
+}
+
+/* ── actions ─────────────────────────────────────────────────── */
+
+.ws-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: auto;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+.ws-actions .btn.tiny { margin-top: 0; }
+/* de-emphasised until the card is hovered or something inside it has focus */
+.ws-actions .btn {
+  opacity: 0.7;
+  transition: var(--t-fade), var(--t-color);
+}
+.ws-card:hover .ws-actions .btn:not(:disabled),
+.ws-card:focus-within .ws-actions .btn:not(:disabled) { opacity: 1; }
+.ws-actions .btn:focus-visible { opacity: 1; }
+.ws-actions .btn.danger {
+  color: var(--red);
+  border-color: var(--red-border);
+}
+.ws-actions .btn.danger:hover:not(:disabled) {
+  background: var(--red-soft);
+  border-color: var(--red);
+}
+.ws-actions .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ws-actions .btn:disabled:hover { background: var(--bg-raised); }
+
+.ws-inline-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+/* The field takes App.css's border, radius and focus. The 2px --accent-glow
+   halo that used to sit under it is the treatment the foundation deleted. */
+.ws-inline-form input {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  border-radius: var(--radius-sm);
+}
+.ws-inline-form .btn.tiny {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+/* ── status / result rows ────────────────────────────────────── */
+
+/* An error and a created pull request are both outcomes of an action, so both
+   keep their fill: they have to be findable after the click that made them. */
+.banner.warn.ws-error {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm);
+  max-height: 96px;
+  overflow-y: auto;
+  word-break: break-word;
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: var(--red-border);
+  border-radius: var(--radius-sm);
+}
+
+.ws-pr {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  background: var(--green-soft);
+  border: 1px solid var(--green-border);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+}
+.ws-pr a {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.ws-pr a:hover { text-decoration: underline; }
+
+.ws-loading-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.ws-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.ws-hint code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  background: var(--inline-code-bg);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+/* "no agent workspaces yet" — a sentence where the grid would have been. It
+   was a dashed box with a 22px glyph balanced on top of it. */
+.ws-grid + .ws-hint {
+  margin-top: var(--space-5);
+  padding: var(--space-5) 0;
+  text-align: center;
+}
+
+/* ── graceful empty view ─────────────────────────────────────── */
+/*
+ * Matches the "no local checkouts yet" state (a direct child .center-note of
+ * the workspaces pane). "ws-empty" is the explicit hook if the markup moves.
+ */
+.ws-empty,
+.main-pane.scroll-pane > .center-note {
+  gap: var(--space-4);
+}
+
+/* ── Diff modal ──────────────────────────────────────────────── */
+
+.diff-pane {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius);
+  padding: var(--space-3) 0;
+  max-height: 60vh;
+  overflow: auto;
+  counter-reset: diffline;
+  tab-size: 2;
+}
+
+/*
+ * Two-column line: a CSS-counter gutter (::before) plus the raw diff text,
+ * which the browser wraps in an anonymous grid item for the second column.
+ */
+.diff-line {
+  display: grid;
+  grid-template-columns: 3.4em minmax(0, 1fr);
+  column-gap: var(--space-4);
+  align-items: start;
+  padding: 0 var(--space-5) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  counter-increment: diffline;
+}
+.diff-line::before {
+  content: counter(diffline);
+  box-sizing: border-box;
+  padding-right: var(--space-3);
+  text-align: right;
+  color: var(--text-faint);
+  opacity: 0.7;
+  border-right: 1px solid var(--border-soft);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* structural lines get an empty (but still ruled) gutter cell */
+.diff-line.file,
+.diff-line.hunk,
+.diff-line.note { counter-increment: none; }
+.diff-line.file::before,
+.diff-line.hunk::before,
+.diff-line.note::before { content: ""; }
+
+.diff-line.file {
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-inset);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.diff-line:not(.file) + .diff-line.file {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+.diff-line.hunk {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+  margin: var(--space-2) 0 2px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* Genuine data visualisation: which lines came and went. */
+.diff-line.add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-fg);
+}
+.diff-line.del {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-fg);
+}
+.diff-line.add::before,
+.diff-line.del::before { opacity: 0.85; }
+
+.diff-line.note {
+  color: var(--text-faint);
+  font-style: italic;
+  padding-top: var(--space-3);
+}
+
+/* ── motion preferences ──────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-isolate,
+  .ws-card,
+  .ws-actions .btn {
+    transition: none;
+  }
+}

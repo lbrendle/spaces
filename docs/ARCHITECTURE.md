@@ -1,0 +1,71 @@
+# Architecture
+
+Spaces has a deliberate split between a trusted local execution plane and a
+small shared control plane.
+
+```text
+┌──────────────────────────────┐
+│ Spaces desktop              │
+│ SQLite · repos · terminals  │
+│ browser · Claude/Codex      │
+└──────────────┬───────────────┘
+               │ paired device token
+               │ explicit shared state / jobs
+┌──────────────▼───────────────┐
+│ Spaces portal               │
+│ ChatGPT identity · D1       │
+│ membership · OAuth tokens   │
+│ shared content · job leases │
+└──────────────┬───────────────┘
+               │ provider APIs
+       Google · Microsoft
+       Instagram · TikTok
+```
+
+## Desktop
+
+The React/Tauri app owns:
+
+- the local SQLite database and numbered migrations;
+- local project paths and Git operations;
+- PTYs and persistent terminal panes;
+- embedded WebViews;
+- local agent processes and session continuity;
+- raw process streams, transcripts, diffs, and worktrees;
+- Apple Calendar automation;
+- the generated `.hq/` project context and Spaces MCP server.
+
+Themes are CSS custom properties generated from `desktop/src/themes.ts`.
+Hardcoded stylesheet colors are treated as bugs because Spaces ships light and
+dark IDE-derived themes.
+
+## Portal
+
+The portal is a Next.js-compatible application built with vinext for
+Cloudflare. D1 stores workspace identity, membership, invitations, connected
+account metadata/secrets, shared content, device state, and durable remote jobs.
+
+Provider secrets are encrypted before storage using `INTEGRATION_TOKEN_KEY`.
+The token encryption key itself is a deployment secret and is never committed.
+
+## Agent action path
+
+Spaces generates one MCP manifest from `desktop/src/hqops.ts`. Claude and Codex
+discover the same tools through a dependency-free stdio server. Calls append an
+idempotent JSON line to `.hq/actions.jsonl`; the desktop drains it into a local
+audit log.
+
+Operations marked `auto` apply immediately. Operations marked `propose` wait in
+the visible approval queue. External publishing is always `propose`.
+
+Projects without a local checkout receive a private control directory in the
+application data folder. This lets general/non-code channels expose Spaces
+tools without inventing a repository or writing coordination files into an
+unrelated directory.
+
+## Remote jobs
+
+A remote job is always assigned to the device that hosts the selected agent.
+The portal uses expiring leases and heartbeats; the requester receives durable
+status and a sanitized terminal result. The host does not upload its repository,
+live terminal stream, full transcript, command line, or session identifier.

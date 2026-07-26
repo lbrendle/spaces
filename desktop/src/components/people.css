@@ -1,0 +1,766 @@
+/* ── People: the roster of humans ────────────────────────────── */
+/*
+ * people.css is imported from PeopleView.tsx, which App.tsx pulls in BEFORE
+ * "./App.css" — so anything touching a shared primitive (.btn, .chip, .field)
+ * carries an extra class and wins on specificity rather than on order. Focus is
+ * not one of those things: App.css draws it once, and the six copies this file
+ * used to keep — each a two-layer accent box-shadow naming its own backdrop —
+ * are gone.
+ *
+ * Colors are tokens only. No literal color may appear in this file — the
+ * avatar ramp included, which arrives as var(--avatar-N) from the component.
+ *
+ * A roster is people, not a table of records, so the card is built around the
+ * face and the name: the portrait is the anchor, the name is the only thing on
+ * the card at title size, and everything the person *brings* is a quiet
+ * caption under it. Counts, section labels and provenance all step back into
+ * --text-faint. Where a card has an affordance it belongs to the person —
+ * hovering their name warms the portrait, not the whole box.
+ */
+
+/* ── the page is sections, not cards ─────────────────────────── */
+
+/*
+ * Four sections, each of which was a filled, bordered, shadowed card wrapping
+ * exactly one grid or one list. Scoped by :has(.pe-roster), which PeopleView
+ * renders once, so nothing else that uses .dash-card is touched.
+ */
+.dash-body:has(.pe-roster) {
+  gap: var(--space-6);
+}
+.dash-body:has(.pe-roster) .dash-card {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.dash-body:has(.pe-roster) > .dash-card + .dash-card {
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ── layout ──────────────────────────────────────────────────── */
+
+/*
+ * `.pe-layout` is gone. It was a grid that grew a 340px second column above
+ * 1180px to hold the person detail, which meant selecting somebody reflowed
+ * every card on the page — and below that width it stacked, so the detail was
+ * something you had to be scrolled to. The detail is a real panel now: it takes
+ * its gutter out of the app once, and the roster never moves.
+ */
+.pe-roster {
+  min-width: 0;
+}
+
+.pe-count {
+  margin-left: var(--space-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pe-note {
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-dim);
+  max-width: var(--measure);
+}
+
+.pe-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-faint);
+  max-width: 78ch;
+}
+.pe-hint code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+/* A warning has to be separable from the prose around it, so it keeps its
+   fill — one of three containers left in this file. */
+.pe-warn {
+  margin: var(--space-2) 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--yellow-border);
+  background: var(--yellow-soft);
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.pe-empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-faint);
+  max-width: 62ch;
+}
+
+/* Visible to assistive tech only — labels the swatches and the name box. */
+.pe-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── the explainer ───────────────────────────────────────────── */
+
+.pe-about {
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
+}
+.pe-about-shut {
+  padding-bottom: var(--space-3);
+}
+.pe-about-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease);
+}
+.pe-about-toggle:hover {
+  color: var(--text);
+}
+.pe-about-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+.pe-about-chev {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.pe-about-body {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-5);
+}
+.pe-about-body dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
+  gap: var(--space-5) var(--space-6);
+}
+.pe-about-body dt {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: var(--ls-title);
+}
+.pe-about-body dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-dim);
+  max-width: 82ch;
+}
+.pe-about-body code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+/* ── person cards ────────────────────────────────────────────── */
+
+.pe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-5);
+}
+
+/*
+ * This one earns its boundary: a person is a portrait, a name, what they bring,
+ * their machines and an editor, and in a wrapping grid there is nothing else to
+ * say where one person ends and the next begins. It no longer lifts on hover —
+ * a static grid of records is not a stack of things you can pick up — and
+ * selection is the app's one selected treatment rather than an accent edge.
+ *
+ * The outline is all it takes; the --surface-2 fill is gone, which is not only
+ * one less box but the only way selection can work. --accent-soft is 12–16%
+ * alpha: painted over a raised fill it *replaces* that fill, so on a light
+ * theme the picked card would read as the one that had lost its panel. Over the
+ * canvas it reads as what it is — a wash inside the same outline.
+ */
+.pe-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  min-width: 0;
+  transition: background var(--dur-fast) var(--ease);
+}
+.pe-card-on {
+  background: var(--accent-soft);
+}
+
+.pe-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.pe-ident {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  text-align: left;
+  padding: var(--space-1) var(--space-2);
+  margin: calc(var(--space-1) * -1) calc(var(--space-2) * -1);
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.pe-ident:hover {
+  background: var(--bg-hover);
+}
+.pe-ident-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+/* The one thing on the card at title size. A person's name outranks every
+   count, label and pill around it. */
+.pe-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pe-mail {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The portrait carries the person's own colour, set inline by the component.
+   It warms a step when their name is reached — the affordance belongs to the
+   person, not to the box they happen to be drawn in. */
+.pe-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+  color: var(--avatar-fg);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.pe-ident:hover .pe-avatar,
+.pe-ident:focus-visible .pe-avatar {
+  transform: scale(1.05);
+}
+
+.pe-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: 1px var(--space-3);
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pe-pill-you {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.pe-pill-here {
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+/*
+ * What this person brings, as a caption rather than a header row. It is pulled
+ * up against the identity it describes and ruled off underneath, so the card
+ * reads "who → what they bring → the detail" instead of as three equal bands.
+ */
+.pe-brings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--space-3);
+  margin-top: calc(var(--space-4) * -1);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pe-brings span + span::before {
+  content: "·";
+  margin-right: var(--space-3);
+  color: var(--border-strong);
+}
+
+.pe-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pe-block h4 {
+  margin: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+}
+
+.pe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pe-card .chip,
+.pe-panel .chip {
+  background: var(--bg-inset);
+  border-color: var(--border-soft);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pe-card .chip.pe-agent-hidden,
+.pe-panel .chip.pe-agent-hidden {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.pe-glyph {
+  color: var(--orange);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pe-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+/* ── devices ─────────────────────────────────────────────────── */
+
+/* A machine is a name, when it was last seen and what is installed on it.
+   That was a filled, bordered box nested inside the person's card. */
+.pe-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pe-device {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+  min-width: 0;
+}
+.pe-device:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.pe-device-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.pe-device-name {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pe-device-seen {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.pe-device-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.pe-plat {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+.pe-tool {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--inline-code-bg);
+  white-space: nowrap;
+}
+.pe-tool-ok {
+  color: var(--green);
+}
+.pe-tool-missing {
+  color: var(--text-faint);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+/* Not "missing" — a device that never sent a list is a different fact from a
+   device that sent one with nothing in it. */
+.pe-tool-none {
+  color: var(--text-faint);
+  font-family: var(--font);
+  background: none;
+}
+
+.pe-register {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pe-register-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.pe-register-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── the person editor ───────────────────────────────────────── */
+
+/* The rule and the padding above it were how the form separated itself from the
+   card it used to open inside. It has a panel of its own now, and a panel's
+   header is already the separation. */
+.pe-editor {
+  display: flex;
+  flex-direction: column;
+}
+.pe-editor .field {
+  margin-bottom: var(--space-4);
+}
+
+.pe-colors {
+  border: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  min-width: 0;
+}
+.pe-colors .field-label {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+.pe-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pe-swatch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.pe-swatch:hover {
+  transform: scale(1.08);
+}
+.pe-swatch:active {
+  transform: scale(0.96);
+}
+/* The swatch is its colour, so selection moves the border it already has to
+   --text: neutral, and legible against every avatar hue. */
+.pe-swatch-on {
+  border-color: var(--text);
+}
+.pe-swatch-dot {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1px solid var(--border-soft);
+}
+.pe-swatch-auto {
+  position: absolute;
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  color: var(--avatar-fg);
+  pointer-events: none;
+}
+/* The radio is visually hidden under its dot, so the app's one ring has to be
+   drawn on the dot. Same width, same colour, same offset. */
+.pe-swatch input:focus-visible + .pe-swatch-dot {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+
+/* ── actions ─────────────────────────────────────────────────── */
+
+.pe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: auto;
+  padding-top: 2px;
+}
+.pe-actions .btn.tiny {
+  margin-top: 0;
+}
+/* ── the panels ──────────────────────────────────────────────── */
+/*
+ * Adding somebody, bringing an agent, and everything one person brings all open
+ * beside the roster now. SidePanel owns the surface, the header, the scroll and
+ * the footer; these rules only place what this file puts inside one.
+ *
+ * `.pe-detail-head`, `.pe-detail-ident` and `.pe-detail-sub` are gone with the
+ * card that carried them — the panel header draws the portrait, the name and
+ * the role line, and drawing them twice is how two headers start disagreeing.
+ */
+
+/* The portrait belongs with the name, and .sp-title is the only place a panel
+   has for it. Inline-flex so the h2 keeps its line box. */
+.pe-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.pe-panel-lead {
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+/* Sections in a panel are separated by space, the way PanelSection separates
+   its own — a rule between every block would be a stack of boxes again. */
+.pe-panel .pe-block + .pe-block,
+.pe-panel .pe-block + .pe-hint {
+  margin-top: var(--space-6);
+}
+
+/* Away from Edit and Bring an agent: .sp-foot pushes its children right, and
+   this is the one that must not be next to a control somebody is aiming at. */
+.pe-panel-remove {
+  margin-right: auto;
+}
+
+/* A hint explains the field above it. In a 640px modal the next label was far
+   enough away to read as a new question; in a 420px column it was not, so the
+   gap is put back rather than left to the eye. */
+.pe-panel .pe-hint + .field,
+.pe-panel .pe-hint + .pe-colors,
+.pe-panel .pe-hint + .pe-choice {
+  margin-top: var(--space-4);
+}
+
+.pe-detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.pe-detail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.pe-detail-name {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── unclaimed agents ────────────────────────────────────────── */
+
+/* Rows you can click to give an agent an owner. They were bordered, filled
+   boxes whose border warmed to the accent on hover; a hover fill says it. */
+.pe-loose {
+  display: flex;
+  flex-direction: column;
+}
+.pe-loose-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.pe-loose-row:hover {
+  background: var(--bg-hover);
+}
+.pe-loose-name {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+}
+.pe-loose-kind {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.pe-loose-cta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ── former members ──────────────────────────────────────────── */
+
+.pe-former {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pe-former li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-sm);
+}
+.pe-former-name {
+  font-weight: 650;
+  color: var(--text-dim);
+}
+.pe-former-note {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+/* A labelled control that is not an input, so it cannot live inside .field. */
+.pe-choice {
+  margin-bottom: var(--space-5);
+}
+.pe-choice .field-label {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+/* What removing this person actually does. A heading and its list — it was a
+   filled, bordered panel inside a modal that is already a panel. */
+.pe-consequence {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.pe-consequence-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+.pe-consequence ul {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pe-consequence li {
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.pe-consequence code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+/* Both motion switches: App.css zeroes the durations, so only the transforms
+   that exist purely to move something need saying again here. */
+:root[data-reduce-motion] .pe-swatch:hover,
+:root[data-reduce-motion] .pe-swatch:active,
+:root[data-reduce-motion] .pe-ident:hover .pe-avatar,
+:root[data-reduce-motion] .pe-ident:focus-visible .pe-avatar {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-card,
+  .pe-ident,
+  .pe-avatar,
+  .pe-about-toggle,
+  .pe-loose-row,
+  .pe-swatch {
+    transition: none;
+  }
+  .pe-swatch:hover,
+  .pe-swatch:active,
+  .pe-ident:hover .pe-avatar,
+  .pe-ident:focus-visible .pe-avatar {
+    transform: none;
+  }
+}

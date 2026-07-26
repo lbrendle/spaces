@@ -1,0 +1,378 @@
+/* ── Run transcript (raw harness stream) ─────────────────────── */
+/*
+ * transcript.css is imported from RunInspector.tsx. Not one literal color
+ * lives here: every value is a theme token, so all 14 light and dark themes
+ * stay coherent.
+ *
+ * Overrides of shared primitives (.modal-wide, .btn) always carry a tr- class
+ * in the selector, so they win on specificity rather than on import order.
+ */
+
+/*
+ * The inspector now hosts a whole conversation log, and 640px wraps tool
+ * output into ribbons. Scoped with :has() so only this modal widens — and
+ * keyed off the tab bar, which is present in both tabs, so the modal never
+ * changes width as you switch.
+ */
+.modal-wide:has(.tr-tabs) {
+  width: 880px;
+}
+
+/* ── tab switcher ────────────────────────────────────────────── */
+
+.tr-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 0 13px;
+  padding: 3px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+
+.tr-tab {
+  padding: 4px 15px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.tr-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.tr-tab.on {
+  color: var(--text);
+  background: var(--surface-1);
+  box-shadow:
+    inset 0 1px 0 var(--edge-highlight),
+    var(--shadow-sm);
+}
+.tr-tab.on:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+
+/* ── panel head ──────────────────────────────────────────────── */
+
+.tr-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 7px;
+}
+.tr-count {
+  margin-right: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+/* .btn.tiny carries a top margin meant for stacked forms */
+.tr-head .btn.tr-copy {
+  margin-top: 0;
+}
+
+/* ── the log ─────────────────────────────────────────────────── */
+
+.tr-log {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 52vh;
+  min-height: 130px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 11px 13px;
+  margin-bottom: 16px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.tr-node {
+  min-width: 0;
+  margin: 0;
+}
+
+.tr-trimmed {
+  padding: 6px 9px;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* ── agent / user prose ──────────────────────────────────────── */
+
+.tr-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tr-role {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.tr-prose {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── reasoning ───────────────────────────────────────────────── */
+
+.tr-think > .tr-sum {
+  color: var(--text-faint);
+}
+.tr-think-body {
+  margin-top: 4px;
+  padding-left: 11px;
+  border-left: 2px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── tool calls ──────────────────────────────────────────────── */
+
+.tr-tool,
+.tr-orphan {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.tr-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+}
+.tr-tool-head svg {
+  flex-shrink: 0;
+}
+.tr-tool-name {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tr-code {
+  margin: 0;
+  padding: 7px 9px;
+  max-height: 340px;
+  overflow: auto;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+/* ── results ─────────────────────────────────────────────────── */
+
+.tr-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 6px;
+  background: var(--green-soft);
+  border: 1px solid var(--green-border);
+  border-radius: var(--radius-sm);
+}
+.tr-result > .tr-code {
+  background: none;
+  border: 0;
+  padding: 2px 3px;
+  color: var(--text-dim);
+}
+.tr-result.err {
+  background: var(--red-soft);
+  border-color: var(--red-border);
+}
+.tr-result.err > .tr-code {
+  color: var(--red);
+}
+.tr-more {
+  align-self: flex-start;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  transition: color var(--dur-fast) var(--ease);
+}
+.tr-more:hover {
+  color: var(--accent);
+}
+
+/* ── folds ───────────────────────────────────────────────────── */
+
+.tr-sum {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 3px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
+}
+.tr-sum::-webkit-details-marker {
+  display: none;
+}
+.tr-sum svg {
+  flex-shrink: 0;
+}
+/* a CSS triangle, so the disclosure never depends on a glyph or a font */
+.tr-sum::before {
+  content: "";
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4.5px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform var(--dur-fast) var(--ease);
+}
+details[open] > .tr-sum::before {
+  transform: rotate(90deg);
+}
+.tr-sum:hover {
+  color: var(--text);
+}
+.tr-sum-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tr-sum-count {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.tr-fold > .tr-code {
+  margin-top: 5px;
+}
+
+/* ── notes, errors, unclassified events ──────────────────────── */
+
+.tr-note,
+.tr-err {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.tr-note {
+  color: var(--text-faint);
+}
+.tr-err {
+  padding: 6px 8px;
+  color: var(--red);
+  background: var(--red-soft);
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+}
+.tr-note svg,
+.tr-err svg {
+  flex-shrink: 0;
+  transform: translateY(1.5px);
+}
+
+/* the fallback: an event we could not classify, shown exactly as it arrived */
+.tr-raw {
+  padding: 5px 8px;
+  overflow-x: auto;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── live tail ───────────────────────────────────────────────── */
+
+.tr-live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 1px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.tr-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tr-pulse 1.7s var(--ease) infinite;
+}
+@keyframes tr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ── motion preferences ──────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .tr-tab,
+  .tr-sum,
+  .tr-sum::before,
+  .tr-more {
+    transition: none;
+  }
+  .tr-live-dot {
+    animation: none;
+  }
+}

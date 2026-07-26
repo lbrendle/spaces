@@ -1,0 +1,266 @@
+/* ═══════════════════════════════════════════════════════════
+   Spaces — material layer.
+
+   The elevation ladder the rest of the app already refers to in comments
+   ("Level 1", "Level 4 — the only thing in the app that gets --shadow-lg")
+   written down as tokens, plus the three surface treatments that go with
+   it. Every value derives from the active theme: 39 palettes, light and
+   dark, so nothing here may name a colour.
+
+   Import ONCE, immediately after App.css and before any component
+   stylesheet. These utilities and a component rule have equal specificity,
+   so the later file wins — that ordering is deliberate. A treatment sets
+   the default; a component can still overrule one part of it without
+   having to out-specify anything.
+
+   ── Where glass is wrong ────────────────────────────────────
+   Glass is for surfaces that genuinely float above other content. It is
+   not a finish. Never put .glass on a list row, a table cell, a card in a
+   grid, a nav item, a chip or a button: those sit *in* the page, there is
+   nothing behind them worth sampling, and at that density the treatment
+   stops reading as material and starts reading as a gradient sprayed over
+   a template. Those want .elev-1 / .elev-2 below.
+
+   Two mechanical traps, both inherent to backdrop-filter:
+   - it makes the element a containing block for position:fixed children,
+     so a fixed popover inside a .glass modal anchors to the modal;
+   - nesting glass inside glass blurs an already-blurred backdrop, which
+     is both wasted work and mud. Sample the page once, at the outermost
+     floating surface.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── The material ──────────────────────────────────────────── */
+
+/* Two things happen behind a glass surface, and only one of them is blur.
+   The other is a *band*: contrast() squeezes the backdrop into a narrow
+   luminance range and brightness() parks that range on the surface's own
+   colour, so the composite can never drift far from the opaque version no
+   matter what scrolls past. That is what makes this safe across 39
+   palettes — without it a single saturated avatar behind a modal drags
+   secondary text to 3.1:1, and no choice of alpha fixes the tail.
+
+   Measured on all 38 themes against the worst realistic backdrop for each
+   (canvas, code well, accent fill, avatar, blurred body text): body text
+   never below 5.5:1, secondary text never below 4.1:1 and never more than
+   0.94 under what the same text scores on the fully opaque surface. The
+   band is also centred deliberately rather than just pushed down — glass
+   over the bare canvas stays fractionally lighter than the canvas
+   (1.06x), so a menu still reads as lifted rather than as a hole. */
+
+:root {
+  /* Share of the theme's own overlay colour kept in the translucent mix. */
+  --glass-tint: 76%;
+  --glass-rail-tint: 84%;
+
+  /* Small on purpose. Past ~20px the blur turns to soup and the cost per
+     frame climbs; under ~8px it reads as a flat wash and you may as well
+     be opaque. */
+  --glass-blur: 16px;
+  --glass-rail-blur: 20px;
+
+  /* Blur averages colour away; the saturation lift puts it back, which is
+     what makes the surface read as *sampling* the page rather than sitting
+     on a tinted panel. */
+  --glass-saturate: 140%;
+
+  /* The band, dark appearance: roughly [0.16, 0.34] per channel. Dark
+     enough that a bright card behind a modal cannot glow through the
+     middle of it, and sitting just above a dark theme's overlay colour so
+     the surface still lifts off the canvas. */
+  --glass-contrast: 0.35;
+  --glass-brightness: 0.5;
+
+  /* The hairline. On dark themes the border is half the edge; on light it
+     carries the whole edge, so it is not softened there. */
+  --glass-edge: color-mix(in srgb, var(--border) 72%, transparent);
+
+  /* Top highlight — the lit edge of a pane of glass. Light themes with a
+     pure-white overlay resolve this to a no-op, which is correct: a white
+     panel has no brighter edge to catch. Cream overlays (Solarized Light,
+     Rosé Pine Dawn) still show it. */
+  --glass-highlight: var(--edge-highlight);
+}
+
+/* ── Light themes ──────────────────────────────────────────── */
+
+/* This is where translucency normally falls apart. Most light palettes set
+   bgOverlay to #ffffff over a near-white canvas, so the naive version has
+   nothing to say — and the moment anything dark scrolls behind it, the
+   panel darkens and secondary text is the first thing to go.
+
+   The band inverts: brightness well above 1 parks it at [0.74, 1.0]
+   instead of pushing it down, so dark content behind fades up toward the
+   panel rather than dirtying it. What survives that lift is hue, not
+   luminance — a red badge behind a popover reads as a pale pink wash,
+   which is exactly what light-mode material should do, and it means the
+   tint can stay lower here than on dark themes rather than higher. Glass
+   over the bare canvas lands on the overlay colour exactly, so a white
+   panel on a white theme is white, not grey.
+
+   Verified against Vitesse Light, GitHub Light and Catppuccin Latte (all
+   #ffffff overlays over a near-white canvas — the hardest case): body
+   text 11.1 / 14.6 / 7.1 to 1, secondary text 5.75 / 5.65 / 4.36, within
+   0.2 / 0.5 / 0.6 of its fully opaque score. */
+:root[data-appearance="light"] {
+  --glass-tint: 68%;
+  --glass-rail-tint: 76%;
+  --glass-blur: 12px;
+  --glass-rail-blur: 16px;
+  --glass-saturate: 130%;
+  --glass-contrast: 0.45;
+  --glass-brightness: 2.7;
+  --glass-edge: var(--border);
+}
+
+/* ── Derived ───────────────────────────────────────────────── */
+
+:root {
+  --glass-fill: color-mix(in srgb, var(--bg-overlay) var(--glass-tint), transparent);
+  --glass-rail-fill: color-mix(in srgb, var(--bg-raised) var(--glass-rail-tint), transparent);
+  --glass-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+                  contrast(var(--glass-contrast)) brightness(var(--glass-brightness));
+  --glass-rail-filter: blur(var(--glass-rail-blur)) saturate(var(--glass-saturate))
+                       contrast(var(--glass-contrast)) brightness(var(--glass-brightness));
+}
+
+/* ── Elevation ladder ──────────────────────────────────────── */
+
+/* Background, border and shadow move together. Depth is a set of matched
+   values, not three independent choices — quoting --shadow-lg onto a card
+   is how a grid ends up looking like a pile of modals. Reach for the
+   level, not the parts. */
+:root {
+  /* 1 — a panel resting on the canvas: dashboard card, kanban column. */
+  --elev-1-bg: var(--surface-1);
+  --elev-1-border: var(--border-soft);
+  --elev-1-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+
+  /* 2 — nested inside a level 1 panel: repo tile, run row. No resting
+     shadow; a shadow inside a shadowed box just muddies both. */
+  --elev-2-bg: var(--surface-2);
+  --elev-2-border: var(--border-soft);
+  --elev-2-shadow: none;
+
+  /* 3 — floats over content: popover, menu, toast, drawer. Glass. */
+  --elev-3-bg: var(--glass-fill);
+  --elev-3-border: var(--glass-edge);
+  --elev-3-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+
+  /* 4 — owns the window: modal, command palette. Glass, and the only
+     level allowed --shadow-lg. */
+  --elev-4-bg: var(--glass-fill);
+  --elev-4-border: var(--glass-edge);
+  --elev-4-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
+
+  /* Rail — persistent chrome, not a float. Border only: a full-height rail
+     casting a drop shadow across the pane is the sprayed-on look. */
+  --elev-rail-border: var(--border);
+  --elev-rail-shadow: none;
+}
+
+/* ── Degradation ───────────────────────────────────────────── */
+
+/* Both spellings have to be asked about. WKWebView shipped
+   -webkit-backdrop-filter years before the unprefixed property, so testing
+   only the modern name sends perfectly capable macOS builds down the solid
+   path. When neither exists the fill goes fully opaque — a surface that
+   becomes unreadable without blur is a bug, not a graceful fallback. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-fill: var(--bg-overlay);
+    --glass-rail-fill: var(--bg-raised);
+    --glass-filter: none;
+    --glass-rail-filter: none;
+  }
+}
+
+/* Someone who has asked the OS to stop doing this. Same opaque path, and
+   incidentally the cheap one: no compositing pass at all. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-fill: var(--bg-overlay);
+    --glass-rail-fill: var(--bg-raised);
+    --glass-filter: none;
+    --glass-rail-filter: none;
+  }
+}
+
+/* Non-retina. A 16px blur is 16 real pixels here rather than 8, so the
+   smear is twice as wide and WebKit's downsampled blur starts to band in
+   it. Pull the radius back so the surface stays crisp at 100% zoom on a 1x
+   display. Declared after the blocks above so it wins on order, and
+   repeated for light so the appearance selector cannot outrank it. */
+@media (max-resolution: 1.5dppx) {
+  :root { --glass-blur: 12px; --glass-rail-blur: 14px; }
+  :root[data-appearance="light"] { --glass-blur: 10px; --glass-rail-blur: 12px; }
+}
+
+/* ── Treatments ────────────────────────────────────────────── */
+
+/* USE ON: opaque panels resting on the canvas — dashboard cards, kanban
+   columns, settings sections, the empty-state panel. Anything that sits on
+   the page rather than over it. */
+.elev-1 {
+  background: var(--elev-1-bg);
+  border: 1px solid var(--elev-1-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-1-shadow);
+}
+
+/* USE ON: a panel nested inside an .elev-1 one — repo tiles, run rows,
+   member cards, anything laid out in a grid. This is the class a grid of
+   cards should be reaching for; it is the one glass keeps being misapplied
+   to. */
+.elev-2 {
+  background: var(--elev-2-bg);
+  border: 1px solid var(--elev-2-border);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2-shadow);
+}
+
+/* USE ON: surfaces that appear above the page and are dismissed —
+   popovers, dropdown and context menus, the mention and slash menus, the
+   link picker, toasts, the inspector drawer. Add .elev-4 for the modal
+   tier. NOT on rows, cells, chips or buttons. */
+.glass {
+  background: var(--elev-3-bg);
+  border: 1px solid var(--elev-3-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-3-shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+}
+
+/* USE ON: a .glass surface that owns the window — modal, command palette,
+   confirm dialog. Nothing else in the app takes --shadow-lg. */
+.glass.elev-4 {
+  background: var(--elev-4-bg);
+  border-radius: var(--radius-lg);
+  border-color: var(--elev-4-border);
+  box-shadow: var(--elev-4-shadow);
+}
+
+/* USE ON: persistent chrome that content scrolls behind — the sidebar, the
+   title bar, a sticky pane header. Quieter than .glass because it is
+   always on screen: more of its own colour, a wider blur, no shadow. Keeps
+   its own single-edge border, since which edge depends on the side it
+   lives on — use --elev-rail-border for it. */
+.glass-rail {
+  background: var(--glass-rail-fill);
+  box-shadow: var(--elev-rail-shadow);
+  -webkit-backdrop-filter: var(--glass-rail-filter);
+  backdrop-filter: var(--glass-rail-filter);
+}
+
+/* USE ON: things recessed into a surface rather than floating over it —
+   text inputs, search fields, code blocks, terminal wells, the diff
+   gutter. Deliberately carries no backdrop-filter: a recess has its own
+   parent directly behind it, so sampling would blur a flat fill and buy a
+   compositing pass for nothing. The inner top edge, and the absence of the
+   highlight the raised levels wear, are what sell the depth. */
+.glass-inset {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--border) 65%, transparent);
+}

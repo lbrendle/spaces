@@ -1,0 +1,1212 @@
+/* ── Git Activity view ───────────────────────────────────────── */
+/*
+ * gitactivity.css is imported from GitActivity.tsx. Anything that leans on a
+ * shared primitive (.chip, .banner, .list-row, .avatar) is written with a `ga-`
+ * class in the selector so it wins on specificity rather than on import order.
+ *
+ * Tokens only — every tint comes from a *-soft / *-border pair so the 14 light
+ * themes read as light and the dark ones read as dark.
+ *
+ * This view is a report: a headline, some numbers, a list of commits and one
+ * commit open. Reports are made of headings and columns, so the panels that
+ * used to wrap each of those — the status banner, four stat tiles, two
+ * sparkline cards, the branch table and the commit list — are now headings
+ * with space under them. What kept a surface is what you actually look *into*:
+ * the sticky detail panel and the diff.
+ */
+
+.ga-root {
+  /* The commit rows and the SVG lane diagram beside them are one grid: both
+   * read this, so they can never drift apart by a pixel. */
+  --ga-row-h: 34px;
+}
+
+.ga-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── the headline: has anything left this machine? ───────────── */
+
+/* The largest sentence on the screen, with a coloured mark beside it. It was
+   a tinted, outlined banner, which made the answer to the view's central
+   question look like a notification about something else. */
+.ga-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ga-headline-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-faint);
+}
+
+.ga-headline-body {
+  min-width: 0;
+}
+
+.ga-headline-main {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.ga-headline-sub {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 78ch;
+}
+
+.ga-headline.local .ga-headline-icon,
+.ga-headline.synced .ga-headline-icon {
+  color: var(--green);
+}
+
+.ga-headline.pending .ga-headline-icon {
+  color: var(--yellow);
+}
+
+.ga-headline.neutral .ga-headline-icon {
+  color: var(--text-faint);
+}
+
+/* ── landed state: ahead / behind / uncommitted ──────────────── */
+
+.ga-landed {
+  margin-bottom: var(--space-6);
+}
+
+/* Four numbers in a row. A number with a label under it is already a tile;
+   drawing a tile around it is drawing it twice. */
+.ga-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-5);
+}
+
+.ga-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ga-tile-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ga-tile-value {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+.ga-tile-value.warn {
+  color: var(--yellow);
+}
+
+.ga-tile-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A table's rows are its own dividers; the frame around them was a third. */
+.ga-branch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.ga-branch-table th,
+.ga-branch-table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.ga-branch-table thead th {
+  border-top: none;
+  padding-top: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ga-branch-table .num,
+.ga-branch-table .when {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.ga-branch-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ga-branch-table .avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  font-size: 9px;
+}
+.ga-branch-table .avatar-badge {
+  display: none;
+}
+
+.ga-branch-name {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 34ch;
+}
+
+.chip.ga-tag.main-tag {
+  color: var(--text-dim);
+  background: var(--bg-active);
+  border-color: transparent;
+}
+
+.ga-num {
+  font-weight: 650;
+  color: var(--text);
+}
+.ga-num.zero {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+.ga-num.ahead {
+  color: var(--yellow);
+}
+.ga-num.behind {
+  color: var(--blue);
+}
+.ga-num.dirty {
+  color: var(--orange);
+}
+
+.ga-branch-note {
+  margin-top: var(--space-3);
+}
+
+/* ── meta row ────────────────────────────────────────────────── */
+
+.ga-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+.chip.ga-meta-chip {
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  gap: var(--space-2);
+}
+
+.ga-meta-chip svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+a.chip.ga-remote-link {
+  font-family: var(--mono);
+  color: var(--text-dim);
+  transition: var(--t-color);
+}
+a.chip.ga-remote-link:hover {
+  text-decoration: none;
+  color: var(--text);
+  background: var(--bg-active);
+}
+
+.ga-meta-note {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+/* ── section labels ──────────────────────────────────────────── */
+
+.ga-section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ga-count {
+  font-weight: 600;
+  letter-spacing: 0;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--text-dim);
+}
+
+/* ── filters ─────────────────────────────────────────────────── */
+
+.ga-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.ga-filters input,
+.ga-filters select {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-sm);
+  border-radius: var(--radius-sm);
+  width: auto;
+}
+.ga-filters select {
+  padding-right: var(--space-6);
+}
+
+.ga-filter-text {
+  flex: 1 1 180px;
+  min-width: 140px;
+}
+.ga-filter-path {
+  flex: 0 1 150px;
+  min-width: 110px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.ga-filter-select {
+  max-width: 22ch;
+}
+
+.ga-filter-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ga-filter-date {
+  font-size: var(--fs-xs);
+}
+.ga-filter-dash {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+button.chip.ga-toggle {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+}
+
+.btn.tiny.ga-clear {
+  margin-top: 0;
+}
+
+/* ── sparklines ──────────────────────────────────────────────── */
+
+/* Two charts, each under its own caption. They were cards; a chart with a
+   title above it is already legible as one thing. */
+.ga-facets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+@media (max-width: 900px) {
+  .ga-facets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ga-facet {
+  min-width: 0;
+}
+
+.ga-facet-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.ga-facet-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ga-facet-sub,
+.ga-facet-empty {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.ga-facet-empty {
+  padding: var(--space-1) 0;
+}
+
+.ga-days {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 42px;
+}
+
+/* Genuine data visualisation: the bar's height is the datum and its fill is
+   the series. This is the one place colour is allowed to be a shape. */
+.ga-day {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.ga-day:hover {
+  background: var(--bg-hover);
+}
+
+.ga-day-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.75;
+  transition: var(--t-fade);
+}
+.ga-day:hover .ga-day-bar {
+  opacity: 1;
+}
+.ga-day.empty .ga-day-bar {
+  background: var(--border);
+  opacity: 1;
+}
+.ga-day.active {
+  background: var(--accent-soft);
+}
+.ga-day.active .ga-day-bar {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.ga-authors {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ga-author {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.ga-author:hover {
+  background: var(--bg-hover);
+}
+.ga-author.active {
+  background: var(--accent-soft);
+}
+
+.ga-author .avatar {
+  width: 17px;
+  height: 17px;
+  border-radius: var(--radius-sm);
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.ga-author .avatar-badge {
+  display: none;
+}
+
+.ga-author-dot {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+}
+
+.ga-author-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ga-author.active .ga-author-name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ga-author-count {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  min-width: 2.5ch;
+  text-align: right;
+}
+
+.ga-spark {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.ga-spark-bar {
+  fill: currentColor;
+  opacity: 0.7;
+}
+.ga-spark-bar.empty {
+  fill: var(--border);
+  opacity: 1;
+}
+
+/* ── activity list + lane diagram ────────────────────────────── */
+
+.ga-work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  align-items: start;
+  gap: var(--space-6);
+}
+
+/* Rows separated by hairlines are a list. The frame around them made the list
+   a panel, and the panel had to be told to clip its own corners. */
+.ga-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.ga-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--ga-row-h, 34px);
+  padding: 0 var(--space-3) 0 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.ga-row:hover {
+  background: var(--bg-hover);
+}
+.ga-row.sel {
+  background: var(--accent-soft);
+}
+
+/* The diagram is decoration for a mouse and noise for a screen reader; the row
+ * text says everything it says. */
+.ga-graph {
+  flex: 0 0 auto;
+  display: block;
+  overflow: visible;
+}
+
+.ga-edge {
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  opacity: 0.55;
+}
+
+.ga-dot {
+  fill: currentColor;
+  stroke: var(--bg);
+  stroke-width: 1;
+}
+.ga-dot.local {
+  fill: var(--bg);
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+.ga-dot-ring {
+  stroke: currentColor;
+  stroke-width: 1.2;
+  opacity: 0.4;
+}
+.ga-dot-halo {
+  fill: var(--accent-soft-strong);
+}
+
+.ga-row-main {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0;
+  height: 100%;
+  text-align: left;
+  color: inherit;
+}
+
+.ga-sha {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.ga-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  max-width: 22ch;
+}
+.ga-row .avatar {
+  width: 19px;
+  height: 19px;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+}
+.ga-row .avatar-badge {
+  display: none;
+}
+.ga-agent-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ga-subject {
+  flex: 1 1 auto;
+  min-width: 6ch;
+  font-size: var(--fs);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ga-row-links {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  max-width: 28ch;
+  overflow: hidden;
+}
+
+.ga-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.chip.ga-tag {
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ga-tag.checkpoint,
+.ga-tag.run {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.ga-tag.local {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: transparent;
+}
+
+.ga-tag.branch {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border-color: transparent;
+}
+.ga-tag.branch.main {
+  color: var(--text-dim);
+}
+
+.ga-when {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  text-align: right;
+  min-width: 6ch;
+}
+
+.btn.ga-more {
+  margin-top: var(--space-4);
+}
+
+.ga-empty-filtered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.ga-hint,
+.ga-note-detail {
+  margin-top: var(--space-3);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-faint);
+  max-width: 78ch;
+}
+
+.dash-card .ga-note {
+  margin: var(--space-4) 0 0;
+  font-size: var(--fs-sm);
+}
+.dash-card .ga-note code {
+  font-family: var(--mono);
+  background: var(--inline-code-bg);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+/* ── commit detail ───────────────────────────────────────────── */
+
+/* This one keeps a surface, and earns it: it sticks beside a scrolling list,
+   scrolls independently of it, and has to stay legible over whatever row
+   happens to be behind it. */
+.ga-detail {
+  position: sticky;
+  top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm);
+  max-height: 72vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ga-detail-empty {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.ga-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ga-detail-sha {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+}
+
+.ga-detail-when {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.ga-detail-close {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+}
+
+.ga-detail-subject {
+  font-size: var(--fs);
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.ga-detail-body {
+  margin: var(--space-2) 0 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 18em;
+  overflow-y: auto;
+}
+
+.ga-detail-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ga-detail-author {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+/* An agent run produced this commit. Inside a panel that is already a panel,
+   so it is a block under a rule — the avatar and the name are what identify
+   it, and they were doing that job before the tinted card was added. */
+.ga-run-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.ga-run-block.plain .ga-run-name,
+.ga-run-block.plain .ga-run-sub {
+  color: var(--text-dim);
+}
+
+.ga-run-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.ga-run-block .avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+
+.ga-run-who {
+  min-width: 0;
+}
+.ga-run-name {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+.ga-run-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.ga-run-prompt {
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ga-run-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.ga-run-actions .btn.tiny {
+  margin-top: 0;
+}
+
+.ga-detail-section {
+  min-width: 0;
+}
+
+.ga-detail-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ga-detail-totals {
+  display: inline-flex;
+  gap: var(--space-2);
+  letter-spacing: 0;
+}
+
+.ga-detail-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ga-detail-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 22em;
+  overflow-y: auto;
+}
+
+.ga-file {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.ga-file:hover {
+  background: var(--bg-hover);
+}
+
+.ga-file-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* keep the filename visible when the path is too long */
+  text-align: left;
+}
+
+.ga-file-counts {
+  display: inline-flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+}
+
+.ga-add {
+  color: var(--diff-add-fg);
+}
+.ga-del {
+  color: var(--diff-del-fg);
+}
+.ga-add.zero,
+.ga-del.zero {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.ga-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.ga-detail-actions .btn.tiny {
+  margin-top: 0;
+}
+
+.ga-detail-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* Code, so it keeps the code surface — that fill is material, not decoration. */
+.ga-diff {
+  max-height: 40vh;
+  overflow: auto;
+  padding: var(--space-2) 0;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.ga-diff-line {
+  padding: 0 var(--space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+}
+.ga-diff-line.file {
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-inset);
+}
+.ga-diff-line.hunk {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.ga-diff-line.add {
+  color: var(--diff-add-fg);
+  background: var(--diff-add-bg);
+}
+.ga-diff-line.del {
+  color: var(--diff-del-fg);
+  background: var(--diff-del-bg);
+}
+.ga-diff-line.note {
+  color: var(--text-faint);
+  font-style: italic;
+  padding-top: var(--space-1);
+}
+
+/* ── skeletons ───────────────────────────────────────────────── */
+
+/* Bars in the shape of what is coming. They breathe rather than sweep: a
+   travelling highlight is a gradient, and this app has none. */
+.ga-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sk-block {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  animation: ga-pulse calc(var(--dur) * 7) var(--ease) infinite;
+}
+
+@keyframes ga-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.sk-headline {
+  height: 58px;
+  border-radius: var(--radius);
+}
+
+.sk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3);
+}
+.sk-tile {
+  height: 52px;
+  border-radius: var(--radius);
+}
+
+.sk-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-soft);
+}
+.sk-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: var(--ga-row-h, 34px);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+.sk-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.sk-sha {
+  width: 52px;
+  height: 9px;
+  flex-shrink: 0;
+}
+.sk-subject {
+  height: 9px;
+  max-width: 60%;
+}
+.sk-when {
+  width: 44px;
+  height: 9px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.sk-file {
+  height: 12px;
+  margin: var(--space-1) 0;
+}
+
+/* ── error state ─────────────────────────────────────────────── */
+
+/* A title, a sentence and a path. The mark beside it carries the colour; the
+   yellow panel it used to sit in made a recoverable problem look like an
+   alarm. */
+.ga-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.ga-error-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--yellow);
+}
+
+.ga-error-title {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+
+.ga-error-body {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 78ch;
+}
+
+.ga-error-path {
+  margin-top: var(--space-2);
+}
+.ga-error-path code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  background: var(--inline-code-bg);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+
+.ga-error-hint {
+  margin-top: var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* PR rows reuse .list-row. Scoped to .ga-pr-row so the Dashboard's own
+ * .list-row instances are untouched by this stylesheet. */
+.list-row.ga-pr-row {
+  align-items: center;
+}
+.ga-pr-row .ga-tag.branch {
+  flex-shrink: 0;
+}
+.ga-pr-row .pr-dot {
+  display: inline-flex;
+  align-items: center;
+  color: var(--green);
+}
+.ga-pr-row .pr-dot.draft {
+  color: var(--text-faint);
+}
+
+/* ── narrow panes ────────────────────────────────────────────── */
+
+@media (max-width: 1200px) {
+  .ga-row-links {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .ga-work {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Rows wrap here, so the fixed-height lane diagram can no longer line up
+   * with them — the branch tag still says where each commit lives. */
+  .ga-graph {
+    display: none;
+  }
+  .ga-detail {
+    position: static;
+    max-height: none;
+  }
+  .ga-detail.empty {
+    display: none;
+  }
+  .ga-row {
+    height: auto;
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+  .ga-row-main {
+    flex-wrap: wrap;
+    height: auto;
+  }
+  .ga-subject {
+    flex-basis: 100%;
+    order: 3;
+  }
+  .ga-tags {
+    order: 4;
+  }
+  .ga-when {
+    margin-left: auto;
+  }
+  .ga-branch-table .ga-branch-name {
+    max-width: 18ch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ga-row,
+  .ga-day,
+  .ga-day-bar,
+  .ga-file,
+  .ga-author {
+    transition: none;
+  }
+  a.ga-remote-link {
+    transition: none;
+  }
+  .sk-block {
+    animation: none;
+  }
+}

@@ -1,0 +1,986 @@
+/* ── The dashboard ────────────────────────────────────────────── */
+/*
+ * Imported from DashboardView.tsx. Every selector is `db-` prefixed and no
+ * shared primitive (.btn, .chip, .avatar, .ec, .field, .modal-*) is redefined,
+ * only scoped — so this sheet can land at any point in the cascade without
+ * fighting App.css.
+ *
+ * One exception is deliberate: .db-card mirrors App.css's generic .dash-card,
+ * because <FirstRunChecklist /> renders into a .dash-card of its own and the
+ * two sit in the same column. They have to read as one family.
+ *
+ * Colors are theme tokens only. No literal color may appear in this file.
+ *
+ * This is the first screen, so it has to read as one composition and not a
+ * stack of unrelated boxes — and it used to be exactly that: ten level-1 cards
+ * down the page, each with its own border, radius, shadow and inset hairline.
+ * Every one of them has gone. What separates a section from the next section is
+ * space, and what names it is its heading.
+ *
+ * The proportion is what makes it work, and it is the only thing holding the
+ * page together now, so it is deliberate:
+ *
+ *  - Between sections   --space-6, doubled at the page's own seams
+ *  - Inside a section   --space-2/3 between rows, --space-4 under the heading
+ *  - Between the paired
+ *    sections in a row  --space-6 across, so the two columns read as two
+ *                       sections and not as one wrapped list
+ *
+ * Related things are close and unrelated things are far; that ratio is roughly
+ * three to one, which is what the eye needs to group without a rule to help it.
+ * Nothing on this page is emphasised by decoration — the live run reads because
+ * of a green pulse and a heading that says so, not because its box lit up.
+ */
+
+.db-body {
+  padding: var(--space-5) var(--pane-x) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  /* The whole page is now separated by this number. It has to be unmistakably
+     larger than anything inside a section, or the sections run together. */
+  gap: calc(var(--space-6) * 1.5);
+}
+
+/* Two answers to one question. With no boxes they need real air between them,
+   or the right-hand column reads as a continuation of the left. */
+.db-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--space-6) * 1.5);
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .db-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── sections ─────────────────────────────────────────────────── */
+
+/*
+ * Was a card: --surface-1, a border, a radius, --shadow-sm and an inset
+ * hairline. It grouped a heading with a list that was already grouped with it
+ * by being directly underneath it. Now it is just the group.
+ */
+.db-card {
+  min-width: 0;
+}
+
+/*
+ * The spine of the page. Four steps and no fifth: pane title --fs-lg, section
+ * heading --fs-md, row title --fs, supporting text --fs-xs. The heading is 700
+ * so it still outranks a 650 row title at one step down — with the boxes gone,
+ * weight is the only thing left holding the levels apart.
+ */
+.db-card-title {
+  margin: 0 0 var(--space-4);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.db-card-icon {
+  display: inline-flex;
+  color: var(--text-dim);
+}
+.db-card-meta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.db-meta-live {
+  color: var(--green);
+}
+.db-meta-idle {
+  font-style: italic;
+}
+
+.db-sub {
+  min-width: 0;
+}
+.db-sub-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-micro);
+  font-weight: 650;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.db-empty {
+  margin: 0;
+  padding: var(--space-2) 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  max-width: var(--measure);
+}
+
+.db-hint {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.db-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── which runtimes are on this machine ───────────────────────── */
+
+/*
+ * This used to be three bordered pills in the pane header, under the title,
+ * where it cost the whole page 34px of chrome forever and answered a question
+ * nobody was asking yet. It now sits directly under the Workload heading,
+ * because the only column it explains is Workload's "runs here" — and it is a
+ * line of text with dots, not three boxes.
+ */
+.db-runtimes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: calc(var(--space-3) * -1) 0 var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.db-runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--mono);
+}
+.db-runtime-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  opacity: 0.5;
+}
+.db-runtime.on {
+  color: var(--text-dim);
+}
+.db-runtime.on .db-runtime-dot {
+  background: var(--green);
+  opacity: 1;
+}
+
+.db-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.db-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+}
+
+/* ── right now ────────────────────────────────────────────────── */
+
+/*
+ * With the card gone, a row's own padding would push its text in from the
+ * heading above it. The negative inline margin puts the text back on the
+ * heading's baseline column and lets only the hover fill overhang — so the page
+ * reads as one left edge, and the fill still has room to breathe around it.
+ * Hover is --bg-hover and nothing else; there is no resting border to swap.
+ */
+.db-run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-h);
+  text-align: left;
+  margin-inline: calc(var(--space-3) * -1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+.db-run:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.db-run:disabled {
+  cursor: default;
+  color: var(--text-dim);
+}
+.db-run .avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+/* A ring leaving the dot rather than a repainted shadow: one composited layer
+   per pulse instead of a full repaint of the row behind it. */
+.db-pulse {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+}
+.db-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--green);
+  /* Derived, so the motion preference reaches it and it stays in step with
+     .run-pulse in App.css and .col-dot.hot on the board. */
+  animation: db-pulse calc(var(--dur) * 9) var(--ease) infinite;
+}
+@keyframes db-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+.db-run-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.db-run-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.db-run-who {
+  font-weight: 650;
+  font-size: var(--fs);
+  white-space: nowrap;
+}
+.db-run-where {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The one line that says what it is actually doing — it must never wrap the
+   row into two heights, or the strip jitters as activity streams in. */
+.db-run-doing {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-run-clock {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* A sub-group inside a section, so it separates by space, not by a rule. */
+.db-parked {
+  margin-top: var(--space-5);
+}
+.db-parked-head {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  margin-bottom: var(--space-2);
+}
+
+/*
+ * Parked turns were a wrapping strip of bordered pills, each carrying a second
+ * filled pill for its count — two rounded boxes per queued turn, and a strip
+ * that reflowed every time one drained. They are rows in the same vocabulary as
+ * the live runs above them now: a number in its own column, a name, a place.
+ * Nothing moves sideways when the queue changes length.
+ */
+.db-parked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.db-parked-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  text-align: left;
+  margin-inline: calc(var(--space-3) * -1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  transition: background var(--dur-fast) var(--ease);
+}
+.db-parked-row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.db-parked-row:disabled {
+  cursor: default;
+}
+/* The queue's numbers read as a column, so depth is legible without counting. */
+.db-parked-n {
+  width: 18px;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--yellow);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.db-parked-who {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-parked-where {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+/* ── workload ─────────────────────────────────────────────────── */
+
+.db-wl,
+.db-wl-work,
+.db-projects,
+.db-chiprow,
+.db-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* These lists used to be ruled: a hairline between every pair of rows. The rows
+   are already 30px tall with a face on the left and a fixed column on the
+   right — they were never in danger of running together, and forty hairlines
+   down a page is forty lines of noise. A single --space-1 does the same job. */
+.db-wl,
+.db-feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.db-wl-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-h);
+  text-align: left;
+  margin-inline: calc(var(--space-3) * -1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  min-width: 0;
+}
+.db-wl-toggle {
+  transition: background var(--dur-fast) var(--ease);
+}
+.db-wl-toggle:hover {
+  background: var(--bg-hover);
+}
+.db-wl-row .avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.db-wl-ident {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.db-wl-name {
+  font-weight: 650;
+  font-size: var(--fs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-wl-sub {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The two right-hand columns.
+ *
+ * Both were pills: one bordered pill per kind of work, and a filled bordered
+ * pill for availability — up to five rounded boxes per row, wrapping, so no two
+ * rows agreed on where anything was. They are columns now. Fixed widths and
+ * tabular figures are the whole point: the eye runs straight down the counts
+ * and straight down the availability without re-finding either, and a count
+ * ticking from 9 to 10 moves nothing.
+ */
+.db-wl-counts {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  min-width: 88px;
+}
+.db-kind {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.db-kind-glyph {
+  font-size: 1.05em;
+  line-height: 1;
+}
+.db-wl-none {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+
+/* Where an agent can run is metadata, not a badge: a dot and a word, in the
+   row's own column with everything else. "not on this machine" is a fact about
+   your laptop, not a fault in the workspace — so it is quiet, never red. */
+.db-avail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  /* Wide enough for the longest label this can hold — "no member runs here" —
+     so the column never truncates the one row that had something to say. */
+  width: 132px;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-avail::before {
+  content: "";
+  flex-shrink: 0;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  opacity: 0.5;
+}
+.db-avail-ready {
+  color: var(--green);
+}
+.db-avail-ready::before {
+  background: var(--green);
+  opacity: 1;
+}
+
+.db-wl-caret {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.db-wl-caret.open {
+  transform: rotate(90deg);
+}
+/* A row with nothing to expand still reserves the caret's column, so the
+   availability pills line up down the card instead of going ragged. */
+.db-wl-row:not(.db-wl-toggle)::after {
+  content: "›";
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1;
+  visibility: hidden;
+}
+
+/* Indented to the row's text column, not to its box: 22px avatar + --space-3. */
+.db-wl-work {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-3) calc(22px + var(--space-3));
+}
+
+/* ── work summary ─────────────────────────────────────────────── */
+
+.db-project {
+  padding: var(--space-3) 0;
+}
+.db-project-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+.db-project-name {
+  font-weight: 600;
+  font-size: var(--fs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Three cells of the same width, right-aligned, tabular: "12 doing" under
+   "3 doing" without the words sliding about. */
+.db-project-counts {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.db-project-counts > span {
+  width: 64px;
+  text-align: right;
+}
+.db-project-counts b {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.db-project-zero {
+  width: auto;
+  font-style: italic;
+}
+
+.db-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-inset);
+}
+.db-bar-seg {
+  height: 100%;
+}
+.db-bar-open {
+  background: var(--blue);
+}
+.db-bar-doing {
+  background: var(--yellow);
+}
+.db-bar-done {
+  background: var(--green);
+}
+.db-bar-empty {
+  background: var(--bg-inset);
+}
+
+.db-legend {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.db-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.db-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+.db-flags {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.db-flag-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: var(--space-2);
+}
+.db-flag-overdue .db-flag-head {
+  color: var(--red);
+}
+.db-flag-go {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+.db-flag-go:hover {
+  text-decoration: underline;
+}
+
+.db-chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.db-more {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+/* ── activity feed ────────────────────────────────────────────── */
+
+.db-feed-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  min-width: 0;
+}
+/* Fixed column so the eye can run down the times without re-finding them. */
+.db-feed-when {
+  width: 62px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.db-feed-what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.db-feed-verb {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.db-feed-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.db-feed-joiner {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+
+/* ── GitHub ───────────────────────────────────────────────────── */
+
+.db-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  margin-inline: calc(var(--space-3) * -1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+.db-row:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+.db-row-title {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+.db-row-sub {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.db-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.db-dot-pr {
+  background: var(--green);
+}
+.db-dot-pr.draft {
+  background: var(--text-faint);
+}
+.db-dot-issue {
+  background: var(--yellow);
+}
+
+/*
+ * Each repo was a level-2 card sitting inside the level-1 card of the section —
+ * a box inside a box, twelve of them in a grid. The card is gone. What is left
+ * is a three-line block: name, description, meta. The grid gap separates them,
+ * the hover fill says which one is under the pointer, and neither of those
+ * needs an edge to work.
+ */
+.db-repo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: var(--space-2) var(--space-5);
+}
+.db-repo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-inline: calc(var(--space-3) * -1);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  min-width: 0;
+  transition: background var(--dur-fast) var(--ease);
+}
+.db-repo:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+.db-repo-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 650;
+  font-size: var(--fs);
+  min-width: 0;
+}
+.db-repo-desc {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  min-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-repo-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+/* "private" is one word of metadata about a repo. It does not need a box to be
+   read, and twelve boxed words in a grid is what the grid was reading as. */
+.db-tag {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.db-repo-tag {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-faint);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease);
+}
+.db-repo-tag:hover {
+  color: var(--text);
+}
+
+/* ── trouble notes ────────────────────────────────────────────── */
+
+/*
+ * The one container left on this page, and it earns it: a note is an
+ * interruption, so it does have to separate from the page it interrupts. The
+ * tint is what carries the meaning; the border is there so it still reads as an
+ * object on the light themes, where --accent-soft is only a few percent off the
+ * canvas.
+ */
+.db-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+}
+.db-note-info {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.db-note-warn {
+  background: var(--yellow-soft);
+  border-color: var(--yellow-border);
+}
+.db-note-title {
+  font-weight: 650;
+  font-size: var(--fs);
+}
+.db-note-body {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  max-width: var(--measure);
+  overflow-wrap: anywhere;
+}
+.db-note-cmd {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  background: var(--code-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  color: var(--text);
+  user-select: all;
+}
+
+/* ── skeletons ────────────────────────────────────────────────── */
+
+/*
+ * These stand in for .db-row, so they carry .db-row's geometry: same padding,
+ * same 9px gap, same 7px dot, and a min-height built from the same line box.
+ * A skeleton that is shorter than the rows it becomes makes the card jump when
+ * the data lands, which is the one thing a skeleton exists to prevent.
+ */
+.db-skel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  position: relative;
+}
+.db-skel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-height: calc(1.55em + var(--space-2) * 2);
+}
+/*
+ * The bar used to carry a travelling gradient sheen. A skeleton's whole job is
+ * to say "this is not the data yet" — a moving highlight is a second thing
+ * saying it decoratively, and it was the only gradient in this file. A breathing
+ * opacity says it in one property, on the compositor, with no gradient at all.
+ */
+.db-skel {
+  display: block;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  animation: db-breathe calc(var(--dur) * 7) var(--ease) infinite;
+}
+.db-skel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* Width comes from the component, which ramps it down row by row so the block
+   reads as ragged text and not a stack of identical bars. */
+.db-skel-line {
+  height: 9px;
+}
+.db-skel-tail {
+  height: 9px;
+  width: 54px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* Row 1 is the .db-sr status line, so the bars start at child 2. Staggering
+   them reads as a list arriving rather than one block blinking. */
+.db-skel-row:nth-child(3) .db-skel {
+  animation-delay: 90ms;
+}
+.db-skel-row:nth-child(4) .db-skel {
+  animation-delay: 180ms;
+}
+.db-skel-row:nth-child(n + 5) .db-skel {
+  animation-delay: 270ms;
+}
+@keyframes db-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* App.css zeroes the durations for both the OS setting and the in-app one; what
+   is left here is the part a duration cannot fix — the resting frame of the two
+   loops. The hover lift on .db-repo is gone with the card, so there is no
+   transform left on this page to switch off. The caret's rotation stays: it is
+   a state, not a movement. */
+:root[data-reduce-motion] .db-pulse::after {
+  animation: none;
+  transform: scale(1.8);
+  opacity: 0.35;
+}
+:root[data-reduce-motion] .db-skel {
+  animation: none;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .db-pulse::after {
+    animation: none;
+    transform: scale(1.8);
+    opacity: 0.35;
+  }
+  .db-skel {
+    animation: none;
+    opacity: 0.7;
+  }
+  .db-run,
+  .db-repo,
+  .db-repo-tag,
+  .db-wl-toggle,
+  .db-wl-caret,
+  .db-parked-row,
+  .db-row {
+    transition: none;
+  }
+}

@@ -1,0 +1,614 @@
+/* ── Scheduling a meeting ─────────────────────────────────────── */
+/*
+ * Imported from ScheduleMeeting.tsx, so it lands wherever that view is first
+ * mounted — nothing here may depend on cascade order against App.css. Every
+ * selector is prefixed `sm-`, the shared primitives (.btn, .avatar, the panel
+ * chrome) are used as they are rather than restyled, and focus is App.css's:
+ * the three rings this file used to draw are gone.
+ *
+ * The screen lives in a side panel: one column of roughly 560px that the reader
+ * can drag between 300 and 720, with the panel's own body as the only scroller.
+ * Nothing here sets a width, and nothing here is written against a viewport
+ * media query — a panel's width has almost nothing to do with the window's, so
+ * every layout in this file has to survive the whole range on its own. That is
+ * why the controls wrap, the lane names take a fixed narrow column, and the
+ * results list scrolls with the panel instead of inside itself.
+ *
+ * Two rules carry the rest of the file:
+ *
+ *  1. No literal colours. A block takes its calendar's identity colour inline
+ *     as --sm-c and spends it on a low-opacity wash only — never on an edge and
+ *     never on text, because a hashed hue cannot be trusted to contrast against
+ *     39 themes in two modes, and an edge in a semantic colour is the tell this
+ *     whole pass exists to remove.
+ *  2. A redacted block is a different *kind* of thing, not a dimmer one.
+ *     Hatching reads as "withheld" where grey reads as "past", and that
+ *     distinction is the entire privacy story rendered. It is drawn with a
+ *     repeating gradient because it is a texture, not decoration — the same
+ *     exemption the app's ruled calendar grid takes.
+ */
+
+/* The run of things under one section heading. The heading and the space above
+   it are the panel's; this is only the rhythm within. */
+.sm-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sm-h-note {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+.sm-warn {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--yellow);
+}
+
+/* ── who ──────────────────────────────────────────────────────── */
+
+.sm-who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+}
+
+.sm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-height: 26px;
+  align-items: center;
+}
+
+.sm-chips-empty {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.sm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-1) 2px 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-size: var(--fs-xs);
+}
+
+.sm-chip .avatar {
+  width: 18px;
+  height: 18px;
+  font-size: var(--fs-micro);
+}
+
+.sm-chip-name {
+  color: var(--text);
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-chip-x {
+  color: var(--text-faint);
+  border-radius: 999px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-micro);
+  line-height: 1;
+  transition: var(--t-color);
+}
+.sm-chip-x:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.sm-search {
+  font-size: var(--fs-sm);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* Level 3: a list floating over the form. It earns its boundary. */
+.sm-suggest {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.sm-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 32px;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  width: 100%;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sm-suggest-row:hover {
+  background: var(--bg-hover);
+}
+/* The list clips at its own radius, so this row's ring sits just inside the
+   edge — the one permitted variant, not a new treatment. */
+.sm-suggest-row:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+.sm-suggest-row .avatar {
+  width: 20px;
+  height: 20px;
+  font-size: var(--fs-micro);
+}
+
+.sm-suggest-name {
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.sm-suggest-detail {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+/* ── when ─────────────────────────────────────────────────────── */
+
+.sm-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-end;
+}
+
+/* Six controls that have to fold into a column 300px wide at worst. They pack
+   and wrap at their natural size rather than growing into the gap: the last
+   control on a wrapped row is usually the only one on it, and one stretched
+   time field beside four normal ones reads as a different kind of control. */
+.sm-ctl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 0 1 auto;
+  min-width: 118px;
+}
+
+.sm-ctl-grow {
+  flex: 1;
+  min-width: 180px;
+}
+
+.sm-ctl-label {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.sm-ctl input,
+.sm-ctl select {
+  font-size: var(--fs-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.sm-ctl-check {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+  min-width: 0;
+  padding-bottom: var(--space-2);
+}
+.sm-ctl-check span {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+/* ── candidates ───────────────────────────────────────────────── */
+
+/* Holds its height so the panel does not jump as results replace a spinner. */
+.sm-results-hold {
+  min-height: 172px;
+}
+
+.sm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-6) var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  text-align: center;
+  line-height: 1.6;
+}
+.sm-empty strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+/* No scroller of its own: the panel body is the one scroll region, so arrowing
+   past the bottom of the list carries the confirm block into view with it
+   rather than stopping dead against an inner edge. */
+.sm-results {
+  display: flex;
+  flex-direction: column;
+  padding: 2px;
+  border-radius: var(--radius);
+}
+
+/* A day of results: a heading, the lanes and the slots under it. It was a
+   filled, bordered card inside a dialog that is already a panel. */
+.sm-day {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.sm-day:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.sm-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.sm-day-name {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+
+.sm-day-count {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── the busy overlay ─────────────────────────────────────────── */
+
+/* Genuine data visualisation: everyone's day, on one axis. The name column is
+   deliberately mean: the track is the thing being read, and a panel has no
+   width to spare for a second copy of the roll call below it. */
+.sm-lanes {
+  --sm-name-w: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+
+.sm-ruler {
+  position: relative;
+  height: 13px;
+  margin-left: var(--sm-name-w);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sm-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.sm-tick:first-child {
+  transform: none;
+}
+.sm-tick:last-child {
+  transform: translateX(-100%);
+}
+
+.sm-lane {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sm-lane-name {
+  width: var(--sm-name-w);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Some of their calendars weren't checked" — a question, not a warning. */
+.sm-lane-gap {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+
+.sm-track {
+  position: relative;
+  flex: 1;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+/* A busy block. Its calendar's colour is a wash under it, and nothing else —
+   it used to also be a 2px rule down the block's left edge in that hue. */
+.sm-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background-color: var(--bg-raised);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 3px;
+}
+.sm-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--sm-c, var(--border-strong));
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.sm-block-label {
+  position: relative;
+  font-size: var(--fs-micro);
+  line-height: 1;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Withheld, not dimmed: hatching says "you may not read this". */
+.sm-block-busy {
+  background-color: var(--bg-inset);
+}
+.sm-block-busy::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--sm-c, var(--border-strong)) 0 1px,
+    transparent 1px 6px
+  );
+  opacity: 0.5;
+}
+.sm-block-busy .sm-block-label {
+  color: var(--text-faint);
+  letter-spacing: 0.2px;
+}
+
+/* A "maybe" on somebody's calendar is a softer obstacle than a "yes" — so it
+   is drawn lighter, with a neutral dashed outline rather than a coloured one. */
+.sm-block-maybe {
+  outline: 1px dashed var(--border-strong);
+  outline-offset: -1px;
+}
+.sm-block-maybe::before {
+  opacity: 0.1;
+}
+
+.sm-marker {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  border-radius: 2px;
+  background: var(--accent-soft-strong);
+  pointer-events: none;
+}
+
+/* ── slot chips ───────────────────────────────────────────────── */
+
+.sm-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.sm-slot {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.sm-slot:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Everyone free reads as available; a near-miss reads as a compromise. */
+.sm-slot-all {
+  border-color: var(--green-border);
+  color: var(--text);
+}
+.sm-slot-all .sm-slot-time {
+  font-weight: 600;
+}
+.sm-slot-partial {
+  border-style: dashed;
+}
+
+.sm-slot-count {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+.sm-slot-on,
+.sm-slot-on:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+.sm-slot-on .sm-slot-count {
+  color: var(--accent-fg);
+  opacity: 0.8;
+}
+
+.sm-truncated {
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+
+/* ── confirm ──────────────────────────────────────────────────── */
+
+.sm-when {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sm-roll {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sm-roll-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.sm-roll-mark {
+  color: var(--green);
+  width: 11px;
+  flex: none;
+  text-align: center;
+}
+.sm-roll-busy .sm-roll-mark {
+  color: var(--red);
+}
+
+.sm-roll-name {
+  color: var(--text);
+  flex: 0 0 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-roll-why {
+  min-width: 0;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * What could not be checked. Yellow rather than red: a calendar you are not
+ * allowed to see is the privacy model working, not a fault. It keeps its fill
+ * because it qualifies the answer above it and has to be read with it.
+ */
+.sm-caveat {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--yellow-border);
+  border-radius: var(--radius-sm);
+  background: var(--yellow-soft);
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.sm-fields {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-1);
+}
+
+/*
+ * The destination sentence. Deliberately the last thing above the button and
+ * deliberately not a warning colour — syncing and staying local are both
+ * legitimate, and only being surprised by either one is a problem. It is a
+ * sentence now, not a tinted panel: the tag in front of it does the pointing.
+ *
+ * It shares the panel footer with the button it qualifies, and takes the whole
+ * of its own row there: the footer right-aligns actions, and a sentence pushed
+ * into the gap beside one is a sentence set as a label.
+ */
+.sm-dest {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.sm-dest-tag {
+  flex: none;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.sm-dest-note {
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sm-slot,
+  .sm-chip-x,
+  .sm-suggest-row {
+    transition: none;
+  }
+}

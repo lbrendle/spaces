@@ -1,0 +1,1 @@
+ALTER TABLE `memberships` ADD `display_name` text DEFAULT '' NOT NULL;

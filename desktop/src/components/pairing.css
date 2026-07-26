@@ -1,0 +1,256 @@
+/* ── Pairing gate: the one screen shown before there is an app ─── */
+/*
+ * This used to be a hero: two radial gradients washing the canvas, two orbiting
+ * rings, a 24px backdrop blur and a 26px radius on a card outlined in accent.
+ * All of it is gone. What is left is the enrollment card on the app's canvas,
+ * at the app's elevation level 4, with the app's spacing and type tokens — the
+ * screen is a form, and a form that arrives claiming to be a product launch is
+ * the loudest thing in the build.
+ *
+ * Every colour is a theme token. The tokens this file used to name — --surface,
+ * --text-2, --text-3, --accent-2 — do not exist in themes.ts, so half of these
+ * rules were silently painting nothing.
+ */
+
+.pairing-gate {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: var(--space-6);
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Decoration, kept out of the layout rather than deleted from the markup. */
+.pairing-orbit {
+  display: none;
+}
+
+/* The one thing on the canvas, so it is the one thing that floats: level 4. */
+.pairing-card {
+  width: min(680px, 100%);
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-lg);
+}
+
+.pairing-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+}
+
+.pairing-logo {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.pairing-kicker {
+  margin-top: var(--space-6);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.pairing-card h1 {
+  max-width: 20ch;
+  margin: var(--space-3) 0 var(--space-4);
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.08;
+  letter-spacing: var(--ls-display);
+}
+
+.pairing-lede {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs);
+  line-height: 1.65;
+}
+
+.pairing-service {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+
+/* The dot is the state. It used to sit inside a 4px halo of its own colour;
+   the word beside it was always doing the work. */
+.pairing-service > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+.pairing-service.online { color: var(--green); }
+.pairing-service.online > span { background: var(--green); }
+.pairing-service.error { color: var(--red); }
+.pairing-service.error > span { background: var(--red); }
+
+/* ── the three steps ─────────────────────────────────────────── */
+
+/* A numbered list, not three cards. The rows are separated by space and by the
+   numeral in front of them; a border around each one said nothing the numeral
+   was not already saying. */
+.pairing-steps {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-6) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pairing-steps li {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+}
+
+.pairing-steps li > span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+
+.pairing-steps li strong,
+.pairing-steps li small {
+  display: block;
+}
+.pairing-steps li strong {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.pairing-steps li small {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+}
+
+/* The app's one selected treatment: a soft accent wash, full-strength text. */
+.pairing-steps li.active {
+  color: var(--text-dim);
+  background: var(--accent-soft);
+}
+.pairing-steps li.active strong {
+  color: var(--text);
+}
+
+.pairing-steps li.active > span,
+.pairing-steps li.complete > span {
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+/* ── the form ────────────────────────────────────────────────── */
+
+.pairing-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.pairing-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.pairing-form label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+/* Fields inherit App.css: its border, its radius, its focus. The 3px accent
+   halo that used to live here is the reason the shared ring looked wrong. */
+.pairing-form input {
+  height: 36px;
+  padding: 0 var(--space-4);
+}
+
+.pairing-form .pairing-code {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.pairing-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.pairing-primary {
+  min-width: 180px;
+}
+
+/* A failure has to be separable from the form it is about, so it keeps its
+   box — this is a container that earns its existence. */
+.pairing-error {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius);
+  color: var(--red);
+  background: var(--red-soft);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.pairing-card footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+
+@media (max-width: 680px) {
+  .pairing-gate {
+    padding: var(--space-4);
+  }
+  .pairing-card {
+    padding: var(--space-5);
+  }
+  .pairing-form-row {
+    grid-template-columns: 1fr;
+  }
+  .pairing-actions,
+  .pairing-card footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

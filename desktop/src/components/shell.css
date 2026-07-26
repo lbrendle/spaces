@@ -1,0 +1,459 @@
+/* ── The app shell ───────────────────────────────────────────── */
+/*
+ * Imported from Shell.tsx. Every selector is `sh-` prefixed and no shared
+ * primitive (.btn, .icon-btn, .chip, .field, .modal-*) is redefined, so this
+ * sheet can land at any point in the cascade without fighting App.css.
+ *
+ * Three exceptions are deliberate and all of them are scoped inside .sh-app:
+ * the mini rail restyles the rows <Sidebar /> renders, and an overlaid rail
+ * moves the legacy .pane-header out from under its own floating button.
+ * Adapting borrowed markup to a width it was never told about is the shell's
+ * job — reaching into Sidebar.tsx to do it would not be.
+ *
+ * Colors are theme tokens only. No literal color may appear in this file.
+ */
+
+.sh-app {
+  --sh-measure: 1240px; /* a comfortable line length, not the window's width */
+  --sh-rail-mini: calc(var(--row-h) + var(--space-4) * 2);
+  position: relative;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* The macOS traffic lights are drawn over our chrome. --titlebar keeps that
+   strip clear everywhere; this makes the same strip drag the window. */
+.sh-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar);
+  z-index: 6; /* over the pane header, under modals (100) */
+}
+
+/* ── rail ────────────────────────────────────────────────────── */
+
+.sh-rail {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.sh-rail:focus-visible {
+  outline: none;
+  box-shadow: none; /* it takes focus when it floats open; it is not a control */
+}
+
+.sh-rail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.sh-rail-body > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Only a change of shape animates — see the note in Shell.tsx. The rail's
+   contents are carried along, or the sidebar overhangs the frame mid-tween. */
+.sh-app[data-animate] .sh-rail {
+  transition: flex-basis var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+.sh-app[data-animate] .sh-rail-body > * {
+  transition: width var(--dur) var(--ease), min-width var(--dur) var(--ease);
+}
+
+.sh-rail-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border-soft);
+  /* continues the sidebar's own right edge past the end of its scroll box */
+  border-right: 1px solid var(--border-soft);
+}
+.sh-rail-toggle {
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+}
+.sh-rail-toggle-label {
+  white-space: nowrap;
+}
+
+/* ── the mini rail ───────────────────────────────────────────── */
+/*
+ * Icons only. The label text is zeroed rather than hidden so it stays in the
+ * accessibility tree, and Shell.tsx mirrors it into a title for the tooltip.
+ * font-size is only ever zeroed on the rows themselves — never on .sidebar,
+ * which is also the parent of the modals it opens.
+ */
+
+.sh-app[data-rail="mini"] .sh-rail {
+  --sidebar-w: var(--sh-rail-mini);
+}
+.sh-app[data-rail="mini"] .sh-rail-foot {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.sh-app[data-rail="mini"] .sh-rail-toggle-label {
+  display: none;
+}
+
+.sh-app[data-rail="mini"] .sidebar {
+  padding-left: var(--space-2);
+  padding-right: var(--space-2);
+  overflow-x: hidden;
+}
+.sh-app[data-rail="mini"] .sidebar-brand {
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-4);
+  font-size: 0;
+}
+.sh-app[data-rail="mini"] .brand-hint,
+.sh-app[data-rail="mini"] .nav-empty,
+.sh-app[data-rail="mini"] .nav-item.channel,
+.sh-app[data-rail="mini"] .project-actions,
+.sh-app[data-rail="mini"] .agent-count {
+  display: none;
+}
+.sh-app[data-rail="mini"] .nav-section {
+  margin-bottom: var(--space-4);
+}
+.sh-app[data-rail="mini"] .nav-heading {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 0;
+}
+.sh-app[data-rail="mini"] .nav-heading .icon-btn {
+  font-size: var(--fs-sm);
+}
+.sh-app[data-rail="mini"] .nav-item {
+  justify-content: center;
+  gap: 0;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 0;
+}
+.sh-app[data-rail="mini"] .nav-icon {
+  font-size: var(--fs);
+}
+.sh-app[data-rail="mini"] .unread-badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  min-width: 7px;
+  height: 7px;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+/* A project row has no glyph of its own, so it borrows its own first letter. */
+.sh-app[data-rail="mini"] .project-name {
+  justify-content: center;
+  padding: 0;
+}
+.sh-app[data-rail="mini"] .project-open {
+  flex: 0 0 auto;
+  height: var(--row-h);
+  text-align: center;
+  font-size: 0;
+}
+.sh-app[data-rail="mini"] .project-open::before {
+  content: attr(data-initial);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* ── the floating rail ───────────────────────────────────────── */
+
+.sh-app[data-rail="overlay"] .sh-rail {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 92; /* over the inspector's own overlay (89), under modals (100) */
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform var(--dur) var(--ease), visibility 0s linear var(--dur);
+}
+.sh-app[data-rail="overlay"][data-rail-open="1"] .sh-rail {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--dur) var(--ease);
+}
+
+.sh-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 91;
+  background: var(--backdrop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+.sh-app[data-rail-open="1"] .sh-scrim {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sh-menu {
+  position: fixed;
+  top: calc(var(--titlebar) + var(--space-2));
+  left: var(--space-3);
+  z-index: 93;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--row-h);
+  height: var(--row-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.sh-menu:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+/* Once the rail is out it covers this corner, and the rail carries its own
+   dismiss. Hidden rather than unmounted so Escape has somewhere to put focus. */
+.sh-app[data-rail-open="1"] .sh-menu {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The floating opener sits where a pane title would start, so the title steps
+   aside by exactly the opener's own width plus a gap. */
+.sh-app[data-rail="overlay"] .sh-pane-head,
+.sh-app[data-rail="overlay"] .pane-header {
+  padding-left: calc(var(--pane-x) + var(--row-h) + var(--space-2));
+}
+
+/* ── resize handles ──────────────────────────────────────────── */
+/* Overhang the edge so the grab target is comfortable while the visible line
+   stays a hairline. */
+
+.sh-rail-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 7px;
+  z-index: 7; /* the divider beats the drag strip in its own 7px column */
+  cursor: col-resize;
+  touch-action: none;
+}
+.sh-rail-grip::after,
+.sh-split-grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+/* The hairline itself goes accent — it is a 1px line the pointer is already
+   on top of. It also carried a 1px --accent-glow spread, which is a light
+   source lit by a divider. */
+.sh-rail-grip:hover::after,
+.sh-rail-grip:focus-visible::after,
+.sh-split-grip:hover::after,
+.sh-split-grip:focus-visible::after {
+  background: var(--accent);
+}
+.sh-rail-grip:focus-visible,
+.sh-split-grip:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* While dragging, the pointer is captured but the cursor and the selection are
+   the document's — without this a fast drag selects the whole page. */
+.sh-dragging,
+.sh-dragging * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* ── content ─────────────────────────────────────────────────── */
+
+.sh-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex; /* a row: the inspector drawer sits beside the surface */
+  overflow: hidden;
+}
+
+.sh-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sh-pane-head {
+  flex: 0 0 auto;
+  padding: calc(var(--titlebar) - var(--space-2)) var(--pane-x) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+.sh-pane-head-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.sh-pane-head-text {
+  min-width: 0;
+}
+.sh-pane-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.sh-pane-sub {
+  margin-top: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.sh-pane-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.sh-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+/* The scrollbar rides the window edge even when the content is centred. */
+.sh-pane-body[data-scroll="1"] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sh-pane-body[data-scroll="0"] {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* The same gutter the header above it uses, so a pane has one left edge. */
+.sh-pane-body[data-pad="1"] {
+  padding: var(--space-5) var(--pane-x) var(--space-6);
+}
+
+.sh-measure {
+  width: 100%;
+  max-width: var(--sh-measure);
+  margin: 0 auto;
+  min-width: 0;
+}
+.sh-pane-body[data-scroll="0"] > .sh-measure {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── toolbar ─────────────────────────────────────────────────── */
+
+/* A toolbar is separated from the content it acts on by space, not by a rule:
+   it is already at the top of the pane with a hairline above it in the header,
+   and two hairlines four rows apart is a stripe, not a structure. */
+.sh-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.sh-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.sh-toolbar-group[data-grow="1"] {
+  flex: 1 1 220px;
+}
+.sh-toolbar-group[data-end="1"] {
+  margin-left: auto;
+}
+
+/* ── split ───────────────────────────────────────────────────── */
+
+.sh-split {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+.sh-split-side {
+  flex: 0 0 var(--sh-split-left);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.sh-split-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.sh-split-grip {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  width: 7px;
+  margin: 0 -3px; /* a 7px target that costs 1px of layout */
+  cursor: col-resize;
+  touch-action: none;
+}
+.sh-split-grip::after {
+  background: var(--border-soft);
+}
+
+/* One column: the divider has nothing left to divide. */
+.sh-split[data-stacked="1"] {
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sh-split[data-stacked="1"] > .sh-split-side,
+.sh-split[data-stacked="1"] > .sh-split-main {
+  flex: 0 0 auto;
+  overflow: visible;
+}

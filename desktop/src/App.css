@@ -1,0 +1,1108 @@
+/* ═══════════════════════════════════════════════════════════
+   Spaces — base design system.
+
+   Colors come from the active theme (src/themes.ts) as CSS custom
+   properties set on <html> at runtime. NOTHING in this file may
+   hardcode a color: 39 IDE themes, light and dark, depend on it.
+
+   Sizes come from the same place. src/themes.ts emits the type ladder,
+   the radius ladder, --space-1..6 and --row-h from the user's density,
+   radius and font-scale prefs. The :root block below mirrors those at
+   their neutral values so first paint is correct before the theme layer
+   runs — it is a fallback, not a second source of truth. Nothing in
+   this file may write a raw px value that one of those tokens covers,
+   or the appearance settings quietly stop working.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* shape — mirrors RADIUS_SCALES.default */
+  --radius-sm: 6px;
+  --radius: 9px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  /* motion */
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* type scale — mirrors FONT_SIZES at fontScale 1 */
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --fs-micro: 10.5px;  /* uppercase labels */
+  --fs-xs: 11.5px;     /* meta, timestamps */
+  --fs-sm: 12.5px;     /* secondary text */
+  --fs: 13.5px;        /* body */
+  --fs-md: 15px;       /* card titles */
+  --fs-lg: 20px;       /* pane titles */
+
+  /* Letter-spacing tracks the size, not a fixed px offset: display type wants
+     to close up, micro caps want air. In em so a font-scale change carries. */
+  --ls-display: -0.022em;
+  --ls-title: -0.013em;
+  --ls-body: 0;
+  --ls-caps: 0.08em;
+
+  /* spacing rhythm — mirrors DENSITY_SCALES.cozy */
+  --space-1: 3px;
+  --space-2: 6px;
+  --space-3: 9px;
+  --space-4: 13px;
+  --space-5: 18px;
+  --space-6: 26px;
+  --row-h: 30px;
+
+  /* Pane gutter. Wider than --space-5 so content breathes against the window
+     edge, and still derived, so compact really does reclaim the margins. */
+  --pane-x: calc(var(--space-5) + var(--space-2));
+  /* Comfortable reading measure for anything that is prose rather than data. */
+  --measure: 68ch;
+
+  /* chrome */
+  --titlebar: 30px; /* room for the macOS traffic lights over our own UI */
+  --sidebar-w: 252px;
+
+  /* focus */
+  --focus-w: 2px;
+  --focus-gap: 2px;
+
+  /* The press acknowledgement, in one place so every control agrees on how
+     much a click moves. Zeroed under reduced motion at the bottom of the file. */
+  --press: translateY(0.5px) scale(0.994);
+
+  /* Transition bundles. Components compose these instead of re-listing
+     properties — and because every one is authored against --dur/--dur-fast,
+     the motion preference switches them all off at once. */
+  --t-color: color var(--dur-fast) var(--ease),
+             background-color var(--dur-fast) var(--ease),
+             border-color var(--dur-fast) var(--ease);
+  --t-press: transform var(--dur-fast) var(--ease);
+  --t-lift: transform var(--dur) var(--ease),
+            box-shadow var(--dur) var(--ease),
+            border-color var(--dur-fast) var(--ease);
+  --t-fade: opacity var(--dur-fast) var(--ease);
+
+  font-family: var(--font);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  /* This is a dashboard: counts, durations, timestamps and diff stats all sit
+     in columns that must not jitter as they tick. Running prose opts back out
+     below — everything else is data and wants tabular by default. */
+  font-variant-numeric: tabular-nums;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs);
+  line-height: 1.55;
+  overflow: hidden;
+}
+
+::selection { background: var(--accent-soft-strong); color: var(--text); }
+
+button, input, textarea, select {
+  font: inherit;
+  /* the `font` shorthand resets font-variant-*, which would drop the tabular
+     figures set on :root — controls carry counts and durations too */
+  font-variant-numeric: inherit;
+  color: inherit;
+}
+button { background: none; border: none; cursor: pointer; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Focus ─────────────────────────────────────────────────── */
+
+/* One keyboard-focus treatment everywhere, and it has to survive being drawn
+   on the canvas, on a card, inside a modal and over a coloured banner. A
+   box-shadow ring cannot: it has to paint its own gap, which means naming the
+   surface behind it, which is why components kept re-declaring the ring with
+   --surface-1/--surface-2 substituted in. An outline with an offset leaves a
+   real hole instead — whatever is actually behind shows through, on every
+   theme, at no maintenance cost. --accent at full strength rather than
+   --accent-border (45% alpha), which washes out on light themes. */
+:focus { outline: none; }
+:focus-visible {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+  /* deliberately no border-radius here: an outline already follows the
+     element's own corners, and forcing one squares off pills and circles */
+}
+
+/* Full-bleed rows inside a clipping parent have no room for an outset ring, so
+   theirs sits just inside the edge. This is the ONLY permitted variant, and a
+   component joins the list rather than drawing a ring of its own. */
+.focus-inset:focus-visible,
+.nav-item:focus-visible,
+.list-row:focus-visible,
+.member-row:focus-visible,
+.mention-opt:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+/* ── State, in one place ───────────────────────────────────── */
+
+/* Every surface in the app draws these four states the same way. There is no
+   fifth thing, and none of them is made of light:
+   selected  background --accent-soft and text --text. Nothing else — no
+             leading edge, no border, no ring. A row that is filled is chosen;
+             adding a bar to say it twice is what made this app look generated.
+   hover     background --bg-hover
+   focus     the outline above, and nothing beside it
+   elevation --bg → --surface-1 → --surface-2 → --bg-overlay, each with its own
+             neutral --shadow-* and border, never borrowing another level's
+   Emphasis is type weight, size and --text/--text-dim/--text-faint. Colour is
+   allowed only where it answers "what does this tell me?" — status, urgency,
+   identity. A coloured box-shadow answers nothing, so there are none: shadows
+   come from --shadow-sm/md/lg, which are neutral and mean height only.
+
+   And a container is not a state. A border plus a radius is a claim that what
+   is inside needs separating from what is outside; where that claim is false,
+   the separator is space and a heading instead. */
+
+/* ── Form controls ─────────────────────────────────────────── */
+
+input, textarea, select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  width: 100%;
+  transition: var(--t-color);
+}
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+/* A focused field says so with its border, and the keyboard ring above is the
+   only thing drawn on top of that. The 3px --accent-soft halo that used to sit
+   here is the reason a dozen components then invented rings of their own: it
+   made the shared ring look wrong wherever the surface behind it changed. */
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+textarea { resize: vertical; }
+select {
+  appearance: none;
+  padding-right: calc(var(--space-6) + var(--space-1));
+  /* Two gradients, one caret. This draws the ▾ glyph — it is an icon with no
+     asset behind it, and it is the only gradient in this file. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cursor: pointer; }
+
+/* ── Elevation ladder ──────────────────────────────────────── */
+
+/* canvas   --bg           no border, no shadow
+   level 1  --surface-1    --border-soft  + --shadow-sm    cards, columns
+   level 2  --surface-2    --border-soft  + none           nested in a card
+   level 3  --bg-overlay   --border       + --shadow-md    popovers, menus
+   level 4  --bg-overlay   --border       + --shadow-lg    modals
+
+   Level 2 is a fill, not a lift: it sits *inside* level 1, so a resting shadow
+   would be light coming from the wrong place. It earns --shadow-sm only while
+   it is actually raised on hover.
+
+   The ladder is for things that genuinely stack. Most of the app is flat: a
+   section of a page is level 0 with space around it, not a card. Reaching for
+   level 1 to mean "this is a group" is how a screen ends up as ten boxes. */
+.elev-1 {
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-sm);
+}
+.elev-2 {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+.elev-3 {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+.elev-4 {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── Motion primitives ─────────────────────────────────────── */
+
+/* Enter animations, authored so the thing arrives from where it belongs.
+   Callers set --enter-dy / --enter-dx / --pop-origin to aim them. */
+@keyframes hq-fade { from { opacity: 0; } }
+@keyframes hq-rise {
+  from { opacity: 0; transform: translateY(var(--enter-dy, 6px)); }
+}
+@keyframes hq-slide {
+  from { opacity: 0; transform: translateX(var(--enter-dx, -8px)); }
+}
+@keyframes hq-pop {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+}
+@keyframes hq-exit {
+  to { opacity: 0; transform: translateY(-4px) scale(0.99); }
+}
+
+.anim-fade  { animation: hq-fade var(--dur) var(--ease); }
+.anim-rise  { animation: hq-rise var(--dur) var(--ease); }
+.anim-slide { animation: hq-slide var(--dur) var(--ease); }
+.anim-pop   { animation: hq-pop var(--dur) var(--ease); transform-origin: var(--pop-origin, center); }
+.anim-exit  { animation: hq-exit var(--dur-fast) var(--ease) forwards; }
+
+/* Press acknowledgement for anything clickable that is not already a .btn. */
+.press { transition: var(--t-press); }
+.press:active:not(:disabled) { transform: var(--press); }
+
+/* ── Type utilities ────────────────────────────────────────── */
+
+.num { font-variant-numeric: tabular-nums; }
+/* Running text opts back out of the app-wide tabular figures — proportional
+   numerals read better mid-sentence — and takes a measure, so a maximised
+   window does not stretch a paragraph to 200 characters. The cap lands on the
+   text-level children rather than .md itself so code blocks, which the reader
+   scans rather than reads, keep the full column. */
+.prose { font-variant-numeric: proportional-nums; }
+.prose, .measure, .md > div, .md > ul, .md > ol, .md > blockquote, .md > table {
+  max-width: var(--measure);
+}
+.md { font-variant-numeric: proportional-nums; }
+.md code, .md .codeblock, .md td, .md th { font-variant-numeric: tabular-nums; }
+.md > .codeblock { max-width: none; }
+.caps {
+  font-size: var(--fs-micro); font-weight: 700;
+  text-transform: uppercase; letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+}
+
+/* ── Drag ──────────────────────────────────────────────────── */
+
+/* Styled once. During a drag the cursor must not flicker as the pointer
+   crosses buttons, links and drop targets, and stray text selection must not
+   ghost along behind it — so the whole document is locked for the duration.
+   Panes that own a resize handle set their own axis cursor the same way
+   (see .insp-dragging). */
+[draggable="true"] { cursor: grab; }
+[draggable="true"]:active { cursor: grabbing; }
+body:has(.dragging) *,
+body:has([data-dragging]) * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* ── Crash screen ──────────────────────────────────────────── */
+
+.app-crash {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Alone on an otherwise empty canvas. A card would be a box drawn around the
+   only thing on screen — there is nothing for it to separate this from. */
+.app-crash-card {
+  width: min(460px, 100%);
+}
+
+.app-crash-card h1 {
+  margin: var(--space-3) 0;
+  font-size: var(--fs-lg);
+  letter-spacing: var(--ls-display);
+}
+
+.app-crash-card p {
+  margin: 0 0 var(--space-5);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.app-crash-card details {
+  margin: 0 0 var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* A fill, not a box: --code-bg already separates the trace from the sentence
+   above it, and an edge as well would be the second thing saying so. */
+.app-crash-card pre {
+  max-height: 160px;
+  overflow: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* ── App shell ─────────────────────────────────────────────── */
+
+.app { display: flex; height: 100vh; }
+.app.loading {
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-4); color: var(--text-dim);
+}
+.brand-mark { color: var(--accent); display: inline-flex; align-items: center; }
+/* Derived from --dur so the motion preference stops the breathing too — a
+   hardcoded 2.4s would keep going after the user asked for stillness. */
+.brand-mark.big { font-size: 44px; animation: breathe calc(var(--dur) * 12) var(--ease) infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/* ── Sidebar ───────────────────────────────────────────────── */
+
+/* The rail's indent scale, declared once here and inherited by every row in
+   it — AccountMenu's footer included. Three columns, and no fourth:
+
+     --rail-x                     the row box. Every row starts here, so a
+                                  hover or a selection fill has one left edge
+                                  and one right edge for the whole rail.
+     + --rail-pad                 the glyph column. One box holds every nav
+                                  icon, every channel hash and the account's
+                                  face, so all of them stand on one axis.
+     + --rail-glyph + --rail-gap  the label column. Every label, every channel
+                                  name and the account's name land here.
+
+   A row with no glyph of its own — a section heading, a project name — starts
+   at --rail-text instead: the glyph column inset by the air a 16px icon leaves
+   inside it, so its text lines up with the icons' ink rather than with the
+   invisible box drawn around them.
+
+   Channels are the nested level and the only one: a channel's hash sits in the
+   glyph column, directly under its project's name, and the channel's own name
+   lands in the label column. Parent text over child glyph is the indent — it
+   costs no extra column, which is why there is no third step. */
+.sidebar {
+  --rail-x: var(--space-3);
+  --rail-gap: var(--space-3);
+  /* Deliberately not from the space scale: this is the width of a glyph, and
+     20 is what a 16px icon needs to sit in with air around it while still
+     seating the two marks that are drawn larger than an icon — the product
+     logo and the account's face, both round or dense enough that matching an
+     icon's box would make them look smaller than it. It doubles as the height
+     of the chips at the far end of a row, so both ends run on one measure. */
+  --rail-glyph: 20px;
+  /* What icons.tsx is drawn for — see its header. The set stays at the size it
+     was designed for and is centred in the column rather than stretched. */
+  --rail-icon: 16px;
+  /* Derived, not chosen. A collapsed rail seats its glyph in a --row-h box
+     with --space-4 of air beside it; this makes an expanded row seat one the
+     same way, putting the glyph's axis at --row-h / 2 + --space-4 whatever the
+     column and the gutter are. Collapsing the rail therefore does not move an
+     icon at any density — with a hardcoded --space-3 here it did, by 1.5px at
+     compact. At the default density this evaluates to --space-3 anyway, which
+     is where that number came from in the first place. */
+  --rail-pad: calc(
+    var(--space-4) + (var(--row-h) - var(--rail-glyph)) / 2 - var(--rail-x)
+  );
+  --rail-text: calc(var(--rail-pad) + (var(--rail-glyph) - var(--rail-icon)) / 2);
+
+  width: var(--sidebar-w); min-width: var(--sidebar-w);
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border-soft);
+  display: flex; flex-direction: column;
+  padding: var(--titlebar) var(--rail-x) var(--rail-x);
+  /* The rail does NOT scroll. When it did, a workspace with enough projects
+     pushed the top-level nav off the top — measured at -763px — leaving you
+     stuck at the bottom with only channels and no way back to Dashboard
+     without scrolling up. Only the project list below scrolls now. */
+  overflow: hidden;
+}
+/* The icon-only buttons that sit at the end of a rail row get the glyph
+   column's box, so the trailing controls stop inventing a height each (19, 21
+   and 22px) and their hover fills line up down one right edge. Listed row by
+   row rather than as `.sidebar .icon-btn`: the rail is also the parent of the
+   modals it opens, and those have icon buttons of their own. */
+.sidebar-brand .icon-btn,
+.nav-heading .icon-btn,
+.project-name .icon-btn {
+  min-width: var(--rail-glyph); min-height: var(--rail-glyph);
+  padding: 0;
+}
+/* The brand is a row like any other — mark in the glyph column, wordmark in
+   the label column, --row-h tall. The space beneath it is the gap to the first
+   section, not part of the row, so it is padding and not height. */
+.sidebar-brand {
+  min-height: calc(var(--row-h) + var(--space-5));
+  padding: 0 var(--rail-pad) var(--space-5);
+  font-size: var(--fs-md); font-weight: 700; letter-spacing: var(--ls-title);
+  display: flex; align-items: center; gap: var(--rail-gap);
+  user-select: none;
+}
+.sidebar-brand .brand-mark {
+  width: var(--rail-glyph); height: var(--rail-glyph);
+  justify-content: center;
+}
+.brand-hint {
+  margin-left: auto; font-size: var(--fs-micro); font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  /* the same chip height as an unread badge — see the badge column below */
+  min-height: var(--rail-glyph); padding: 0 var(--space-2);
+  display: inline-flex; align-items: center;
+}
+.nav-section { flex: 0 0 auto; margin-bottom: var(--space-5); }
+.nav-section.grow {
+  flex: 1 1 0;
+  /* Load-bearing: a flex child will not shrink below its content without it,
+     which is why `flex: 1` alone left this section unable to scroll. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.nav-heading {
+  font-size: var(--fs-micro); font-weight: 700;
+  text-transform: uppercase; letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+  min-height: var(--row-h);
+  padding: 0 var(--rail-pad) 0 var(--rail-text);
+  display: flex; justify-content: space-between; align-items: center;
+}
+/* --row-h is what makes a density switch legible: the rail rows step from 26
+   to 36px. Vertical padding is only the floor for rows whose content wraps. */
+.nav-item {
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--rail-pad);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim); font-size: var(--fs);
+  display: flex; align-items: center; gap: var(--rail-gap);
+  cursor: pointer; user-select: none;
+  position: relative;
+  transition: var(--t-color), var(--t-press);
+}
+.nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.nav-item:active { transform: var(--press); }
+/* The whole row fills. That is the entire selected treatment — there was also
+   a 2px accent bar down the left edge, saying the same thing a second time. */
+.nav-item.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.nav-icon {
+  width: var(--rail-glyph); height: var(--rail-glyph);
+  flex-shrink: 0; opacity: 0.75;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: var(--t-fade);
+}
+.nav-item.active .nav-icon { opacity: 1; }
+.nav-item:hover .nav-icon { opacity: 1; }
+.nav-empty {
+  color: var(--text-faint); font-size: var(--fs-sm);
+  padding: var(--space-2) var(--rail-text); line-height: 1.6;
+}
+.project-group { margin-bottom: var(--space-1); }
+/* A project heads its channels, so its name takes the glyph column and its
+   channels' names take the label column. It is a row on the same rhythm as
+   every other: one --row-h, symmetric padding — it used to be padded 6 above
+   and 3 below, which is what put it off the grid. */
+.project-name {
+  min-height: var(--row-h);
+  padding: 0 var(--rail-pad) 0 var(--rail-text);
+  font-weight: 650; font-size: var(--fs-sm);
+  letter-spacing: var(--ls-body);
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  /* A project header sits directly on its first channel, so a selected first
+     channel painted its fill flush against the header — reading as one block
+     rather than one selected row. The gap is what separates them now that the
+     header is no longer filled itself. */
+  margin-bottom: var(--space-1);
+}
+/* Deliberately NOT filled. The channel is what is selected; a project header
+   only says "the selection is in here". Painting both meant that selecting a
+   project's FIRST channel put two identical fills against each other with no
+   gap, which reads as one tall block and makes it ambiguous which row is
+   actually selected. Weight and colour carry it instead. */
+.project-name.active { color: var(--text); font-weight: 650; }
+.project-open {
+  min-width: 0; flex: 1; padding: 0; text-align: left; color: inherit;
+}
+.project-open span {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* A length, not a ratio: the line box is then exactly the glyph column's
+     measure, so a project name occupies the same slot in its row that an icon
+     occupies in the row above it. */
+  line-height: var(--rail-glyph);
+}
+.project-actions { display: flex; align-items: center; margin-left: var(--space-2); }
+.project-name .icon-btn { opacity: 0; transition: var(--t-fade); }
+.project-group:hover .project-name .icon-btn,
+.project-name .icon-btn:focus-visible,
+.project-name.active .icon-btn { opacity: 1; }
+
+.nav-item.channel .channel-manage {
+  margin-left: var(--space-1);
+  opacity: 0;
+}
+
+.nav-item.channel:hover .channel-manage,
+.nav-item.channel .channel-manage:focus-visible {
+  opacity: 1;
+}
+
+.removal-warning {
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius-md);
+  background: var(--red-soft);
+  color: var(--text);
+  padding: var(--space-4);
+}
+
+.removal-warning p {
+  color: var(--text-secondary);
+  margin: var(--space-2) 0 0;
+  line-height: 1.55;
+}
+/* A channel's hash is its glyph, so it is dimmed by the column it sits in like
+   every other one rather than carrying a second, fainter colour of its own.
+   The base .hash rule still stands for the pane title, which is text. */
+.hash { color: var(--text-faint); font-weight: 600; flex-shrink: 0; }
+.nav-icon .hash { color: inherit; }
+/* The chips at the end of a row — unread count or agent count — are one
+   column: right-aligned against the same edge, one height, and never narrower
+   than two digits, so a count ticking from 9 to 10 cannot move the label
+   beside it or the chip below it. Tabular figures for the same reason, stated
+   here rather than left to the :root default because it is load-bearing. */
+.agent-count,
+.unread-badge {
+  margin-left: auto; flex-shrink: 0;
+  /* One glyph plus one gap: the chip column mirrors the glyph column at the
+     other end of the row, with the extra step that a second digit needs. A
+     literal 2ch would not do — ch is the element's own font, and the badge is
+     bold where the count is not, so the two chips would come out different
+     widths and the column would wobble. Only "99+" is allowed to exceed it. */
+  min-width: calc(var(--rail-glyph) + var(--rail-gap));
+  min-height: var(--rail-glyph);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.agent-count { gap: var(--space-1); color: var(--text-faint); }
+.nav-item.has-unread { color: var(--text); font-weight: 650; }
+.unread-badge {
+  background: var(--accent); color: var(--accent-fg);
+  font-weight: 700; border-radius: 999px;
+  padding: 0 var(--space-2);
+}
+/* An agent is running. The ring is a pseudo that scales and fades — the same
+   indicator as .db-pulse on the dashboard and .col-dot.hot on the board, so
+   "live" reads identically wherever it appears. It was a repainted green
+   box-shadow, which is both a glow and a full repaint of the row behind it. */
+.run-pulse {
+  position: relative;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green); flex-shrink: 0;
+}
+.run-pulse::after {
+  content: ""; position: absolute; inset: -1px;
+  border-radius: 50%; border: 1.5px solid var(--green);
+  animation: pulse calc(var(--dur) * 9) var(--ease) infinite;
+}
+@keyframes pulse {
+  0%   { transform: scale(1); opacity: 0.7; }
+  70%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* ── Panes ─────────────────────────────────────────────────── */
+
+.main-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.scroll-pane { overflow-y: auto; overscroll-behavior: contain; }
+.pane-header {
+  padding: calc(var(--titlebar) - var(--space-2)) var(--pane-x) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: var(--space-4); flex-shrink: 0;
+  background: var(--bg);
+  position: sticky; top: 0; z-index: 5;
+}
+.pane-title {
+  font-size: var(--fs-lg); font-weight: 700; letter-spacing: var(--ls-display);
+  line-height: 1.2;
+  display: flex; align-items: baseline; gap: 1px;
+}
+.pane-title .hash { font-size: 0.8em; opacity: 0.55; font-weight: 600; }
+.pane-sub {
+  color: var(--text-dim); font-size: var(--fs-sm); margin-top: var(--space-3);
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+}
+.topic { color: var(--text-faint); }
+.center-note {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--text-dim); text-align: center;
+  padding: calc(var(--space-6) * 1.8) var(--space-6);
+  line-height: 1.7; gap: var(--space-1);
+}
+.center-note > * { max-width: var(--measure); }
+.center-note strong { color: var(--text); }
+
+/* ── Chips ─────────────────────────────────────────────────── */
+
+.chip {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-3); border-radius: 999px;
+  background: var(--bg-hover); color: var(--text-dim);
+  font-size: var(--fs-xs); line-height: 1.5;
+  border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.project-chip {
+  color: var(--text); cursor: pointer;
+  transition: var(--t-color), var(--t-press);
+}
+.project-chip:hover { border-color: var(--accent-border); background: var(--accent-soft); }
+.project-chip:active { transform: var(--press); }
+.repo-chip { font-family: var(--mono); font-size: var(--fs-xs); }
+a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); color: var(--text); }
+.tiny-chip { font-size: var(--fs-micro); padding: 0 var(--space-2); }
+.tiny-chip.overdue { color: var(--red); border-color: var(--red-border); background: var(--red-soft); }
+.select-chip { cursor: pointer; transition: var(--t-color), var(--t-press); }
+.select-chip:hover { background: var(--bg-active); color: var(--text); }
+.select-chip:active { transform: var(--press); }
+.select-chip.active {
+  background: var(--accent-soft); color: var(--text);
+  border-color: var(--accent-border); font-weight: 600;
+}
+.tool-chip.ok { color: var(--green); }
+.tool-chip.missing { color: var(--text-faint); }
+
+/* ── Buttons ───────────────────────────────────────────────── */
+
+/* --row-h is the app's hit-area floor and it moves with the density pref, so a
+   control is never smaller than a list row the user can already hit. */
+.btn {
+  min-height: var(--row-h);
+  padding: var(--space-2) var(--space-4); border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-raised); color: var(--text);
+  font-size: var(--fs); font-weight: 500;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  white-space: nowrap;
+  transition: var(--t-color), var(--t-press);
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.btn:active:not(:disabled) { transform: var(--press); }
+.btn:disabled { opacity: 0.42; cursor: default; transform: none; }
+.btn:disabled:hover { background: var(--bg-raised); border-color: var(--border); }
+.btn.primary {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--accent-fg); font-weight: 600;
+}
+.btn.primary:hover { filter: brightness(1.08); border-color: var(--accent); }
+.btn.primary:disabled:hover { filter: none; }
+.btn.danger { color: var(--red); border-color: var(--red-border); }
+.btn.danger:hover { background: var(--red-soft); border-color: var(--red); }
+/* The one exception to the floor: a tiny button rides inside a filter row or a
+   chip strip, where matching the row it sits in matters more than the floor. */
+.btn.tiny {
+  min-height: 0;
+  padding: var(--space-1) var(--space-3); font-size: var(--fs-xs);
+  margin-top: var(--space-2);
+}
+.icon-btn {
+  color: var(--text-faint); border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2); font-size: var(--fs); line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: var(--t-color), var(--t-press);
+}
+.icon-btn:hover { color: var(--text); background: var(--bg-active); }
+.icon-btn:active:not(:disabled) { transform: var(--press); }
+.row { display: flex; gap: var(--space-3); align-items: center; }
+
+/* ── Messages (shared base; chat.css refines) ──────────────── */
+
+.chat { height: 100vh; }
+.messages {
+  flex: 1; overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--space-5) var(--pane-x);
+}
+.msg { margin-bottom: var(--space-4); }
+/* A run of messages from one author is one block, so the seam between them
+   collapses to a hairline of the current rhythm rather than a full gap. */
+.msg.grouped { margin-top: calc(var(--space-1) - var(--space-4)); }
+.msg-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-1); }
+.msg-author { font-weight: 700; letter-spacing: var(--ls-title); }
+.msg-time { color: var(--text-faint); font-size: var(--fs-xs); }
+.bot-tag {
+  font-size: calc(var(--fs-micro) * 0.86); font-weight: 800; letter-spacing: var(--ls-caps);
+  background: var(--accent-soft); color: var(--accent);
+  padding: 1.5px 5px; border-radius: var(--radius-sm);
+}
+.msg-body { margin-left: 36px; line-height: 1.6; }
+.msg-meta { color: var(--text-faint); font-size: var(--fs-xs); margin-top: var(--space-2); }
+.running-note {
+  color: var(--text-dim); font-size: var(--fs-sm);
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-1) 0;
+}
+.avatar {
+  width: 26px; height: 26px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 700;
+  position: relative; flex-shrink: 0;
+  color: var(--avatar-fg);
+  letter-spacing: var(--ls-title);
+}
+.avatar-badge {
+  position: absolute; bottom: -4px; right: -4px;
+  font-size: 9px; background: var(--bg); color: var(--text-dim);
+  border-radius: 50%; width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+/* Left at a fixed duration on purpose: a spinner is a progress report, not
+   decoration, and a frozen one reads as a hung app. The reduced-motion block
+   at the bottom of the file still stops it when the OS asks. */
+.spinner {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+  display: inline-block; flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Markdown + code ───────────────────────────────────────── */
+
+.md { word-wrap: break-word; overflow-wrap: anywhere; }
+.md .codeblock {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.55;
+  margin: var(--space-3) 0;
+  position: relative;
+}
+.md .codelang {
+  color: var(--text-faint); font-size: calc(var(--fs-micro) * 0.9);
+  text-transform: uppercase; letter-spacing: var(--ls-caps); font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+.md .codelang:empty { display: none; }
+.md code {
+  font-family: var(--mono); font-size: 0.92em;
+  background: var(--inline-code-bg); color: var(--text);
+  padding: 1.5px 5px; border-radius: var(--radius-sm);
+}
+.md .codeblock code { background: none; padding: 0; font-size: inherit; }
+.md ul { margin: var(--space-2) 0; padding-left: var(--space-6); }
+.md li { margin: 2px 0; }
+.md blockquote {
+  border-left: 2.5px solid var(--border-strong);
+  margin: var(--space-2) 0; padding: 2px var(--space-4); color: var(--text-dim);
+}
+.md .md-h { font-weight: 700; margin: var(--space-3) 0 var(--space-1); letter-spacing: var(--ls-title); }
+/* Markdown headings scale off the body size so a font-scale change moves the
+   whole document, not just its paragraphs. */
+.md .md-h1 { font-size: calc(var(--fs) * 1.26); }
+.md .md-h2 { font-size: calc(var(--fs) * 1.15); }
+.md .md-h3 { font-size: calc(var(--fs) * 1.04); }
+.md .md-gap { height: var(--space-3); }
+.mention {
+  color: var(--accent); background: var(--accent-soft);
+  padding: 0.5px 5px; border-radius: var(--radius-sm); font-weight: 600;
+}
+
+/* syntax highlighting (src/syntax.ts emits these classes) */
+.tk-kw { color: var(--syn-keyword); }
+.tk-str { color: var(--syn-string); }
+.tk-num { color: var(--syn-number); }
+.tk-com { color: var(--syn-comment); font-style: italic; }
+.tk-fn { color: var(--syn-func); }
+.tk-ty { color: var(--syn-type); }
+.tk-pn { color: var(--syn-punct); }
+
+/* ── Composer ──────────────────────────────────────────────── */
+
+.composer-wrap {
+  padding: var(--space-4) var(--pane-x) var(--space-5);
+  position: relative; flex-shrink: 0;
+}
+.composer {
+  display: flex; gap: var(--space-3); align-items: flex-end;
+  background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: var(--space-3);
+  transition: var(--t-color);
+}
+/* The whole box is the field, so the border is what lights up — the textarea
+   inside keeps none of its own, and neither of them glows. */
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea {
+  border: none; background: none; padding: var(--space-1) var(--space-2);
+}
+.composer textarea:focus-visible { outline: none; }
+.composer-hint {
+  color: var(--text-faint); font-size: var(--fs-xs);
+  margin-top: var(--space-2); padding-left: var(--space-1);
+}
+/* Level 3: a popover over the composer, not a modal — --shadow-md, not lg. */
+.mention-pop {
+  position: absolute; bottom: 100%; left: var(--pane-x); right: var(--pane-x);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  overflow: hidden; box-shadow: var(--shadow-md);
+  z-index: 20; margin-bottom: var(--space-2);
+  transform-origin: bottom center;
+  animation: hq-rise var(--dur-fast) var(--ease);
+}
+.mention-opt {
+  min-height: var(--row-h);
+  padding: var(--space-2) var(--space-4);
+  display: flex; align-items: center; gap: var(--space-3); cursor: pointer;
+  transition: var(--t-color);
+}
+.mention-opt:hover { background: var(--accent-soft); }
+.mention-label { color: var(--text-dim); font-size: var(--fs-sm); }
+
+/* ── Page sections ─────────────────────────────────────────── */
+
+/* .dash-card is the app's generic "a section of a page" wrapper, used across
+   the dashboard, people, settings, workspaces, git activity and setup. It used
+   to be a level-1 card, which meant every one of those screens read as a stack
+   of boxes — and any of them that put one section inside another drew a box
+   inside a box.
+
+   It is now a section: a heading, its content, and space. The separation comes
+   from --space-6 between siblings, which is more than twice the gap inside any
+   of them, so the grouping is unambiguous without a single border. */
+.dash-body {
+  padding: var(--space-5) var(--pane-x) var(--space-6);
+  display: flex; flex-direction: column; gap: var(--space-6);
+}
+.dash-card {
+  min-width: 0;
+}
+.dash-card h3 {
+  margin: 0 0 var(--space-4); font-size: var(--fs-md); font-weight: 650;
+  letter-spacing: var(--ls-title);
+  display: flex; align-items: center; gap: var(--space-3);
+}
+/* A section nested in a section is one heading level quieter, not one box
+   deeper. */
+.dash-card .dash-card { margin-top: var(--space-5); }
+.list-row {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); color: var(--text);
+  transition: var(--t-color);
+}
+.list-row:hover { background: var(--bg-hover); text-decoration: none; }
+.list-title { flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-sub {
+  color: var(--text-faint); font-size: var(--fs-xs); margin-left: auto; white-space: nowrap;
+}
+.pr-dot { color: var(--green); font-size: 8px; }
+.pr-dot.draft { color: var(--text-faint); }
+
+/* .repo-grid / .repo-card / .repo-name / .repo-desc / .repo-foot / .issue-dot
+   were deleted here: nothing renders them. DashboardView.tsx has its own
+   db-repo-* set in dashboard.css, and these were the copy left behind. */
+
+/* A banner earns its box. It is an interruption — it has to separate from the
+   page around it, which is the whole test. */
+.banner {
+  border-radius: var(--radius); padding: var(--space-4) var(--space-5);
+  font-size: var(--fs); line-height: 1.6;
+  border: 1px solid var(--border);
+}
+.banner.warn { background: var(--yellow-soft); border-color: var(--yellow-border); }
+.banner.info { background: var(--accent-soft); border-color: var(--accent-border); color: var(--text-dim); }
+.banner code { font-family: var(--mono); font-size: 0.92em; }
+
+/* .setup-steps / .setup-step / .step-check were deleted here: SetupGuide.tsx
+   renders setup.css's own set, and nothing in the app used these. */
+
+/* ── Kanban ────────────────────────────────────────────────── */
+
+.kanban {
+  flex: 1; display: flex; gap: var(--space-4);
+  padding: var(--space-5) var(--pane-x) var(--pane-x);
+  overflow-x: auto; align-items: flex-start;
+}
+/* Level 1. */
+.kanban-col {
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+  width: 274px; min-width: 274px;
+  display: flex; flex-direction: column;
+  max-height: 100%; padding: var(--space-3);
+  box-shadow: var(--shadow-sm);
+  transition: var(--t-color);
+}
+.kanban-head {
+  font-size: var(--fs-xs); font-weight: 700;
+  text-transform: uppercase; letter-spacing: var(--ls-caps);
+  color: var(--text-dim); padding: var(--space-1) var(--space-2) var(--space-4);
+  display: flex; gap: var(--space-2); align-items: center;
+}
+.kanban-head .count {
+  color: var(--text-faint); font-weight: 600; margin-left: auto;
+  background: var(--bg-hover); border-radius: 999px; padding: 0 var(--space-2);
+  letter-spacing: var(--ls-body);
+}
+.kanban-cards {
+  overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3);
+  min-height: var(--space-3); overscroll-behavior: contain;
+}
+/* Level 2, inside the column. */
+.task-card {
+  background: var(--surface-2); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); cursor: pointer;
+  transition: var(--t-lift);
+}
+.task-card:hover {
+  border-color: var(--accent-border); transform: translateY(-1px); box-shadow: var(--shadow-sm);
+}
+.task-title {
+  font-weight: 600; font-size: var(--fs); line-height: 1.45;
+  letter-spacing: var(--ls-title);
+}
+.task-desc {
+  color: var(--text-dim); font-size: var(--fs-sm);
+  margin-top: var(--space-2); line-height: 1.5;
+}
+.task-foot {
+  display: flex; align-items: center; gap: var(--space-3);
+  margin-top: var(--space-3); flex-wrap: wrap;
+}
+.task-foot:empty { display: none; }
+.task-assignee {
+  display: flex; align-items: center; gap: var(--space-2);
+  color: var(--text-dim); font-size: var(--fs-xs);
+}
+.task-assignee .avatar { width: 18px; height: 18px; font-size: 9px; border-radius: 5px; }
+.quick-add {
+  margin-top: var(--space-3); background: none; border: 1px dashed var(--border);
+  color: var(--text-dim); font-size: var(--fs-sm);
+}
+.quick-add:focus { border-style: solid; background: var(--bg-input); }
+.dispatch-row { display: flex; gap: var(--space-3); margin: var(--space-3) 0; }
+.dispatch-row select { width: auto; flex: 1; }
+
+/* .agent-grid / .agent-card / .agent-card-head / .agent-name / .agent-persona /
+   .team-avatars were deleted here: AgentsView.tsx renders agents.css's own set,
+   and nothing in the app used these. */
+
+/* ── Modals ────────────────────────────────────────────────── */
+
+/* The scrim is a dim, not a material: --backdrop and nothing else. A blur here
+   costs a full-window composite on every modal and says nothing the dim does
+   not already say. */
+.modal-backdrop {
+  position: fixed; inset: 0; background: var(--backdrop);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+  padding: var(--space-6);
+  animation: hq-fade var(--dur) var(--ease);
+}
+/* Level 4 — the only thing in the app that gets --shadow-lg. */
+.modal {
+  background: var(--bg-overlay);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  width: 468px; max-width: 100%; max-height: 86vh;
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  transform-origin: var(--pop-origin, center);
+  animation: hq-pop var(--dur) var(--ease);
+}
+.modal-wide { width: 640px; }
+.modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-soft);
+}
+.modal-title { font-weight: 700; font-size: var(--fs-md); letter-spacing: var(--ls-title); }
+.modal-body { padding: var(--space-5); overflow-y: auto; }
+.modal-actions {
+  display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5);
+}
+.modal-actions.space-between { justify-content: space-between; }
+.field {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  margin-bottom: var(--space-4); flex: 1;
+}
+.field-label {
+  font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase;
+  letter-spacing: var(--ls-caps); color: var(--text-dim);
+}
+.fields-row { align-items: flex-start; }
+.checkbox-field { flex-direction: row; align-items: center; gap: var(--space-3); }
+.checkbox-field input { width: auto; }
+.checkbox-field span { font-size: var(--fs-sm); color: var(--text-dim); }
+.member-section { margin-bottom: var(--space-5); }
+.member-row {
+  min-height: var(--row-h);
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
+  transition: var(--t-color);
+}
+.member-row:hover { background: var(--bg-hover); }
+.member-row input { width: auto; }
+
+/* Theme swatch used in the command palette (paints in each theme's colors). */
+.theme-swatch {
+  border: 1px solid; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: flex-end; justify-content: flex-end;
+  padding: 3px; overflow: hidden;
+}
+.theme-swatch i { width: 7px; height: 7px; border-radius: 2px; display: block; }
+
+/* ── Scrollbars ────────────────────────────────────────────── */
+
+/* Styled once, globally, and deliberately NOT with scrollbar-width /
+   scrollbar-color: in Chromium the standard properties switch the
+   ::-webkit-scrollbar pseudo-elements off entirely, which would trade this
+   inset, themed thumb for the browser default. */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar); border-radius: 999px;
+  border: 3px solid transparent; background-clip: content-box;
+  min-height: 28px; /* long lists otherwise produce a thumb too small to grab */
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── Reduced motion ────────────────────────────────────────── */
+
+/* Both switches land here, so no component has to remember either one:
+   the OS setting via the media query, and the in-app appearance pref via
+   data-reduce-motion on <html> (which also zeroes --dur, covering everything
+   authored against the motion tokens). This block is the backstop for the few
+   durations that are deliberately literal, like the spinner. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --press: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+:root[data-reduce-motion] { --press: none; }
+:root[data-reduce-motion] *,
+:root[data-reduce-motion] *::before,
+:root[data-reduce-motion] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+/* "Running" is a state, not an animation, so the ring keeps a resting frame
+   instead of disappearing when the motion stops. Same frame as .db-pulse and
+   .col-dot.hot use. */
+@media (prefers-reduced-motion: reduce) {
+  .run-pulse::after { animation: none; transform: scale(1.8); opacity: 0.35; }
+}
+:root[data-reduce-motion] .run-pulse::after {
+  animation: none; transform: scale(1.8); opacity: 0.35;
+}

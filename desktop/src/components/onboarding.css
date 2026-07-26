@@ -1,0 +1,1061 @@
+/* ── First run ───────────────────────────────────────────────── */
+/*
+ * onboarding.css is imported from Onboarding.tsx. The wizard sits above the
+ * whole app, which makes it the one thing in this file that genuinely floats:
+ * .ob-panel-wrap is the container, and everything inside it is a heading with
+ * prose or controls under it. It used to be panels inside the panel — a titled
+ * card for every paragraph, a bordered card per fact, per summary line, per
+ * detected runtime — which is what made eight steps of plain English read like
+ * a tax return.
+ *
+ * It deliberately sits BELOW toasts (z-index 300) — a failure that happens
+ * while the wizard is open still has to be readable, and the wizard is never
+ * the most important thing on screen.
+ *
+ * Focus is App.css's, everywhere, without exception: this file used to redraw
+ * the same 2px accent outline eleven times. Colours are tokens only — the
+ * avatar ramp arrives as var(--avatar-N) from the component, and 39 themes
+ * depend on everything else resolving through the theme.
+ */
+
+/* ── overlay + panel ─────────────────────────────────────────── */
+
+.ob-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  padding-top: max(var(--space-4), var(--titlebar));
+  overflow: auto;
+  background: var(--backdrop);
+  /* Material, not decoration: this really is glass over the running app. */
+  backdrop-filter: blur(3px);
+}
+
+/* Level 4 — the only elevation in this file. */
+.ob-panel-wrap {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+/* ── header ──────────────────────────────────────────────────── */
+
+.ob-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ob-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+
+.ob-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ob-head .ob-skip {
+  margin-left: auto;
+}
+
+/* ── step rail ───────────────────────────────────────────────── */
+
+.ob-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  list-style: none;
+}
+
+.ob-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ob-rail-btn:disabled {
+  cursor: default;
+}
+.ob-rail-btn:not(:disabled):hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.ob-rail-dot {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Where you are, in the app's one selected treatment. */
+.ob-rail-step.ob-on .ob-rail-btn {
+  color: var(--text);
+  font-weight: 650;
+  background: var(--accent-soft);
+}
+.ob-rail-step.ob-on .ob-rail-dot {
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+.ob-rail-step.ob-past .ob-rail-btn {
+  color: var(--text-dim);
+}
+.ob-rail-step.ob-past .ob-rail-dot {
+  border-color: var(--green-border);
+  color: var(--green);
+}
+
+/* The label is the first thing to go on a narrow window; the numbered dots
+   still say where you are. */
+@media (max-width: 620px) {
+  .ob-rail-step:not(.ob-on) .ob-rail-label {
+    display: none;
+  }
+}
+
+/* ── body ────────────────────────────────────────────────────── */
+
+.ob-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Only the prose scrolls; the actions row below it never moves, so the way
+   forward is always in the same place on every step. */
+.ob-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6) var(--space-6) var(--space-5);
+}
+
+.ob-kicker {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.ob-title {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  color: var(--text);
+}
+
+.ob-lede p {
+  margin: 0 0 var(--space-3);
+  max-width: var(--measure);
+  color: var(--text-dim);
+  font-size: var(--fs);
+  line-height: 1.62;
+}
+.ob-lede strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.ob-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  max-width: 74ch;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.ob-note svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.ob-hint {
+  display: block;
+  margin: var(--space-1) 0 0;
+  max-width: 74ch;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.ob-hint code,
+.ob-consequence code {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--inline-code-bg);
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+/* A warning has to be separable from the prose around it, so it keeps its
+   fill. It is one of four containers left in this file. */
+.ob-warn {
+  margin: var(--space-3) 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--yellow-border);
+  border-radius: var(--radius);
+  background: var(--yellow-soft);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+/* ── welcome facts ───────────────────────────────────────────── */
+
+/* Three sentences about what Spaces is. They were three filled, bordered cards
+   stacked inside the panel that already framed them. */
+.ob-facts {
+  display: grid;
+  gap: var(--space-4);
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ob-facts li {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.ob-facts strong {
+  display: block;
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* ── fields ──────────────────────────────────────────────────── */
+
+.ob-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-5) 0 0;
+}
+.ob-field > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ob-field > .ob-hint {
+  margin: 0;
+}
+
+.ob-label {
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 650;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+/* Fields are App.css's: its fill, its border, its radius, its focus. This file
+   used to restate all four and then re-draw the ring on top. */
+.ob-field input,
+.ob-field select,
+.ob-field textarea,
+.ob-row input {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.ob-field textarea {
+  resize: vertical;
+  min-height: 76px;
+}
+
+.ob-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+.ob-row .btn {
+  flex: none;
+}
+
+.ob-grid {
+  display: grid;
+  gap: 0 var(--space-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 560px) {
+  .ob-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.ob-choice {
+  margin: var(--space-5) 0 0;
+}
+.ob-choice .ob-label {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+
+.ob-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  cursor: pointer;
+}
+.ob-check input {
+  flex: none;
+  margin-top: 2px;
+}
+.ob-check strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+.ob-check-off {
+  cursor: default;
+  opacity: 0.62;
+}
+
+/* ── colour swatches ─────────────────────────────────────────── */
+
+.ob-colors {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  border: 0;
+}
+.ob-colors .ob-label {
+  padding: 0;
+}
+
+.ob-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.ob-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.ob-swatch-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+/* The swatch is its colour, so selection moves the border the swatch already
+   has to --text — neutral, and legible against all 39 palettes. */
+.ob-swatch-on {
+  border-color: var(--text);
+}
+/* The radio inside is visually hidden, so its ring has to be drawn on the
+   wrapper. It borrows the app's — same width, same colour, same offset. */
+.ob-swatch:has(input:focus-visible) {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+.ob-swatch-auto {
+  position: absolute;
+  color: var(--avatar-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  pointer-events: none;
+}
+
+/* ── titled blocks ───────────────────────────────────────────── */
+
+/*
+ * .ob-panel appears eleven times: "What this means", "Later, when you want
+ * them", "Something to open with". Each was a filled, bordered card inside the
+ * wizard's own filled, bordered panel. A title and a rule above it say the same
+ * thing and leave the prose room to be read.
+ */
+.ob-panel {
+  margin: var(--space-6) 0 0;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.ob-panel .ob-field:first-child,
+.ob-panel .ob-check:first-child {
+  margin-top: 0;
+}
+
+.ob-panel-title {
+  margin: 0 0 var(--space-3);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.ob-made {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ob-made .ob-hint {
+  margin: 0;
+}
+
+.ob-fact {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+/* The dot is the state, at full strength. It used to sit inside a 3px halo of
+   its own colour — a coloured shadow, which is the one thing shadows are not.
+   An absent runtime is a choice not yet made, never a fault, so the idle tone
+   is grey and red is kept for things that are actually broken. */
+.ob-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.ob-fact-ok .ob-dot {
+  background: var(--green);
+}
+
+.ob-consequence {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.62;
+}
+.ob-consequence li + li {
+  margin-top: var(--space-2);
+}
+
+.ob-later {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.ob-later li + li {
+  margin-top: var(--space-2);
+}
+.ob-later strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* What was set up, read back. A list, ruled — not a stack of cards. */
+.ob-summary {
+  display: grid;
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ob-summary li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ob-summary .ob-hint {
+  margin: 0;
+}
+/* Pushed to the end of its own row rather than revealed on hover: taking a
+   teammate back out is not a secret, and a control you have to find by
+   pointing at it is a control most people never find. */
+.ob-summary .ob-drop {
+  margin-left: auto;
+}
+
+/* Adding the next one. A real button, in the flow of the panel, so "and now
+   another" is one obvious click rather than a second trip through setup. */
+.ob-add {
+  margin-top: var(--space-4);
+}
+
+/* ── the setup checklist ─────────────────────────────────────── */
+
+/*
+ * All three apps, always, one under the other. It was a two-column grid of
+ * only the ones that had been found, which meant the list silently changed
+ * length and the ones you had not got were somewhere else entirely — the
+ * layout was making the same "pick one of these" argument the copy was.
+ *
+ * A checklist is a list. Ruled rows, no cards: every row already carries its
+ * own state in the dot and the pill beside the name, and a border around it
+ * would be a third copy of the same claim.
+ */
+.ob-runtimes {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-runtime {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.ob-runtime-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+/* Sized for the larger of the two marks it holds, so the row does not move
+   when a probe answers and the spinner becomes a dot. */
+.ob-runtime-state {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+}
+.ob-runtime-on .ob-dot {
+  background: var(--green);
+}
+
+.ob-runtime-name {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.ob-pill {
+  margin-left: auto;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+.ob-runtime-on .ob-pill {
+  color: var(--green);
+}
+
+.ob-runtime-good {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+/* The install path for something absent, folded shut. It indents under the row
+   it belongs to so a list of three stays readable with one of them open. */
+.ob-runtime .ob-aside {
+  margin-top: var(--space-3);
+}
+
+/* ── copy block ──────────────────────────────────────────────── */
+
+/* A command is a different medium from the prose around it, so this one keeps
+   its frame. */
+.ob-cmd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+}
+
+.ob-cmd-text {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* A sentence, not a command: it wraps, and the button lines up with the top
+   of it rather than floating in the middle of three lines. */
+.ob-cmd-prose {
+  align-items: flex-start;
+  background: var(--bg-inset);
+}
+.ob-cmd-prose .ob-cmd-text {
+  overflow-x: visible;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.ob-cmd-prose .ob-cmd-copy {
+  margin-top: 1px;
+}
+
+.ob-cmd-copy {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ob-cmd-copy:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* ── the audience fork ───────────────────────────────────────── */
+/*
+ * Two cards, deliberately the same size, the same weight and the same colour.
+ * Whichever one reads as the "advanced" option is the one people pick wrongly,
+ * so neither may be given a badge, an icon or a longer paragraph than the
+ * other. These keep their boundary because they are the hit target: the whole
+ * rectangle is the button.
+ */
+
+.ob-forks {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 620px) {
+  .ob-forks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ob-fork {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ob-fork:hover {
+  background: var(--bg-hover);
+}
+.ob-fork-on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.ob-fork-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 650;
+}
+.ob-fork-title svg {
+  color: var(--accent);
+}
+.ob-fork-blurb {
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+.ob-fork-steps {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+/* ── the fork, afterwards ────────────────────────────────────── */
+
+.ob-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.ob-mode strong {
+  color: var(--text-dim);
+  font-weight: 650;
+}
+.ob-mode .btn {
+  margin-left: auto;
+}
+
+/* ── teammates who are already here ──────────────────────────── */
+
+/* Same reasoning as the fork: the rectangle is the button. */
+.ob-cards {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+}
+
+.ob-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  color: var(--text-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.ob-card:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.ob-card:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ob-card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ob-card-name {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+.ob-card-top svg {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+/* Whose agent it is, never folded into the name. */
+.ob-tag {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+
+.ob-card-role {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+.ob-card-owns {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+
+/* Whether it can answer at all. Grey when it cannot: an asleep laptop is a
+   fact about the world, not an error the reader caused. */
+.ob-avail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: auto;
+  padding-top: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.ob-avail-ok .ob-dot {
+  background: var(--green);
+}
+
+/* ── who else is in the team ─────────────────────────────────── */
+
+.ob-picks {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  border: 0;
+}
+.ob-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 28px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.ob-pick input {
+  flex: none;
+}
+.ob-pick .ob-tag,
+.ob-pick .ob-hint {
+  display: inline;
+  margin-left: var(--space-2);
+}
+
+/* Choosing which app a teammate works inside. Each option carries its real
+   state and a line about what it is for — which is why this is radios with
+   room rather than chips with a tooltip: none of it may be behind a hover. */
+.ob-picks-wide .ob-pick {
+  align-items: flex-start;
+  padding: var(--space-2) 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+.ob-picks-wide .ob-pick input {
+  margin-top: 3px;
+}
+.ob-picks-wide .ob-pick > span {
+  min-width: 0;
+}
+.ob-picks-wide .ob-pick .ob-hint {
+  display: block;
+  margin: var(--space-1) 0 0;
+}
+
+/* ── the assembled standing context ──────────────────────────── */
+
+/* The literal text an agent receives — a different medium again, so it keeps
+   its frame. */
+.ob-preview {
+  max-height: 230px;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* How much has been written, beside the label rather than under the box. */
+.ob-count {
+  margin-left: var(--space-3);
+  color: var(--text-faint);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── "what this means", on request ───────────────────────────── */
+/*
+ * Our vocabulary lives in here and nowhere else. Closed by default, because
+ * the person who has never heard of a worktree must be able to finish setup
+ * without reading the word.
+ */
+
+.ob-aside {
+  margin-top: var(--space-4);
+}
+.ob-aside > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  list-style: none;
+}
+.ob-aside > summary::-webkit-details-marker {
+  display: none;
+}
+.ob-aside > summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.ob-aside[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ob-aside > summary:hover {
+  color: var(--text-dim);
+}
+/* A neutral hairline indenting an aside, the way a blockquote is indented.
+   Not an accent bar: it carries no colour and no state. */
+.ob-aside-body {
+  margin-top: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--border-soft);
+}
+.ob-aside-body .ob-hint {
+  margin: 0 0 var(--space-2);
+}
+.ob-aside-body .ob-cmd + .ob-cmd {
+  margin-top: var(--space-2);
+}
+
+/* ── actions ─────────────────────────────────────────────────── */
+
+.ob-step {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.ob-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--border-soft);
+}
+
+.ob-actions-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+}
+
+/*
+ * What the button is about to do, and what that costs. It sits in the actions
+ * row on purpose — one line, next to the thing it describes, on every step
+ * without exception. In the prose above it would be read once and then
+ * scrolled past; in a tooltip it would not be read at all.
+ *
+ * It is the flexible one, so on a narrow window the buttons wrap to a line of
+ * their own beneath it — which leaves the primary exactly where it sits at
+ * every other width, in the bottom-right corner, rather than shuffling it.
+ */
+.ob-outcome {
+  flex: 1 1 16ch;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+/* When this line is carrying the reason a button is off rather than a note
+   about what it does, it has to be legible at a glance. */
+.ob-outcome strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* ── the skip prompt ─────────────────────────────────────────── */
+
+.ob-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--yellow-border);
+  background: var(--yellow-soft);
+}
+.ob-ask p {
+  flex: 1;
+  min-width: 220px;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.ob-ask-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* ── footer ──────────────────────────────────────────────────── */
+
+.ob-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+/* ── assistive-tech only ─────────────────────────────────────── */
+
+.ob-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-rail-btn,
+  .ob-fork,
+  .ob-card,
+  .ob-aside > summary::before,
+  .ob-cmd-copy {
+    transition: none;
+  }
+}

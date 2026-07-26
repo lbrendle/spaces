@@ -1,0 +1,263 @@
+/* ── The save indicator ───────────────────────────────────────── */
+/*
+ * savestate.css is imported from SaveState.tsx, which lands in the bundle at
+ * whatever point the first editor importing it does — so nothing here may
+ * depend on cascade order. Every rule is .svst-/.svbar- scoped, and the one
+ * shared primitive it touches (.spinner) is only ever narrowed *inside* .svst,
+ * never redefined for the app.
+ *
+ * The whole layout exists to stop one thing: movement. This badge sits at the
+ * edge of vision while you type, and anything that jumps there reads as
+ * something going wrong. So the states are stacked in a single grid cell and
+ * cross-fade in place rather than replacing each other, the clock text is
+ * tabular and its box is pinned the moment it starts counting, and no rule
+ * below animates a dimension.
+ *
+ * Tokens only. The green tick, the red error strip and the accent Retry all
+ * arrive as *-soft / *-border pairs so the light themes stay light. The strip
+ * used to carry a 3px red rail down its left edge on top of a red border, a red
+ * tint and a red title — four ways of saying one thing. It says it once now.
+ */
+
+/* ── stack ────────────────────────────────────────────────────── */
+
+/*
+ * inline-grid with every frame in the same cell: the outgoing and incoming
+ * states overlap for one --dur instead of shoving each other sideways. The
+ * container is briefly as wide as the wider of the two and then settles, which
+ * is the one place a width moves — and it moves once per state change, not
+ * once per re-word.
+ *
+ * With nothing to say the grid has no items and collapses to nothing, but the
+ * element stays in the DOM: it is a live region, and a live region that is
+ * created at the same moment as its first message is a message nobody hears.
+ */
+.svst {
+  display: inline-grid;
+  grid-template-areas: "state";
+  align-items: center;
+  justify-items: start;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.svst-frame {
+  grid-area: state;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  animation: svst-in var(--dur) var(--ease);
+}
+
+/* Held in the DOM only to play its exit. `inert` in the markup already takes it
+   out of the a11y tree and out of the focus order; this is the paint half. */
+.svst-leaving {
+  pointer-events: none;
+  animation: svst-out var(--dur) var(--ease) forwards;
+}
+
+@keyframes svst-in {
+  from { opacity: 0; }
+}
+@keyframes svst-out {
+  to { opacity: 0; }
+}
+
+/* ── inline states ────────────────────────────────────────────── */
+
+.svst-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.svst-tick {
+  color: var(--green);
+}
+
+/* Dirty is the quietest thing here on purpose: work in progress is the normal
+   condition of an editor, not a warning. */
+.svst-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+/* Scoped down from the app's 12px: at the size of a caption a full-strength
+   spinner reads as "something is wrong", which is the opposite of the message. */
+.svst .spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+}
+
+.svst-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.svst-f-dirty .svst-text {
+  color: var(--text-faint);
+}
+
+/*
+ * Once the label is counting minutes its box is pinned, so "9m" turning into
+ * "10m" cannot nudge whatever sits beside it. Wide enough for "Saved 12h ago";
+ * tabular numerals hold the rest of the range steady. Unpinned before that,
+ * because reserving the space while it still just says "Saved" would leave a
+ * hole in the row for a full minute.
+ */
+.svst-rel .svst-text {
+  min-width: 13ch;
+}
+
+/* ── error ────────────────────────────────────────────────────── */
+/*
+ * The one state allowed to change the shape of the row, and the one container
+ * in this file. It never auto-dismisses — the text it is talking about is still
+ * unsaved in the editor behind it — so it is built to be read, not glanced at:
+ * the reason on its own line, and the remedy right there. It earns its box by
+ * being an interruption; the 3px red rail it also carried earned nothing.
+ */
+
+.svst-f-error {
+  align-items: flex-start;
+  gap: var(--space-2);
+  /* A measure, not a width: on a wide editor pane an unwrapped stderr would
+     run for 900px and leave Retry stranded at the far end of the room. It
+     still shrinks below this inside a narrow modal. */
+  max-width: 60ch;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius);
+  background: var(--red-soft);
+  overflow: hidden;
+}
+
+.svst-f-error .svst-glyph {
+  margin-top: 1px;
+  color: var(--red);
+}
+
+.svst-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.svst-title {
+  color: var(--red);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+}
+
+/* Failed writes arrive as raw stderr and can run for paragraphs; show the gist,
+   keep the strip a strip. The whole reason is on the line's own tooltip. */
+.svst-detail {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* Opaque, unlike the toasts' .tst-action: this button sits on a --red-soft
+   wash, and an --accent-soft fill is translucent enough that the red bleeds
+   through it and turns the remedy muddy purple. A solid surface keeps it
+   crisp on all 39 themes; the accent survives in the border and the label. */
+.svst-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  margin-top: 1px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.svst-retry:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+/* ── compact ──────────────────────────────────────────────────── */
+/*
+ * Glyph only, for a toolbar with no room for a sentence — but the words stay in
+ * the DOM, clipped rather than removed, because the live region still has to
+ * say "Saved" out loud. Errors are exempt: a red dot with no reason is a state
+ * nobody acts on.
+ */
+
+.svst-compact .svst-frame:not(.svst-f-error) .svst-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.svst-compact .svst-rel .svst-text {
+  min-width: 0;
+}
+
+/* ── modal footer ─────────────────────────────────────────────── */
+
+.svbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* The indicator gives way first: in a narrow modal a long error message should
+   wrap, never squeeze the button that closes the thing. */
+.svbar > .svst {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.svbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ── reduced motion ───────────────────────────────────────────── */
+/*
+ * The state still changes, it just changes at once. Nothing here carried
+ * meaning that only the fade expressed.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .svst-frame,
+  .svst-leaving {
+    animation: none;
+  }
+  .svst-retry {
+    transition: none;
+  }
+}

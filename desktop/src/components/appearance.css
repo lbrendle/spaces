@@ -1,0 +1,886 @@
+/* ═══════════════════════════════════════════════════════════
+   Appearance panel.
+
+   Two coordinate systems live in this file. Everything outside
+   .ap-mini is authored in theme tokens and therefore reacts live
+   to density / radius / type-scale changes — that is the point of
+   the panel. Inside .ap-mini the sizes are fixed px on purpose:
+   the miniature must stay the same physical size in every card so
+   forty themes can be compared, while its *colors* come from the
+   inline vars the card spreads onto it. The miniature is a drawing
+   of the app, not chrome, and it is the one place in this file
+   allowed to be made of small filled rectangles.
+
+   Selection is the app's one selected treatment: --accent-soft
+   behind, --text on top. Not an accent edge, not a halo — a theme
+   card's whole job is to show a palette, and anything drawn in the
+   accent lies about the palette underneath it. Focus is never
+   re-declared: App.css draws it once, as an outline with an offset,
+   and an outline leaves a real hole so it survives being drawn on
+   a card, on the canvas or over a swatch.
+
+   The four .ap-card sections are deboxed by settings.css, which owns
+   the settings page they live on. Here they are a heading and the
+   controls under it.
+   ═══════════════════════════════════════════════════════════ */
+
+.ap-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+.ap-row + .ap-row { margin-top: var(--space-5); }
+
+.ap-copy { min-width: 0; max-width: 56ch; }
+.ap-label {
+  font-size: var(--fs);
+  font-weight: 600;
+  color: var(--text);
+}
+.ap-hint {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  margin-top: var(--space-1);
+}
+.ap-hint code { font-size: 0.95em; }
+
+.ap-count {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.ap-now {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-now.peeking { color: var(--accent); }
+
+.ap-mono-chip {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  background: var(--inline-code-bg);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Segmented control ───────────────────────────────────────── */
+
+.ap-seg {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--seg-n, 3), minmax(0, 1fr));
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 3px;
+  flex-shrink: 0;
+}
+/* The thumb is the selection, so it is the selection treatment and nothing
+   else: a soft accent wash. It used to also carry an --accent-border edge. */
+.ap-seg-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--seg-n, 3));
+  background: var(--accent-soft-strong);
+  border-radius: calc(var(--radius) - 3px);
+  transform: translateX(calc(var(--seg, 0) * 100%));
+  transition: transform var(--dur) var(--ease);
+  pointer-events: none;
+}
+.ap-seg-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-4);
+  border-radius: calc(var(--radius) - 3px);
+  font-size: var(--fs);
+  font-weight: 500;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease);
+}
+.ap-seg-btn:hover { color: var(--text); }
+.ap-seg-btn.active { color: var(--text); font-weight: 600; }
+/* Same ring as everywhere, drawn inside: the track clips at 3px of padding,
+   so an outset offset would be cropped by the control that owns it. */
+.ap-seg-btn:focus-visible { outline-offset: calc(var(--focus-w) * -1); }
+.ap-seg-icon { font-size: var(--fs-xs); opacity: 0.85; }
+
+/* ── Gallery filters ─────────────────────────────────────────── */
+
+.ap-gallery-hint { margin: calc(var(--space-1) * -1) 0 var(--space-5); }
+
+.ap-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.ap-search {
+  position: relative;
+  flex: 1 1 250px;
+  min-width: 200px;
+  max-width: 340px;
+  display: flex;
+  align-items: center;
+}
+.ap-search input {
+  padding-left: 30px;
+  padding-right: 28px;
+  font-size: var(--fs);
+}
+.ap-search input::-webkit-search-cancel-button { display: none; }
+.ap-search-icon {
+  position: absolute;
+  left: 11px;
+  font-size: var(--fs-md);
+  color: var(--text-faint);
+  pointer-events: none;
+  line-height: 1;
+}
+.ap-search-clear {
+  position: absolute;
+  right: 7px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+.ap-search-clear:hover { color: var(--text); background: var(--bg-hover); }
+
+.ap-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ap-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-3);
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.ap-tag:hover:not(:disabled) { color: var(--text); background: var(--bg-active); }
+.ap-tag.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+.ap-tag:disabled { opacity: 0.35; cursor: default; }
+.ap-tag-count {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.ap-tag.on .ap-tag-count { color: var(--text-dim); }
+.ap-tag-clear { border-style: dashed; }
+
+/* Nothing matched. A sentence in the middle of the space the grid would have
+   filled — it does not need a dashed box drawn round it to be found. */
+.ap-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-5);
+  color: var(--text-dim);
+}
+.ap-empty-title { font-size: var(--fs-md); color: var(--text); }
+
+/* ── Gallery groups ──────────────────────────────────────────── */
+
+.ap-group + .ap-group { margin-top: var(--space-6); }
+.ap-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+.ap-group-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+.ap-group-count { font-size: var(--fs-xs); color: var(--text-faint); }
+.ap-group-rule { flex: 1; height: 1px; background: var(--border-soft); }
+
+.ap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(222px, 1fr));
+  gap: var(--space-5);
+}
+
+/* A theme card is a container that earns it: it groups a palette that must be
+   compared against thirty-eight others, and it is the hit target. */
+.ap-theme {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+/* A card lifts one level, never two: --shadow-sm is what level 1 owns. */
+.ap-theme:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+}
+.ap-theme.active {
+  background: var(--accent-soft);
+}
+
+/* ── The miniature ───────────────────────────────────────────── */
+
+.ap-mini {
+  display: flex;
+  width: 100%;
+  aspect-ratio: 200 / 136;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg);
+  line-height: 1;
+  font-family: var(--font);
+}
+
+.ap-mini-rail {
+  width: 26%;
+  min-width: 40px;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 5px;
+}
+.ap-mini-logo {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--accent);
+  margin: 1px 0 4px 2px;
+}
+.ap-mini-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 3px;
+}
+.ap-mini-nav i {
+  width: 5px;
+  height: 5px;
+  border-radius: 1.5px;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.ap-mini-nav b {
+  height: 4px;
+  flex: 1;
+  border-radius: 2px;
+  background: var(--border);
+}
+.ap-mini-nav.on { background: var(--accent-soft); }
+.ap-mini-nav.on i { background: var(--accent); }
+.ap-mini-nav.on b { background: var(--text-dim); }
+
+.ap-mini-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ap-mini-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.ap-mini-crumb {
+  font-size: 7px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.1px;
+}
+.ap-mini-chip {
+  margin-left: auto;
+  font-size: 6px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 1px 4px;
+  white-space: nowrap;
+}
+
+.ap-mini-msg {
+  display: flex;
+  gap: 4px;
+  padding: 6px 6px 0;
+}
+.ap-mini-av {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--avatar-0);
+  color: var(--avatar-fg);
+  font-size: 6px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ap-mini-bubble {
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 3px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+.ap-mini-who {
+  font-size: 6px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.ap-mini-said {
+  font-size: 6.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ap-mini-code {
+  flex: 1;
+  min-height: 0;
+  margin: 6px 6px 0;
+  padding: 4px 5px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  font-family: var(--mono);
+  font-size: 6.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+.ap-mini-code span { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.ap-mini-c { color: var(--syn-comment); }
+.ap-mini-k { color: var(--syn-keyword); }
+.ap-mini-f { color: var(--syn-func); }
+.ap-mini-s { color: var(--syn-string); }
+.ap-mini-p { color: var(--syn-punct); }
+.ap-mini-caret {
+  display: inline-block;
+  width: 2px;
+  height: 7px;
+  margin-left: 2px;
+  vertical-align: -1px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+/* The caret is drawn, not blinked. Nothing in this app loops except a spinner,
+   and "which theme is on" is already said by the wash and the tick. */
+
+.ap-mini-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px;
+  flex-shrink: 0;
+}
+.ap-mini-btn {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2.5px 6px;
+  border-radius: 3px;
+}
+.ap-mini-tag {
+  font-size: 6px;
+  color: var(--text-dim);
+  background: var(--bg-active);
+  border-radius: 999px;
+  padding: 2px 5px;
+}
+.ap-mini-dots { display: flex; gap: 2.5px; margin-left: auto; }
+.ap-mini-dots i { width: 4px; height: 4px; border-radius: 50%; display: block; }
+
+.ap-theme-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-1) var(--space-2);
+}
+.ap-theme-id { flex: 1; min-width: 0; }
+.ap-theme-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ap-theme-badge {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ap-theme-author {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-theme-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--accent-fg);
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur) var(--ease);
+}
+.ap-theme.active .ap-theme-check { opacity: 1; transform: none; }
+
+/* ── Fine tuning ─────────────────────────────────────────────── */
+
+.ap-tune {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 234px;
+  gap: var(--space-6);
+  align-items: start;
+}
+.ap-tune-controls { min-width: 0; }
+
+@media (max-width: 940px) {
+  .ap-tune { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ap-accent { display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-end; }
+.ap-swatches {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ap-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--sw, var(--accent));
+  border: 2px solid var(--border-soft);
+  padding: 0;
+  position: relative;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.ap-swatch:hover { transform: scale(1.12); }
+/* The swatch *is* its colour, so selection cannot be carried by fill or by an
+   accent edge — accent is one of the choices. It moves the 2px border the
+   swatch already has to --text: neutral, and legible against all 39 palettes. */
+.ap-swatch.on { border-color: var(--text); }
+.ap-swatch-custom {
+  background: var(--bg-input);
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  overflow: hidden;
+}
+.ap-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+/* The colour input is opacity:0 over its own swatch, so its focus ring would
+   be invisible too. The wrapper borrows the app's one ring rather than
+   inventing a second — same width, same colour, same offset. */
+.ap-swatch-custom:focus-within {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+
+.ap-accent-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ap-ratio {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.ap-ratio.weak { color: var(--yellow); }
+
+.ap-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.ap-slider input[type="range"] { width: 148px; }
+.ap-slider-end { color: var(--text-faint); font-size: var(--fs-micro); line-height: 1; }
+.ap-slider-end.big { font-size: var(--fs-lg); }
+.ap-slider-value {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+
+.ap-select { width: auto; min-width: 172px; font-size: var(--fs-sm); }
+
+/* Scoped to this panel: the range element is unstyled elsewhere in the app and
+   this file has no business changing that. */
+.ap-card input[type="range"] {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  height: 18px;
+  cursor: pointer;
+}
+.ap-card input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-active);
+}
+.ap-card input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+/* A range is not a text field, so it does not take the field focus wash that
+   App.css gives inputs — it takes the plain outline, around the whole track. */
+.ap-card input[type="range"]:focus,
+.ap-card input[type="range"]:focus-visible {
+  box-shadow: none;
+  outline-offset: var(--focus-gap);
+}
+
+/* ── Toggles ─────────────────────────────────────────────────── */
+
+.ap-toggles {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.ap-toggle {
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ap-toggle:hover { background: var(--bg-hover); }
+.ap-toggle-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 36px;
+  text-align: left;
+  padding: var(--space-3) var(--space-3);
+  border-radius: var(--radius);
+}
+.ap-toggle-copy { display: flex; flex-direction: column; min-width: 0; }
+.ap-toggle-copy .ap-hint { margin-top: 1px; }
+.ap-track {
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  margin-top: 2px;
+  position: relative;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.ap-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform var(--dur) var(--ease), background var(--dur-fast) var(--ease);
+}
+.ap-toggle.on .ap-track { background: var(--accent-soft-strong); border-color: var(--accent-border); }
+.ap-toggle.on .ap-knob { transform: translateX(14px); background: var(--accent); }
+.ap-tint-range { margin: 0 0 var(--space-3) 51px; width: min(190px, calc(100% - 61px)); }
+
+/* ── Live sample ─────────────────────────────────────────────── */
+
+/*
+ * A drawing of the app's own chrome, the way .ap-mini is. It keeps its frame
+ * because the frame is what says "this is a sample, not the panel you are in",
+ * and .ap-sample-card keeps its own because demonstrating what a card looks
+ * like is the entire job of that rectangle.
+ */
+.ap-sample {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ap-sample-head {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.ap-sample-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--row-h);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs);
+}
+.ap-sample-row.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.ap-sample-hash { color: var(--text-faint); font-weight: 600; }
+.ap-sample-row.on .ap-sample-hash { color: var(--accent); }
+.ap-sample-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-sample-badge {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px var(--space-3);
+  line-height: 1.6;
+}
+.ap-sample-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-2);
+}
+.ap-sample-title { font-size: var(--fs); font-weight: 600; letter-spacing: var(--ls-title); }
+.ap-sample-text {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  margin-top: var(--space-1);
+  line-height: 1.5;
+}
+.ap-sample-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.ap-sample-chip {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 1px var(--space-3);
+}
+.ap-sample-btn {
+  margin-left: auto;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border-radius: var(--radius);
+  padding: var(--space-1) var(--space-4);
+}
+.ap-sample-code {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+/* ── Actions, export / import ────────────────────────────────── */
+
+.ap-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.ap-actions .ap-hint { margin-top: 0; }
+
+.ap-io {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+  margin-top: var(--space-5);
+}
+@media (max-width: 940px) {
+  .ap-io { grid-template-columns: minmax(0, 1fr); }
+}
+.ap-io-side { display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-start; }
+.ap-io-side.grow { align-items: stretch; }
+.ap-io-side .ap-hint { margin-top: 0; }
+
+/* The custom theme that is currently loaded: a line of facts, not a panel. */
+.ap-custom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  margin-top: var(--space-1);
+}
+.ap-custom-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.ap-custom-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-custom-tag { font-size: var(--fs-micro); color: var(--text-faint); }
+.ap-custom .btn { margin-left: auto; margin-top: 0; }
+
+.ap-import {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  min-height: 96px;
+}
+/* The red border says "this does not parse". Focus stays the app's one focus
+   treatment on top of it — two overlapping rings would be saying it twice. */
+.ap-import.bad { border-color: var(--red); }
+/* A parse failure has to be separable from the box it is about, so this is a
+   container that earns its existence. */
+.ap-error {
+  color: var(--red);
+  background: var(--red-soft);
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.ap-io-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.ap-io-actions .ap-hint { margin-top: 0; }
+
+@media (max-width: 720px) {
+  .ap-row { flex-direction: column; align-items: stretch; }
+  .ap-accent, .ap-swatches, .ap-accent-foot { align-items: flex-start; justify-content: flex-start; }
+  .ap-now { display: none; }
+}
+
+/* The panel writes its own reduce-motion setting into --dur, so this block is
+   only about animations and transforms that no token can reach. */
+@media (prefers-reduced-motion: reduce) {
+  .ap-seg-thumb, .ap-theme, .ap-theme-check, .ap-swatch, .ap-toggle, .ap-knob, .ap-tag {
+    transition: none;
+  }
+  .ap-theme:hover { transform: none; }
+  .ap-swatch:hover { transform: none; }
+}
+:root[data-reduce-motion] .ap-theme:hover,
+:root[data-reduce-motion] .ap-swatch:hover { transform: none; }

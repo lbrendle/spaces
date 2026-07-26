@@ -1,0 +1,82 @@
+# Public feature inventory
+
+Last audited: 2026-07-26
+
+This is the source-of-truth inventory for the public Spaces distribution.
+“Implemented” means a real code path exists. It does not mean a third-party
+provider has approved your OAuth app, that an upstream API is enabled, or that
+the feature has been exercised against your deployment.
+
+## Release boundary
+
+Included:
+
+- the macOS Tauri desktop source;
+- the Cloudflare/Sites portal and D1 migrations;
+- local SQLite migrations;
+- the Spaces MCP action transport and approval queue;
+- provider OAuth and action implementations;
+- CI, security policy, contribution files, and self-hosting documentation.
+
+Deliberately excluded:
+
+- production D1 data and Sites project identifiers;
+- OAuth client IDs, client secrets, access tokens, and token-encryption keys;
+- Apple signing/notarization credentials;
+- desktop updater signing keys and private download infrastructure;
+- personal account names, workspace IDs, device tokens, pairing codes,
+  transcripts, repositories, and local database files;
+- provider-specific domain-verification files.
+
+## Capability matrix
+
+| Surface | Status in source | Where data lives | Important boundary |
+| --- | --- | --- | --- |
+| Projects, channels, tasks, memory | Implemented | Desktop SQLite; selected shared state in portal D1 when paired | Local-only work does not require the portal. |
+| Project and channel removal | Implemented | Desktop SQLite and portal D1 | Desktop exposes typed-confirmation cleanup. Shared removal is owner/admin-only; project tombstones prevent deleted duplicates from returning on paired devices. Code folders and Git remotes are never deleted. |
+| Human + agent channel chat | Implemented | Desktop SQLite; shared channel data in D1 when paired | Agent responses run on the owning desktop. |
+| Claude Code and Codex agents | Implemented | Local process/session state | Each user authenticates the CLI they run. Spaces stores no Claude/Codex API key. |
+| Model, effort, sandbox and CLI configuration | Implemented | Desktop SQLite; shareable agent profile in D1 | Available options still depend on the installed CLI version. |
+| Live agent process inspection | Implemented | Desktop only | Streams and full transcripts are not mirrored to the portal. |
+| Persistent terminal panes | Implemented | Desktop process state | A terminal survives pane/tab navigation while the desktop process remains open; it is not a cloud shell. |
+| Embedded project browser | Implemented on macOS | Desktop WebView state | It is an embedded webview, not a remote browser and not available in the portal. |
+| Git activity and isolated worktrees | Implemented | Local repository plus `gh` reads | Spaces coordinates Git; it is not a Git object host or GitHub replacement. |
+| Spaces agent MCP tools | Implemented | Generated `.hq/` files plus desktop approval log | Code projects use their checkout. Non-code projects receive a private control directory so tools do not disappear. |
+| Agent social publishing proposal | Implemented | Desktop approval log + Content Studio + portal provider action | `spaces_publish_social` always waits for human approval. Existing agent sessions must restart to discover a newly added tool. |
+| Documents and knowledge | Implemented | Desktop SQLite; explicitly shared pages in D1 | Markdown, versions, links/backlinks, project memory, and read-only vault imports are supported. This is not simultaneous multiplayer text editing. |
+| Obsidian-style vault mounting | Implemented, read-only | Original files stay on disk; index/cache in desktop SQLite | Spaces does not rewrite the mounted vault. |
+| Mail list/send | Implemented for Google and Microsoft | Tokens encrypted in D1; synced rows in desktop SQLite | Provider APIs and scopes must be enabled. Personal mail connections are not workspace-shared by default. |
+| Google/Microsoft calendars | List/create implemented | Tokens encrypted in D1; shared metadata/events in D1 and desktop SQLite | Upstream edit/delete and attendee invitations are not complete. |
+| Apple Calendar | List/create implemented on macOS | Calendar.app plus desktop SQLite/shared command state | Runs through local macOS automation permission; there is no cloud Apple Calendar OAuth path. |
+| Team/shared calendars | Implemented in Spaces | D1 and desktop SQLite | Provider-backed calendars still obey the connected account’s own permissions. |
+| Instagram OAuth | Implemented with Instagram Login | Encrypted token in D1 | Every account must be eligible for the Meta app; development-role and app-review rules are external. Multiple accounts are stored separately. |
+| Instagram image publishing | Implemented | Portal provider action and Content Studio audit row | Requires a public HTTPS image URL and `instagram_business_content_publish`. A connected account alone does not grant a native Claude/Codex connector. |
+| TikTok OAuth | Implemented | Encrypted token in D1 | Sandbox/production target and Content Posting approval are controlled by TikTok. Multiple accounts are stored separately. |
+| TikTok video publishing | Implemented | Portal provider action and Content Studio audit row | Requires a public HTTPS video URL. TikTok may return a processing job rather than a finished post. |
+| X OAuth and text publishing | Implemented, optional | Encrypted token in D1; portal provider action | The provider can be omitted from a deployment by leaving its OAuth configuration unset. |
+| Project-to-social-account links | Implemented | D1 | Publishing enforces project links and the selected/default account, including multiple accounts for one provider. |
+| Content Studio | Implemented | Desktop SQLite plus provider action result | Draft/review/schedule/published workflow exists. It is not a Buffer/Later connector and does not import their queues. |
+| ChatGPT-authenticated portal | Implemented for Sites | Sites request identity + D1 membership | Authentication proves identity; membership/invitation policy grants access. Self-hosters outside Sites must supply an equivalent trusted identity layer. |
+| Invitations, roles, removal | Implemented | D1 | Removing a person also revokes devices and removes or transfers their governed resources. |
+| Desktop pairing | Implemented | Hashed device token in D1; token on that desktop | Pairing codes are short-lived and single-use. |
+| Cross-device/BYO agent jobs | Implemented | Bounded job/result state in D1; execution on host desktop | Repositories and live process streams remain on the host. The requested prompt and sanitized final result cross the control plane. |
+| Desktop auto-update | Not enabled in the public source | N/A | Forks must create their own signing key, updater endpoint, release process, and platform signatures before enabling it. |
+| Windows/Linux desktop | Not release-verified | N/A | Some code is portable, but macOS is the only supported and audited desktop target today. |
+
+## Verification levels
+
+The initial public release gate runs:
+
+- a clean source and history scan;
+- dependency vulnerability and license inventories;
+- desktop TypeScript/Vite build;
+- Rust unit tests;
+- portal production build, tests, TypeScript check, and lint;
+- MCP protocol/tool discovery checks;
+- a fresh public clone repeating the build/test path;
+- GitHub Actions on the public commit.
+
+Provider transactions are a separate gate because they can create external
+side effects. OAuth connection and multi-account selection can be tested
+without publishing. A real Instagram/TikTok post should be performed only from
+an explicitly approved test account and is not implied by a green source build.

@@ -1,0 +1,256 @@
+/* ── Document sharing ────────────────────────────────────────── */
+/*
+ * Imported from DocumentsShare.tsx, whose three controls land in surfaces this
+ * file does not own: a button in the documents toolbar, a badge in a list row,
+ * and the contents of a side panel. So every rule is .ds-scoped, nothing here
+ * redefines .btn, .icon-btn or the panel chrome, and nothing depends on which
+ * stylesheet loaded first.
+ *
+ * The panel is one column between 300 and 720px wide, and its width is the
+ * reader's to drag — which has almost nothing to do with the window's, so
+ * nothing in the panel half of this file is written against a viewport media
+ * query. Rows fold on their own contents instead: a floor on the control that
+ * must stay readable, and a wrap when even that will not fit.
+ *
+ * The openness classes carry all the color. Filled circle, half circle, hollow
+ * circle already say how far a document has travelled from private; the tone
+ * only has to agree with them, never to carry the meaning alone — which is
+ * also why every state has a word next to its glyph, and why the summary line
+ * no longer draws a 3px rule down its left edge in that tone. The glyph is the
+ * glyph; a coloured edge repeating it was the app's loudest tell.
+ */
+
+/* ── openness tones ───────────────────────────────────────────── */
+
+.ds-shut { --ds-tone: var(--text-dim); }
+.ds-some { --ds-tone: var(--yellow); }
+.ds-open { --ds-tone: var(--accent); }
+.ds-shared { --ds-tone: var(--blue); }
+
+.ds-glyph {
+  color: var(--ds-tone, var(--text-dim));
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+
+/* ── the header button ────────────────────────────────────────── */
+
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── the list-row badge ───────────────────────────────────────── */
+
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── the panel ────────────────────────────────────────────────── */
+
+/* The answer to "who can see this?" — first, in words, before any control.
+   The one container in this file: it is a standing statement about the
+   document, and it has to be separable from the controls that change it. */
+.ds-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-6);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.ds-hint {
+  margin: var(--space-5) 0 0;
+  max-width: var(--measure);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.ds-hint-tight {
+  margin-top: var(--space-2);
+  font-size: var(--fs-xs);
+}
+
+/* Why a section's control exists, under its heading. It used to run alongside
+   the heading, which needed a row to itself and a title cell to hang off; in a
+   panel there is no room beside a heading, so the line simply comes next. */
+.ds-note {
+  margin: 0 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.ds-owner {
+  width: 100%;
+}
+
+/* ── the default-access ladder ────────────────────────────────── */
+
+/* Four steps of one dial, one per line. They were four bordered, filled boxes;
+   they are rows, and the selected one takes the app's selected treatment. */
+.ds-tiers {
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-tier {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: var(--space-3);
+  margin: 0 calc(var(--space-3) * -1);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.ds-tier:hover { background: var(--bg-hover); }
+.ds-tier input { width: auto; flex-shrink: 0; margin-top: 2px; }
+.ds-tier.on { background: var(--accent-soft); }
+
+.ds-tier-body {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  min-width: 0;
+}
+.ds-tier-label {
+  flex: 0 0 88px;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+.ds-tier-blurb {
+  flex: 1 1 280px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+/* ── the named few ────────────────────────────────────────────── */
+
+.ds-shares {
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-empty {
+  padding: var(--space-3) 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+/* The access options are whole phrases ("Write — can open and edit it"), so the
+   select gets the room and the name gives way: it ellipsises first, and once
+   even that is not enough the select wraps onto a line of its own. A truncated
+   access level is the one thing on this row that must never happen — it is the
+   word the whole panel is about. */
+.ds-share {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ds-share-glyph {
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+.ds-share-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A share outlives the team or agent it named; say so rather than dropping it
+   silently, because a stale grant is exactly what somebody wants to find. */
+.ds-share-name.gone {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+/* A floor rather than a share of the row: below it the phrase is cut, so the
+   pair wraps onto a line of its own instead. */
+.ds-share-set {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 200px;
+  min-width: 168px;
+}
+
+.ds-share-access {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding: var(--space-1) var(--space-6) var(--space-1) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.ds-share-add {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.ds-share-add select {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+  padding: var(--space-1) var(--space-6) var(--space-1) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.ds-share-why {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+/* ── utility ──────────────────────────────────────────────────── */
+
+/* Visible to a screen reader, invisible on screen, still focusable. */
+.ds-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-tier { transition: none; }
+}

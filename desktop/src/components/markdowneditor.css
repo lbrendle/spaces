@@ -1,0 +1,358 @@
+/* ── Markdown editor ─────────────────────────────────────────────
+ *
+ * Imported from MarkdownEditor.tsx, so it lands wherever the first import of
+ * that component does — nothing here may depend on cascade order against
+ * App.css. Every rule is .mde-scoped and two classes deep where it has to beat
+ * the global `input, textarea` block, which is more specific than a bare
+ * element selector but loses to `.mde .mde-input`.
+ *
+ * THE INVARIANT: the painted layer must wrap exactly where the textarea wraps.
+ * Anything in here that changes how wide a character is breaks the caret.
+ * That is why:
+ *   - the editor is monospaced (every face in a mono family shares one advance,
+ *     so italics and a bold face cost nothing in width);
+ *   - weight is painted with -webkit-text-stroke, which thickens the ink and
+ *     leaves the advance alone even when the text falls back to a font we never
+ *     picked;
+ *   - a scaled heading takes its extra width straight back out again with
+ *     negative tracking — at scale s, (1 - s)/s ch restores the advance
+ *     per character exactly, so an h1 is bigger and still lands on the same
+ *     characters as the caret;
+ *   - line-height is an absolute length, never a multiplier, so a scaled
+ *     heading cannot make its line box taller than the textarea's.
+ *
+ * Colours are theme tokens only. Syntax markers are ghosted rather than
+ * removed: it keeps the width honest, and it is how somebody learns what `**`
+ * does instead of being kept away from it.
+ */
+
+.mde {
+  position: relative;
+  width: 100%;
+  /* One place decides the metrics; both layers read them from here. */
+  --mde-fs: var(--fs);
+  --mde-lh: calc(var(--fs) * 1.65);
+  --mde-pad: var(--space-3);
+  --mde-bold: 0.4px;
+
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+/* The field owns the focus treatment now that the textarea inside it is
+   chromeless; :focus-within is what a wrapper's focus ring is for. */
+.mde:focus-within {
+  border-color: var(--accent);
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+
+/* ── The two layers ─────────────────────────────────────────── */
+
+/* Everything in this block has to be identical on both, or the layer stops
+   agreeing with the caret. Treat it as one declaration in two places. */
+.mde .mde-input,
+.mde .mde-layer {
+  margin: 0;
+  padding: var(--mde-pad);
+  border: 0;
+  font-family: var(--mono);
+  font-size: var(--mde-fs);
+  font-weight: 400;
+  font-style: normal;
+  line-height: var(--mde-lh);
+  letter-spacing: 0;
+  font-variant-numeric: normal;
+  font-variant-ligatures: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-align: start;
+  tab-size: 2;
+}
+
+.mde .mde-input {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  background: none;
+  border-radius: inherit;
+  resize: none;
+  overflow-x: hidden;
+  /* The glyphs are the layer's job; the textarea contributes the caret, the
+     selection and the spellcheck underline, and nothing else. */
+  color: transparent;
+  caret-color: var(--text);
+}
+.mde .mde-input:focus,
+.mde .mde-input:focus-visible {
+  outline: none;
+  border: 0;
+  box-shadow: none;
+}
+/* App.css paints selected text --text. Here that would draw the raw source on
+   top of the rendered layer — the same words twice, half a pixel apart. */
+.mde .mde-input::selection { color: transparent; background: var(--accent-soft-strong); }
+.mde .mde-input::placeholder { color: transparent; }
+
+.mde .mde-layer {
+  position: absolute;
+  /* right:0 only matters for the first paint — the width is measured against
+     the textarea's content box as soon as there is one, because an 11px
+     scrollbar is real layout here, not an overlay. */
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+  border-radius: inherit;
+}
+
+.mde-ln {
+  position: relative;
+  /* An empty source line has no line box of its own; without this the layer
+     would be shorter than the textarea from the first blank line onwards. */
+  min-height: var(--mde-lh);
+}
+
+.mde-ph { color: var(--text-faint); }
+
+/* ── Syntax markers ─────────────────────────────────────────── */
+
+/* Present, quiet, and solid again on the line you are editing — which is the
+   whole of "the raw syntax is revealed where the caret is". */
+.mde-mk { color: var(--text-faint); opacity: 0.4; }
+.mde-on .mde-mk { opacity: 1; color: var(--text-dim); }
+
+/* ── Blocks ─────────────────────────────────────────────────── */
+
+.mde-ln-heading {
+  color: var(--text);
+  -webkit-text-stroke: 0.3px currentColor;
+}
+/* Scale, then hand the width straight back: (1 - s) / s, in the element's own
+   ch. Left as a calc rather than the decimal it works out to — measured, the
+   division is exact to the pixel and the rounded constant is not. Anything
+   else in these two rules moves the caret off the glyphs. */
+.mde-h1 { font-size: calc(var(--mde-fs) * 1.16); letter-spacing: calc(1ch * -0.16 / 1.16); -webkit-text-stroke-width: 0.55px; }
+.mde-h2 { font-size: calc(var(--mde-fs) * 1.08); letter-spacing: calc(1ch * -0.08 / 1.08); -webkit-text-stroke-width: 0.45px; }
+.mde-h3 { -webkit-text-stroke-width: 0.4px; }
+.mde-h4, .mde-h5, .mde-h6 { color: var(--text-dim); -webkit-text-stroke-width: 0.3px; }
+/* Absolutely positioned so the rule cannot add a pixel of height. */
+.mde-h1::after,
+.mde-h2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  height: 1px;
+  background: var(--border-soft);
+}
+
+.mde-inq { color: var(--text-dim); }
+/* In the gutter rather than on top of the `>` it stands for — the character is
+   still there and still has to be readable. */
+.mde-inq::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--mde-qc, 0) * 1ch - 5px);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+
+.mde-ln-rule .mde-src {
+  color: var(--text-faint);
+  /* The characters stay; the line they stand for is drawn behind them. */
+  opacity: 0.5;
+}
+.mde-ln-rule::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--border);
+}
+
+.mde-ln-table .mde-src { color: var(--text-dim); }
+
+/* Fences and their contents read as one slab, which is the only cue that the
+   markdown inside them is not going to be markdown. */
+.mde-ln-fence,
+.mde-ln-code {
+  background: var(--code-bg);
+  box-shadow: -6px 0 0 var(--code-bg), 6px 0 0 var(--code-bg);
+}
+.mde-ln-fence { color: var(--text-faint); }
+.mde-ln-code .mde-src { color: var(--text); }
+
+/* ── Lists ──────────────────────────────────────────────────── */
+
+/* The bullet is drawn in exactly the cell its character occupies, so hiding
+   the character costs no width — and the character comes back on the caret's
+   own line, where somebody might want to change it. */
+.mde-ln-bullet .mde-tok {
+  position: relative;
+  color: transparent;
+}
+.mde-ln-bullet .mde-tok::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.mde-on.mde-ln-bullet .mde-tok { color: var(--text-dim); opacity: 1; }
+.mde-on.mde-ln-bullet .mde-tok::before { content: none; }
+
+/* A checklist item's bullet character stays out of the way entirely: the box
+   is the thing to look at, and the `-` comes back with the rest of the source
+   when the caret arrives. */
+.mde-ln-task .mde-tok { color: transparent; }
+.mde-ln-task .mde-tok::before { content: none; }
+.mde-on.mde-ln-task .mde-tok { color: var(--text-dim); opacity: 1; }
+
+.mde-ln-ordered .mde-tok { color: var(--accent); opacity: 0.85; }
+
+/* Same trick for the checkbox: three cells of source, one real box. */
+.mde-box {
+  position: relative;
+  color: transparent;
+}
+.mde-box::before {
+  content: "";
+  position: absolute;
+  left: 0.85ch;
+  top: 50%;
+  width: 1.15ch;
+  height: 1.15ch;
+  transform: translateY(-50%);
+  border: 1.4px solid var(--text-faint);
+  /* Half the small radius: the box is about 9px across, so the token's own
+     value would round it into a circle — but it still has to follow the
+     sharp/round preference rather than ignore it. */
+  border-radius: calc(var(--radius-sm) / 2);
+}
+.mde-box[data-on="1"]::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* The tick is the box's own second mark, drawn over the fill. */
+.mde-box[data-on="1"]::after {
+  content: "";
+  position: absolute;
+  left: 1.2ch;
+  top: 50%;
+  width: 0.28ch;
+  height: 0.62ch;
+  margin-top: -0.06em;
+  transform: translateY(-50%) rotate(42deg);
+  border: solid var(--accent-fg);
+  border-width: 0 1.6px 1.6px 0;
+}
+.mde-on .mde-box { color: var(--text-dim); opacity: 1; }
+.mde-on .mde-box::before,
+.mde-on .mde-box::after { content: none; }
+
+/* A finished item stops competing for attention, but stays readable. */
+.mde-done { color: var(--text-faint); }
+.mde-done .mde-strong,
+.mde-done .mde-em { color: inherit; }
+
+/* ── Inline ─────────────────────────────────────────────────── */
+
+.mde-strong { -webkit-text-stroke: var(--mde-bold) currentColor; color: var(--text); }
+.mde-em { font-style: italic; }
+.mde-strongem { -webkit-text-stroke: var(--mde-bold) currentColor; font-style: italic; color: var(--text); }
+.mde-strike { text-decoration: line-through; color: var(--text-dim); }
+
+.mde-code {
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.mde-hl {
+  background: var(--yellow-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.mde-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.mde-url { color: var(--blue); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The three forms that become real edges when the text is saved, coloured the
+   way the entity kinds are coloured everywhere else in the app. */
+.mde-wiki { color: var(--purple); -webkit-text-stroke: 0.2px currentColor; }
+.mde-at { color: var(--orange); -webkit-text-stroke: 0.2px currentColor; }
+.mde-hash { color: var(--blue); }
+
+/* ── Autocomplete ───────────────────────────────────────────── */
+
+/* Level 3 on the elevation ladder: this genuinely floats above the field, so
+   it gets the overlay surface, the border and the shadow that go with it. */
+.mde-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  min-width: min(360px, 100%);
+  max-width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-1);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  animation: mde-pop-in var(--dur-fast) var(--ease);
+}
+
+@keyframes mde-pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.mde-opt {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.mde-opt-on { background: var(--bg-active); }
+
+.mde-opt-glyph { flex-shrink: 0; font-size: var(--fs-xs); }
+.mde-opt-title {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mde-opt-detail {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Reduced motion ─────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .mde-pop { animation: none; }
+}
+[data-reduce-motion] .mde-pop { animation: none; }

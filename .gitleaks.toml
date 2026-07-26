@@ -1,0 +1,13 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated dependency and build directories are not source inputs."
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)target/''',
+  '''(^|/)dist/''',
+  '''(^|/)\.next/''',
+  '''(^|/)\.vinext/''',
+  '''(^|/)\.wrangler/''',
+]

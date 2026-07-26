@@ -1,0 +1,589 @@
+/* ── Calendar settings ───────────────────────────────────────── */
+/*
+ * Imported from CalendarSettings.tsx, which the settings pane renders inside
+ * .dash-body — so this file may lean on .dash-card, .btn and .icon-btn from
+ * App.css but must not redefine them, and must not depend on load order
+ * against any sibling panel. Every rule below is .cs-scoped for that reason,
+ * and settings.css deboxes the two .cs-card sections along with the rest of
+ * the page.
+ *
+ * Focus is App.css's. The three rings this file drew — one of them a four-layer
+ * accent-and-glow stack on a colour swatch — are gone, and the swatch says
+ * "picked" the way every other swatch in the app does: by moving the border it
+ * already has to --text.
+ *
+ * Colors are theme tokens only. The one literal color in the whole panel is
+ * the one a user picked with the custom swatch, and that arrives as inline
+ * style from the row's own data.
+ */
+
+.cs-card > h3 { flex-wrap: wrap; }
+
+.cs-count {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+  line-height: 1.6;
+}
+
+.cs-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.cs-btn-sm {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.cs-hint {
+  margin: 0;
+  max-width: var(--measure);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.cs-hint-warn { color: var(--text-dim); margin-top: var(--space-3); }
+.cs-hint-warn::before {
+  content: "△";
+  color: var(--yellow);
+  margin-right: var(--space-2);
+}
+.cs-hint-tight { margin-top: var(--space-2); font-size: var(--fs-xs); }
+
+.cs-empty {
+  margin-top: var(--space-5);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.cs-empty-inline {
+  margin-top: var(--space-3);
+}
+
+/* ── accounts ─────────────────────────────────────────────────── */
+
+.cs-connect {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+.cs-connect-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+
+.cs-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+/* The "nothing paired" explanation — deliberately prose, not a disabled
+   button, and now prose in every sense: it was a filled box with a 3px rule
+   down its left edge. */
+.cs-note {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.cs-note-title {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+.cs-note p {
+  margin: var(--space-2) 0 0;
+  max-width: var(--measure);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+/* ── connected accounts ───────────────────────────────────────── */
+
+.cs-accounts {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-5);
+}
+.cs-acct {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.cs-acct-mark {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+}
+.cs-acct-id { flex: 1; min-width: 0; }
+.cs-acct-name {
+  font-size: var(--fs);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-acct-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.cs-dot { color: var(--text-faint); }
+.cs-acct-error {
+  margin-top: var(--space-1);
+  color: var(--red);
+  font-size: var(--fs-xs);
+  font-family: var(--mono);
+  word-break: break-word;
+}
+.cs-acct-sync {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.cs-pill {
+  padding: 1px var(--space-3);
+  border-radius: 999px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cs-pill-ok { color: var(--green); background: var(--green-soft); }
+.cs-pill-warn { color: var(--yellow); background: var(--yellow-soft); }
+.cs-pill-bad { color: var(--red); background: var(--red-soft); }
+
+/* ── new calendar form ────────────────────────────────────────── */
+
+/* A form that appears in the middle of a list, ruled off from it. It was a
+   filled, accent-bordered panel, which made a two-field text form read as the
+   loudest thing on the settings page. */
+.cs-new {
+  margin: var(--space-5) 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.cs-new-fields {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+.cs-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.cs-field-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+.cs-new .cs-hint { margin-top: var(--space-3); }
+.cs-new-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+/* ── calendar rows ────────────────────────────────────────────── */
+
+/* One calendar per row, ruled off. They were bordered, filled cards that grew
+   an accent edge when opened; the open one takes the app's selected fill. */
+.cs-cals {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-5);
+}
+
+.cs-cal {
+  border-top: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.cs-cal.open {
+  background: var(--accent-soft);
+}
+
+.cs-cal-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-height: 36px;
+}
+
+/* The dot is the calendar's colour, so "picked" cannot be carried by fill or
+   by an accent edge: it moves the border the dot already has to --text. */
+.cs-cal-dot {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.cs-cal-dot:hover { transform: scale(1.18); }
+
+/* Reads as a label until you touch it — a row of framed inputs would make the
+   list look like a form when it is mostly something to scan. */
+.cs-cal-name {
+  flex: 1 1 120px;
+  min-width: 90px;
+  width: auto;
+  padding: var(--space-1) var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+.cs-cal-name:hover { background: var(--bg-hover); }
+.cs-cal-name:focus {
+  background: var(--bg-input);
+  border-color: var(--accent);
+}
+
+/* Owner and the sharing summary are fixed columns: a row of controls that
+   re-flows per calendar is unreadable to scan down. */
+.cs-cal-owner {
+  width: 178px;
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-6) var(--space-1) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  border-color: transparent;
+  background-color: transparent;
+}
+.cs-cal-owner:hover { background-color: var(--bg-hover); }
+
+.cs-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cs-disclose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 190px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.cs-disclose:hover { background: var(--bg-hover); color: var(--text); }
+.cs-disclose-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-caret {
+  font-size: var(--fs-micro);
+  transition: transform var(--dur) var(--ease);
+}
+.cs-cal.open .cs-caret { transform: rotate(180deg); }
+
+.cs-del { flex-shrink: 0; }
+.cs-del:hover { color: var(--red); background: var(--red-soft); }
+
+/* ── expanded body ────────────────────────────────────────────── */
+
+.cs-cal-body {
+  padding: var(--space-3) var(--space-5) var(--space-5);
+}
+
+.cs-owner-line {
+  margin: var(--space-3) 0 0;
+  max-width: var(--measure);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.cs-owner-line strong { color: var(--text); font-weight: 650; }
+
+.cs-block { margin-top: var(--space-6); }
+.cs-block-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.cs-block-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+.cs-block-hint {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.cs-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.cs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 30px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  width: fit-content;
+}
+.cs-toggle:hover { color: var(--text); }
+.cs-toggle input { width: auto; flex-shrink: 0; }
+.cs-toggle-static {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  line-height: 1.55;
+}
+
+/* ── color palette ────────────────────────────────────────────── */
+
+.cs-colors {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cs-swatch {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+  border-radius: 50%;
+}
+.cs-swatch-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--border-soft);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--text-dim);
+  transition: transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.cs-swatch:hover .cs-swatch-dot { transform: scale(1.12); }
+/* Same as every other swatch in the app: the border it already has goes to
+   --text. It used to be a four-layer accent-and-glow box-shadow stack. */
+.cs-swatch input:checked + .cs-swatch-dot,
+.cs-swatch-custom.on .cs-swatch-dot {
+  border-color: var(--text);
+}
+/* The radio is visually hidden under its dot, so the app's one ring has to be
+   drawn on the dot. Same width, same colour, same offset. */
+.cs-swatch input:focus-visible + .cs-swatch-dot {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+/* "Whatever the theme picks", and "any colour you like": both are the absence
+   of a chosen hue, and both say so the way the accent picker does — dashed. */
+.cs-swatch-dot.cs-swatch-auto,
+.cs-swatch-custom .cs-swatch-dot {
+  background: var(--bg-input);
+  border-style: dashed;
+  border-color: var(--border-strong);
+}
+.cs-swatch-custom.on .cs-swatch-dot {
+  border-style: solid;
+}
+/* The picker itself covers its swatch so the whole dot is the hit target,
+   while staying a real focusable input for the keyboard. */
+.cs-color-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ── visibility tiers ─────────────────────────────────────────── */
+
+/* One per line, in ladder order: these are four steps of the same dial, and a
+   grid of cards invites reading them as unrelated options. They were four
+   bordered boxes, one of which also carried a 3px accent rule down its left
+   edge to say "read this one" — which the blurb says in words. */
+.cs-tiers {
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-tier {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: var(--space-3);
+  margin: 0 calc(var(--space-3) * -1);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.cs-tier:hover { background: var(--bg-hover); }
+.cs-tier input { width: auto; flex-shrink: 0; margin-top: 2px; }
+.cs-tier.on { background: var(--accent-soft); }
+
+.cs-tier-body {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px var(--space-3);
+  min-width: 0;
+}
+.cs-tier-label {
+  flex: 0 0 96px;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text);
+}
+.cs-tier-blurb {
+  flex: 1 1 280px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+/* ── shares ───────────────────────────────────────────────────── */
+
+.cs-shares {
+  display: flex;
+  flex-direction: column;
+}
+
+.cs-share {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.cs-share-glyph {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+}
+.cs-share-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-share-name.gone {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+.cs-share-access {
+  width: auto;
+  max-width: 230px;
+  padding: var(--space-1) var(--space-6) var(--space-1) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.cs-share-add select {
+  width: auto;
+  min-width: 180px;
+  padding: var(--space-1) var(--space-6) var(--space-1) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+/* ── utility ──────────────────────────────────────────────────── */
+
+/* Visible to a screen reader, invisible on screen, still focusable. */
+.cs-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Narrow: the controls wrap under the name, but the name keeps the swatch —
+   a colored dot alone on its own line names nothing. */
+@media (max-width: 860px) {
+  .cs-cal-head { flex-wrap: wrap; }
+  .cs-cal-name { flex: 1 1 60%; }
+  .cs-cal-owner,
+  .cs-disclose { width: auto; }
+  .cs-acct-sync { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-cal,
+  .cs-cal-dot,
+  .cs-caret,
+  .cs-disclose,
+  .cs-swatch-dot,
+  .cs-tier,
+  .cs-toggle {
+    transition: none;
+  }
+  .cs-cal-dot:hover,
+  .cs-swatch:hover .cs-swatch-dot { transform: none; }
+}

@@ -1,0 +1,158 @@
+/* ── New project modal: git setup ────────────────────────────── */
+/*
+ * Imported from Sidebar.tsx, which App.tsx pulls in BEFORE "./App.css" —
+ * so anything that overrides a shared primitive (.chip, .banner, .field)
+ * carries its np-* class in the selector and wins on specificity rather
+ * than on stylesheet order. Focus is the exception: App.css draws it once,
+ * and the two bare 2px --accent box-shadows this file used to paint on a
+ * checkbox and a link are gone.
+ *
+ * Colors are tokens only; every tint comes from a *-soft / *-border pair
+ * so the light themes read as light.
+ */
+
+/* inline status for the chosen local path */
+.np-probe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.np-probe.bad { color: var(--red); }
+.np-probe .spinner { width: 11px; height: 11px; }
+
+.np-probe .chip.np-chip {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.np-probe .chip.np-chip.ok {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: var(--green-border);
+}
+.np-probe .chip.np-chip.warn {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: var(--yellow-border);
+}
+
+.np-note {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  flex-basis: 100%;
+}
+.np-note.mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}
+
+/* "this folder isn't a git repository" */
+.banner.warn.np-setup {
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.np-setup-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--yellow);
+  font-weight: 650;
+}
+.np-setup-title svg { flex-shrink: 0; }
+
+/* checkbox + help text, used by both the init and the GitHub options */
+.np-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  min-height: 30px;
+  cursor: pointer;
+  user-select: none;
+}
+.np-check input {
+  width: auto;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.np-check strong {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  font-weight: 650;
+  font-size: var(--fs-sm);
+}
+
+.np-help {
+  display: block;
+  margin-top: var(--space-1);
+  max-width: 58ch;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+.np-help code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--inline-code-bg);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  word-break: break-word;
+}
+
+/* The GitHub option is the one action here that leaves this machine, so it is
+   genuinely separate from the git block above it — a rule and its own space
+   say that as clearly as a filled box did. */
+.np-check.np-gh {
+  margin: var(--space-5) 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* isolate checkbox when there's no repo to make worktrees in */
+.field.checkbox-field.np-isolate.off { opacity: 0.5; cursor: default; }
+.field.checkbox-field.np-isolate.off input { cursor: default; }
+
+/* What happened, once Create has run. An outcome has to be findable after the
+   click that made it, so this one keeps its fill. */
+.np-result {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  word-break: break-word;
+}
+.np-result svg { flex-shrink: 0; margin-top: 2px; }
+.np-result.ok {
+  color: var(--text-dim);
+  background: var(--green-soft);
+  border: 1px solid var(--green-border);
+}
+.np-result.ok svg { color: var(--green); }
+.np-result.bad {
+  color: var(--red);
+  background: var(--red-soft);
+  border: 1px solid var(--red-border);
+}
+.np-result a {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}

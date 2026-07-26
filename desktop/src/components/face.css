@@ -1,0 +1,284 @@
+/* ═══════════════════════════════════════════════════════════
+   Faces — the tile, the badge, the drop target and the picker.
+
+   Every dimension here derives from --face-size, which Face.tsx sets
+   inline from the size prop. That is the whole trick behind "crisp at
+   16 and at 64": one geometry, scaled, with only the type size and the
+   mark size hand-set per step (the table lives in Face.tsx, where you
+   can see all six at once).
+
+   Colour is the theme's and only the theme's — the tile background is
+   an --avatar-N token passed in as an inline style, and the foreground
+   is --avatar-fg, which every theme derives to be readable on its own
+   ramp. Nothing in this file may name a colour.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── the tile ─────────────────────────────────────────────────── */
+
+.face {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--face-size, 24px);
+  height: var(--face-size, 24px);
+  color: var(--avatar-fg);
+  /* A face's corner is a property of the face, not of the app's container
+     radius: --radius-* is a card's language, and 6px on a 64px tile would
+     read as a slightly-rounded rectangle rather than as somebody. Derived
+     from the size so the family holds at every step. */
+  border-radius: calc(var(--face-size, 24px) * 0.28);
+  user-select: none;
+  /* A face is often the drag handle for its own row; the picture inside must
+     never start an image drag of its own. */
+  -webkit-user-drag: none;
+}
+
+/* A person is a circle, everything that is not a person is a squircle. It is
+   the cheapest possible way to tell a human from a runtime in a mixed roster,
+   and it survives being 16 pixels wide. */
+.face-round {
+  border-radius: 50%;
+}
+
+.face-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  -webkit-user-drag: none;
+}
+
+.face-initials {
+  font-size: var(--face-font, 11.5px);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  /* Exact vertical centring: the tile is a fixed square, so any leading at all
+     pushes the cap height off centre and the smaller sizes look dropped. */
+  line-height: 1;
+  font-variant-numeric: normal;
+}
+
+.face-mark {
+  display: block;
+}
+
+/* A row whose target is gone. Neutral rather than absent — a link outlives the
+   thing it points at, and a face that simply vanished would lose the fact that
+   somebody used to be there. */
+.face-gone {
+  color: var(--text-faint);
+}
+
+/* ── the badge ────────────────────────────────────────────────── */
+
+/* One position for every badge, always. It overhangs the tile's corner rather
+   than sitting inside it, so it never eats the picture. */
+.face-badge {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  transform: translate(28%, 28%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--face-badge, 12px);
+  height: var(--face-badge, 12px);
+  border-radius: 50%;
+  /* An opaque surface plus a hairline, not a cut-out in the parent's
+     background: badged faces land on --bg, --surface-1, --surface-2 and
+     --bg-overlay alike, and only a token that is a surface in its own right
+     reads correctly on all four. */
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  box-shadow: var(--shadow-sm);
+}
+
+.face-round .face-badge {
+  /* A circle's corner is further in, so the same overhang would float. */
+  transform: translate(10%, 10%);
+}
+
+/* Availability. The one place a face is allowed a semantic colour, because
+   "can this run" is status and status is what colour is for. */
+.face-status {
+  width: 46%;
+  height: 46%;
+  border-radius: 50%;
+}
+.face-badge-ready .face-status {
+  background: var(--green);
+}
+/* Unavailable is a hollow ring, so the difference survives a monochrome
+   screenshot and does not rest on green-versus-grey alone. */
+.face-badge-no-host .face-status,
+.face-badge-no-cli .face-status {
+  border: 1.5px solid var(--text-faint);
+}
+
+/* ── drop targets ─────────────────────────────────────────────── */
+
+/* Deliberately the same outline the focus ring uses, because it means the same
+   thing: this element is the one that will receive whatever happens next. A
+   drag and a keyboard focus never coexist, so the two cannot be confused. */
+.face-target-on {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+
+/* ── the picker ───────────────────────────────────────────────── */
+
+.face-lead {
+  margin: 0 0 var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  max-width: var(--measure);
+}
+
+/* This container earns its border: it is a drop target, and a drop target that
+   does not show where to aim is not one. */
+.face-drop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  transition: var(--t-color);
+}
+.face-drop-on {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--accent-soft);
+}
+.face-drop[aria-busy="true"] {
+  /* Working, not disabled: the picture already dropped is being resized. */
+  opacity: 0.7;
+}
+
+.face-drop-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.face-drop-text strong {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+}
+.face-drop-text span {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.face-error {
+  margin: var(--space-3) 0 0;
+  color: var(--red);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.face-block {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.face-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  max-width: var(--measure);
+}
+
+/* The same picture at the sizes it will actually be drawn at. A crop that
+   works at 48 and turns to mush at 16 is the single most common way an avatar
+   goes wrong, and it is invisible until you look. */
+.face-scale {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+.face-scale-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.face-scale-px {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.face-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.face-swatch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: var(--t-color), var(--t-press);
+}
+.face-swatch:active {
+  transform: var(--press);
+}
+.face-swatch-on {
+  border-color: var(--text);
+}
+.face-swatch-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-soft);
+}
+/* "Automatic" paints the colour it would pick, so it needs a mark of its own or
+   it reads as simply choosing that colour. */
+.face-swatch-auto {
+  position: relative;
+  font-size: var(--fs-micro);
+  font-weight: 800;
+  color: var(--avatar-fg);
+  pointer-events: none;
+}
+/* The native radio is the control; it is hidden, so its ring has to land on
+   the swatch the user can actually see. */
+.face-swatch:has(:focus-visible) {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+.face-colours:disabled .face-swatch {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* ── screen-reader only ───────────────────────────────────────── */
+
+.face-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

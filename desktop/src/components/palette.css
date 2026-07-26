@@ -1,0 +1,613 @@
+/* ── Command palette (Cmd+K) ─────────────────────────────── */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 14vh var(--space-5) var(--space-5);
+  animation: palette-fade var(--dur-fast) var(--ease);
+}
+
+.palette {
+  position: relative;
+  width: 580px;
+  max-width: 92vw;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: palette-in var(--dur) var(--ease);
+}
+
+@keyframes palette-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes palette-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── Search row ──────────────────────────────────────────── */
+/* Works with a plain <input> child, or with an optional
+   .palette-search wrapper when the markup provides one. */
+
+.palette-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+/* lens */
+.palette-search::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 21px;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* handle */
+.palette-search::after {
+  content: "";
+  position: absolute;
+  left: 30px;
+  top: 31px;
+  width: 6px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--text-faint);
+  transform: rotate(45deg);
+  transform-origin: left center;
+  pointer-events: none;
+}
+/* fallback glyph when there is no wrapper element (single-element magnifier) */
+.palette:not(:has(.palette-search))::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 21px;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50% 50% 2px 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.palette-input {
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: none;
+  font-size: var(--fs-md);
+  padding: var(--space-5) var(--space-5) var(--space-5) 44px;
+  flex-shrink: 0;
+}
+.palette-input::placeholder { color: var(--text-faint); }
+.palette-input:focus {
+  border-color: var(--border-soft);
+  box-shadow: none;
+}
+
+/* ── Results ─────────────────────────────────────────────── */
+
+.palette-list {
+  overflow-y: auto;
+  max-height: min(52vh, 420px);
+  padding: var(--space-2);
+  scroll-padding: var(--space-2);
+}
+
+.palette-group {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+  padding: var(--space-4) var(--space-3) var(--space-1);
+}
+
+.palette-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+.palette-row:hover { background: var(--bg-hover); }
+/* Selected is the fill and nothing else. There was a 3px accent bar inside the
+   left edge as well, which is the app's single loudest tell repeated per row. */
+.palette-row.selected { background: var(--accent-soft); }
+
+/* A glyph, not a tile. It used to be a bordered --bg-inset well 26px square
+   drawn around a single character, inside a panel that is itself a box — and
+   then a second, accent-tinted version of that well for the selected row. The
+   character is the icon; the column it sits in is the alignment. */
+.palette-icon {
+  width: 26px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  transition: color var(--dur-fast) var(--ease);
+}
+.palette-icon.hash { font-weight: 700; }
+.palette-row.selected .palette-icon { color: var(--text); }
+/* Except when the glyph is not a glyph. A theme row paints itself: the element
+   carries that theme's own background and border inline and an accent dot
+   inside it, so it is a swatch — data, not decoration — and it keeps the square
+   the plain glyphs gave up. */
+.palette-icon.theme-swatch {
+  height: 26px;
+  border-width: 1px;
+  border-style: solid;
+}
+.palette-row .avatar {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  border-radius: 8px;
+}
+
+.palette-label {
+  font-size: var(--fs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-sub {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-unread {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+}
+
+.palette-list .nav-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+/* ── Footer hint ─────────────────────────────────────────── */
+/* Rendered from markup when a .palette-foot element exists, and
+   generated otherwise so the hint is always present. */
+
+.palette-foot,
+.palette:not(:has(.palette-foot))::after {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.palette:not(:has(.palette-foot))::after {
+  content: "↑↓ navigate · ↵ open · esc close";
+}
+
+.palette-kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-backdrop,
+  .palette { animation: none; }
+  .palette-row,
+  .palette-icon { transition: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Palette.tsx — the universal palette.
+
+   Namespaced under .pal so it can share this file with the
+   older .palette-* rules above, which preview.tsx still uses.
+   The backdrop keeps BOTH class names on purpose: Inspector.tsx
+   looks for `.palette-backdrop` to decide that Escape belongs to
+   whatever is stacked above the drawer.
+   ═══════════════════════════════════════════════════════════ */
+
+.pal-backdrop {
+  padding: 12vh var(--space-5) var(--space-5);
+  align-items: flex-start;
+}
+
+.pal {
+  position: relative;
+  width: 640px;
+  max-width: 94vw;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  animation: pal-in var(--dur) var(--ease);
+}
+
+@keyframes pal-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── search row ──────────────────────────────────────────── */
+
+.pal-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: 0 var(--space-4) 0 42px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* A magnifier drawn rather than shipped: one element, two pseudos, no asset. */
+.pal-lens {
+  position: absolute;
+  left: 17px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -7px;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.pal-lens::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 10px;
+  width: 6px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--text-faint);
+  transform: rotate(45deg);
+  transform-origin: left center;
+}
+
+.pal-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-size: var(--fs-md);
+  padding: var(--space-5) 0;
+}
+.pal-input::placeholder { color: var(--text-faint); }
+.pal-input:focus,
+.pal-input:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
+}
+.pal-input:disabled { opacity: 0.6; }
+
+/* The mode chip, and the breadcrumb for a sub-step. */
+.pal-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft-strong);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.pal-crumb-glyph { font-weight: 400; }
+.pal-crumb-clear { cursor: pointer; }
+.pal-crumb-clear:hover { background: var(--accent-soft); }
+
+/* ── results ─────────────────────────────────────────────── */
+
+.pal-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  max-height: min(58vh, 460px);
+  padding: var(--space-2);
+  scroll-padding: var(--space-6) var(--space-2) var(--space-2);
+}
+
+.pal-head-row {
+  position: sticky;
+  top: calc(var(--space-2) * -1); /* cancels .pal-body's padding so nothing peeks above the header */
+  z-index: 1;
+  margin: 0 calc(var(--space-2) * -1);
+  padding: var(--space-3) var(--space-5) var(--space-1);
+  background: var(--bg-overlay);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+
+.pal-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+.pal-row:hover { background: var(--bg-hover); }
+.pal-row.on { background: var(--accent-soft); }
+
+/* Same subtraction as .palette-icon above: the glyph is the icon. */
+.pal-glyph {
+  width: 24px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+.pal-row.on .pal-glyph { color: var(--text); }
+
+/* Theme rows preview themselves: the inline background and border are that
+   theme's own colours and the dot is its accent, so this one is a swatch and
+   keeps the square the plain .pal-glyph gave up. */
+.pal-swatch {
+  position: relative;
+  height: 24px;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.pal-swatch i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.pal-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+.pal-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pal-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+/* <mark> arrives with a browser-yellow background; the theme owns this. */
+.pal-hit {
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+.pal-row.on .pal-hit { color: var(--accent); }
+
+.pal-context {
+  flex-shrink: 0;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.pal-badge {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+}
+
+.pal-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* ── prefix hints ────────────────────────────────────────── */
+
+.pal-prefixes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 2px;
+  flex-shrink: 0;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+.pal-prefix {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+.pal-prefix:hover { background: var(--bg-hover); color: var(--text); }
+.pal-prefix-label { flex-shrink: 0; }
+.pal-prefix-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── sub-step: a name, and where it goes ─────────────────── */
+
+.pal-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+.pal-help {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.pal-scope {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.pal-scope > span {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+
+/* ── cheat sheet ─────────────────────────────────────────── */
+
+.pal-key-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-sm);
+}
+.pal-key-row:hover { background: var(--bg-hover); }
+.pal-keys {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  width: 132px;
+  justify-content: flex-end;
+}
+.pal-key-what {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.pal-kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+
+/* ── footer ──────────────────────────────────────────────── */
+
+.pal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.pal-foot-keys {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.pal-foot-keys .pal-kbd { margin-left: var(--space-2); }
+.pal-foot-keys .pal-kbd:first-child { margin-left: 0; }
+.pal-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+.pal-foot-link:hover { color: var(--text-dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pal { animation: none; }
+  .pal-row,
+  .pal-prefix { transition: none; }
+}

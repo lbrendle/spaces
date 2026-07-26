@@ -1,0 +1,749 @@
+/* ── Run diff / review modal ─────────────────────────────────── */
+/*
+ * rundiff.css is imported from RunDiff.tsx. Not one literal color lives here:
+ * every value is a theme token, so all light and dark themes stay coherent.
+ * Syntax spans (.tk-*) are styled once in App.css and inherited here.
+ *
+ * Overrides of shared primitives (.modal-wide, .btn) always carry an rd- class
+ * in the selector, so they win on specificity rather than on import order.
+ *
+ * Keyboard focus is App.css's single outline, inherited — this sheet declares
+ * only the offset flip on rows that are clipped by their scroller.
+ *
+ * Colour here means added and removed and nothing else, and it is carried by
+ * background and text (--diff-add-bg/-fg, --diff-del-bg/-fg) — never by a
+ * shadow and never by an edge. The 2px accent stripes that used to mark the
+ * open file and the focused hunk are gone: both are now the app's one
+ * selected treatment, a fill, which is what everything else in Spaces uses.
+ */
+
+/* A review surface needs room for a file list *and* two columns of code, but
+   it must still fit a laptop screen. Scoped with :has() so it only applies to
+   this modal's content. */
+.modal-wide:has(.rd-root) {
+  width: min(1240px, calc(100vw - 40px));
+}
+
+.rd-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ── summary header ──────────────────────────────────────────── */
+
+.rd-shas {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+/* Two hashes and an arrow. They were two filled tiles, which is a lot of
+   furniture for eight characters of monospace. */
+.rd-sha {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.rd-arrow {
+  color: var(--text-faint);
+}
+.rd-none {
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: var(--fs-xs);
+}
+
+.rd-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-faint);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rd-copy:hover,
+.rd-copy:focus-visible {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* ── toolbar ─────────────────────────────────────────────────── */
+
+.rd-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The track is the control: one fill, no hairline around the fill. */
+.rd-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.rd-segbtn {
+  min-height: 24px;
+  padding: 0 var(--space-3);
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rd-segbtn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.rd-segbtn.on {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.rd-toggle {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rd-toggle:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+.rd-toggle.on {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.rd-keys {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.rd-keys kbd {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  background: var(--bg-active);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+
+/* ── panes ───────────────────────────────────────────────────── */
+
+.rd-panes {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .rd-panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rd-pane {
+  min-width: 0;
+}
+.rd-pane-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.rd-pane-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+/* ── file list ───────────────────────────────────────────────── */
+
+/* A well you look into. The recessed fill is what says it clips; the outline
+   around the fill said it a second time. */
+.rd-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2);
+  max-height: 58vh;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+/* directory headers group the list into a shallow tree without indentation
+   games that would eat the width the paths need */
+.rd-dir {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rd-files > .rd-dir:first-child {
+  padding-top: var(--space-1);
+}
+
+.rd-file {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  transition: var(--t-color);
+}
+button.rd-file {
+  cursor: pointer;
+}
+button.rd-file:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+/* The list is a clipping scroller, so the ring sits just inside the row edge. */
+button.rd-file:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+  color: var(--text);
+}
+/* The file you are reading. */
+.rd-file.is-active {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+/* a path the run recorded but the diff doesn't cover — real, just not jumpable */
+.rd-file-flat {
+  opacity: 0.6;
+}
+
+.rd-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rd-file-tag {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.rd-file-counts {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+}
+.rd-add {
+  color: var(--diff-add-fg);
+}
+.rd-del {
+  color: var(--diff-del-fg);
+}
+/* a file that only moved (rename, mode change) shouldn't shout in green/red */
+.rd-zero {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+/* ── diff surface ────────────────────────────────────────────── */
+
+.rd-diff {
+  max-height: 58vh;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+/* ── file block ──────────────────────────────────────────────── */
+
+.rd-fileblock {
+  border-bottom: 1px solid var(--border-soft);
+}
+.rd-fileblock:last-child {
+  border-bottom: 0;
+}
+
+/* sticks to the top of the scroller so you always know which file you're in */
+.rd-fhead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.rd-fold {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  color: var(--text);
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.rd-caret {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.rd-caret.closed {
+  transform: rotate(-90deg);
+}
+.rd-fpath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+}
+.rd-fdir {
+  color: var(--text-faint);
+}
+.rd-fbase {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* What happened to the file, as a word. ADDED in green next to a filename is
+   not ambiguous enough to need a tile drawn round it. */
+.rd-badge {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+.rd-badge.added {
+  color: var(--green);
+}
+.rd-badge.deleted {
+  color: var(--red);
+}
+.rd-badge.renamed,
+.rd-badge.binary {
+  color: var(--yellow);
+}
+
+/* small, quiet destructive controls — the loud one is in the action bar */
+.rd-mini {
+  flex: none;
+  min-height: 24px;
+  padding: 0 var(--space-3);
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rd-mini:hover:not(:disabled) {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.rd-mini:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rd-fbody {
+  --rd-num: 4ch;
+}
+
+.rd-fnote {
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+.rd-fnote.warn {
+  color: var(--yellow);
+}
+.rd-mono {
+  font-family: var(--mono);
+  font-style: normal;
+}
+
+/* ── hunks ───────────────────────────────────────────────────── */
+
+/*
+ * One grid per hunk rather than per file: hunks need to be real boxes so
+ * keyboard navigation can scroll to them. The gutter width is fixed per file
+ * (--rd-num, sized from its highest line number), so columns still line up
+ * across every hunk in the file.
+ */
+.rd-hunk {
+  display: grid;
+  grid-template-columns: var(--rd-num) var(--rd-num) minmax(0, 1fr);
+  align-items: stretch;
+  scroll-margin-top: 34px; /* clears the sticky file header */
+}
+/* the extra 7px pays for the seam border and its padding */
+.rd-hunk.split {
+  grid-template-columns:
+    var(--rd-num) minmax(0, 1fr)
+    calc(var(--rd-num) + 7px) minmax(0, 1fr);
+}
+/* Where the hunk keyboard navigation is. The app's one selected treatment:
+   a fill on the header, and nothing else. */
+.rd-hunk.is-active .rd-hhead {
+  background: var(--accent-soft);
+}
+
+.rd-hhead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-4);
+  color: var(--text-dim);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-micro);
+}
+.rd-hrange {
+  color: var(--accent);
+  font-weight: 700;
+}
+.rd-hsection {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+.rd-hcounts {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.rd-hnote {
+  padding: var(--space-1) var(--space-4) var(--space-1)
+    calc(var(--rd-num) * 2 + var(--space-4));
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-style: italic;
+}
+
+/* a stretch of the file the diff never touched */
+.rd-gapline {
+  padding: 0;
+  color: var(--text-faint);
+  background: var(--bg-inset);
+  font-size: var(--fs-micro);
+  text-align: center;
+}
+.rd-gapbtn {
+  width: 100%;
+  padding: var(--space-1) var(--space-4);
+  color: var(--text-faint);
+  background: none;
+  border: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.rd-gapbtn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.rd-gapbtn:disabled {
+  cursor: default;
+}
+/* full-bleed inside the diff scroller: the ring has no room outside the row */
+.rd-gapbtn:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+.rd-gaperr {
+  display: block;
+  padding: var(--space-1) var(--space-4);
+  color: var(--yellow);
+}
+
+.rd-expand {
+  width: 100%;
+  padding: var(--space-1) var(--space-4);
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.rd-expand:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.rd-expand:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+/* ── lines ───────────────────────────────────────────────────── */
+
+.rd-num {
+  padding: 0 var(--space-2) 0 0;
+  color: var(--text-faint);
+  text-align: right;
+  opacity: 0.7;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.rd-num.add {
+  background: var(--diff-add-bg);
+  opacity: 0.85;
+}
+.rd-num.del {
+  background: var(--diff-del-bg);
+  opacity: 0.85;
+}
+.rd-num.none {
+  background: var(--bg-inset);
+}
+/* the seam between the two halves of the side-by-side view */
+.rd-num.rd-edge {
+  border-left: 1px solid var(--border-soft);
+  padding-left: var(--space-2);
+}
+
+.rd-cell {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) 0 var(--space-1);
+  color: var(--text-dim);
+}
+.rd-code {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rd-cell.add {
+  color: var(--text);
+  background: var(--diff-add-bg);
+}
+.rd-cell.del {
+  color: var(--text);
+  background: var(--diff-del-bg);
+}
+/* the empty half of a side-by-side row: present, but clearly not a line */
+.rd-blank {
+  background: var(--bg-inset);
+}
+
+/* the +/− sign carries the meaning when color can't (colorblindness, print) */
+.rd-mark {
+  flex: none;
+  width: 1ch;
+  color: var(--text-faint);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.rd-cell.add .rd-mark {
+  color: var(--diff-add-fg);
+}
+.rd-cell.del .rd-mark {
+  color: var(--diff-del-fg);
+}
+
+/* intra-line word marks: the row tint says "this line changed", this says
+   *what* changed. Both tints are alpha, so they compose into something
+   stronger without a second colour token. The rule under the wash is what
+   survives the palettes whose green and red are pale, and it is an underline —
+   drawn as one, rather than as a border pretending to be one. */
+.rd-cell.add .rd-w,
+.rd-cell.del .rd-w {
+  border-radius: 2px;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+.rd-cell.add .rd-w {
+  background: var(--green-soft);
+  text-decoration-color: var(--diff-add-fg);
+}
+.rd-cell.del .rd-w {
+  background: var(--red-soft);
+  text-decoration-color: var(--diff-del-fg);
+}
+
+.rd-clip {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.rd-stray {
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+.rd-stray.warn {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+}
+
+/* ── states ──────────────────────────────────────────────────── */
+
+.rd-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6) 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* An area with nothing in it yet: the dashed edge is the one thing that can
+   draw a region that has no content to give it shape. */
+.rd-empty {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.banner.warn.rd-error {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm);
+  max-height: 140px;
+  overflow-y: auto;
+  word-break: break-word;
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+}
+
+.rd-note {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  word-break: break-word;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+}
+.rd-note.ok {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.rd-note.err {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+/* announced to screen readers, shown quietly to everyone else */
+.rd-live {
+  min-height: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.rd-live:empty {
+  display: none;
+}
+
+/* ── review actions ──────────────────────────────────────────── */
+
+/*
+ * Pinned to the bottom of the scrolling modal body: a long diff must never
+ * push Approve / Revert below the fold. The -17px/-19px bleed cancels
+ * .modal-body's own padding (App.css) so the bar reaches the modal's edges
+ * instead of leaving a strip of scrolling content beneath it.
+ */
+.rd-actions {
+  position: sticky;
+  bottom: -17px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 -19px -17px;
+  padding: var(--space-4) 19px 17px;
+  background: var(--bg-overlay);
+  border-top: 1px solid var(--border-soft);
+}
+/* pushes "Revert this run" away from the constructive actions */
+.rd-spacer {
+  flex: 1 1 auto;
+  min-width: var(--space-3);
+}
+/* tooltip host — disabled buttons don't fire the hover that shows a title */
+.rd-action {
+  display: inline-flex;
+}
+.rd-actions .btn {
+  margin-top: 0;
+}
+
+/* ── motion preferences ──────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-file,
+  .rd-toggle,
+  .rd-segbtn,
+  .rd-copy,
+  .rd-mini,
+  .rd-expand,
+  .rd-gapbtn,
+  .rd-caret {
+    transition: none;
+  }
+}

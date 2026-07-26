@@ -1,0 +1,1102 @@
+/* ── Knowledge base ──────────────────────────────────────────── */
+/*
+ * Imported from KnowledgeView.tsx, so it lands wherever the first import of
+ * that view does — nothing here may depend on cascade order against App.css.
+ * Every rule is .kb-scoped and no shared primitive (.btn, .chip, .md, .field)
+ * is redefined. The prose rules are the one place that has to out-specify
+ * App.css's generic `.md …`, so they are written `.md.kb-reader-body …` —
+ * three classes, order-independent.
+ *
+ * Colors are theme tokens only, and the spacing tokens carry no px fallback:
+ * a fallback is a second source of truth that quietly ignores the density
+ * preference the moment the first one is missing.
+ *
+ * Four things are deliberately tinted because the tint carries the meaning:
+ * the note about where imported content actually lives, a live drop target,
+ * the search highlight, and the context budget when a prompt grows past what
+ * is reasonable. Everything else that used to wear a tinted box now wears a
+ * heading and the space under it.
+ *
+ * Keyboard focus is App.css's single outline, inherited. This sheet declares
+ * no ring of its own — not one, anywhere.
+ */
+
+.kb {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* The drop veil is positioned against this. */
+  position: relative;
+}
+
+/* Three independent scrollers. Reading a long note must not scroll the hit
+   list out from under the person reading it, and vice versa. */
+.kb-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ── sources rail ─────────────────────────────────────────────── */
+
+.kb-rail {
+  flex: 0 0 258px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-4) var(--space-6);
+  border-right: 1px solid var(--border-soft);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kb[data-narrow] .kb-rail {
+  flex-basis: 214px;
+}
+
+.kb-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kb-h3 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.kb-h3-count {
+  letter-spacing: 0;
+}
+
+.kb-none {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* A source row is a label wrapping a real checkbox: the whole row toggles,
+   and screen readers still get a checkbox with a name. Included is the one
+   fill this app has for "chosen"; it was a raised card with an outline. */
+.kb-src {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.kb-src:hover {
+  background: var(--bg-hover);
+}
+.kb-src-on,
+.kb-src-on:hover {
+  background: var(--accent-soft);
+}
+
+.kb-src-box {
+  margin: 2px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.kb-src-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* The rail is a list too, so it obeys the same ladder one step down: name at
+   --fs, everything about the name at --fs-micro. */
+.kb-src-name {
+  display: block;
+  font-size: var(--fs);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* An icon inside a name that also has to ellipsis: inline, so the ellipsis
+   still works, nudged onto the text baseline. */
+.kb-src-name svg {
+  vertical-align: -1px;
+  margin-right: var(--space-1);
+  color: var(--text-faint);
+}
+
+.kb-src-meta {
+  display: block;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Provenance, not an address: the folder a collection came in from, which may
+   well not exist on this machine. Right-to-left so the tail of a long path —
+   the part that identifies it — is what survives the ellipsis. */
+.kb-src-origin {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-src-away {
+  color: var(--yellow);
+}
+
+.kb-src-share {
+  display: flex;
+  margin-top: var(--space-1);
+}
+/* Reads as a state chip and behaves as a button when it is one. Filled means
+   the whole workspace can read it; unfilled means nobody else can. */
+.kb-vis {
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  cursor: default;
+  transition: var(--t-color);
+}
+button.kb-vis {
+  cursor: pointer;
+}
+.kb-vis[data-on] {
+  background: var(--accent-soft);
+  color: var(--text-dim);
+}
+button.kb-vis:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+button.kb-vis:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Destructive-ish controls stay out of the way until the row is reached, but
+   never disappear from the keyboard — :focus-within brings them back. */
+.kb-src-acts {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: var(--t-fade);
+}
+.kb-src:hover .kb-src-acts,
+.kb-src:focus-within .kb-src-acts {
+  opacity: 1;
+}
+.kb-mini {
+  min-height: 22px;
+  padding: 0 var(--space-2);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  color: var(--text-faint);
+  background: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.kb-mini:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+.kb-mini-danger:hover {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+/* ── indexing progress ────────────────────────────────────────── */
+
+/* A line of text and the bar it describes. The tinted box around it added
+   nothing the bar was not already saying. */
+.kb-prog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+.kb-prog-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+.kb-prog-file {
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.kb-prog-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+.kb-prog-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width var(--dur) var(--ease);
+}
+/* No total yet — the walk hasn't finished counting. A sliding bar says
+   "working" without inventing a percentage. */
+.kb-prog-fill[data-indeterminate] {
+  width: 34%;
+  animation: kb-slide 1.1s var(--ease) infinite;
+}
+@keyframes kb-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+
+/* ── the drop target ──────────────────────────────────────────── */
+
+/* One of the two boxes this sheet keeps, and it earns it: a dashed edge is
+   how a surface says "put something here", and there is no other way to draw
+   an area that does not exist yet. It goes solid and accent while a drag is
+   actually over the pane. */
+.kb-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  transition: var(--t-color);
+}
+.kb-drop-live {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.kb-drop-line {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.kb-drop-where {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+.kb-drop-where select {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-micro);
+}
+
+/* The whole-pane confirmation during a drag. Purely informational — it must
+   never eat the drop, hence pointer-events. It fades up rather than appearing,
+   so the pane does not flash under a moving cursor. */
+.kb-drop-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  /* No fill-mode: the keyframe ends where the declaration already is, so the
+     veil is never invisible if the animation does not run. */
+  animation: kb-veil-in var(--dur-fast) var(--ease);
+}
+/* This one genuinely floats above the pane, so it takes the overlay level of
+   the elevation ladder and its neutral shadow. */
+.kb-drop-veil span {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+@keyframes kb-veil-in {
+  from { opacity: 0; }
+}
+
+/* The screen's central claim, and its limit. It is the paragraph somebody has
+   to read before deciding to trust this with their notes, so it reads as a
+   paragraph — the accent box around it made it look like a warning. */
+.kb-reach {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--text-dim);
+  text-align: left;
+  max-width: 46ch;
+}
+.kb-reach strong {
+  color: var(--text);
+}
+
+/* ── centre column: search and hits ───────────────────────────── */
+
+.kb-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/*
+ * The search box lives in the pane header now.
+ *
+ * It used to sit in a toolbar of its own directly beneath it: a second full
+ * width band, 57px tall, with its own bottom rule, holding one field and two
+ * controls — under a header whose sub-line said "3 collections · 412 notes",
+ * which is the same count the toolbar already showed and the rail already
+ * headed. Two bands, one rule and one duplicated fact, all of it above every
+ * search result forever.
+ *
+ * .kb-head is the header's left block, widened so the field can use the room
+ * the deleted sub-line was using.
+ */
+.kb-head {
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 520px;
+  display: flex;
+  align-items: center;
+}
+.kb-search-icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--text-faint);
+  pointer-events: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+.kb-search:focus-within .kb-search-icon {
+  color: var(--text-dim);
+}
+/* A field, so it keeps the one edge a field is allowed: App.css's. */
+.kb-search-input {
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 calc(var(--space-6) + var(--space-1));
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.kb-search-input::placeholder {
+  color: var(--text-faint);
+}
+/* No focus rule: this is an <input>, so App.css's one field-focus treatment
+   already applies to it. */
+.kb-search-clear {
+  position: absolute;
+  right: var(--space-2);
+  display: flex;
+  padding: var(--space-1);
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.kb-search-clear:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+
+.kb-count {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* ── hit list ─────────────────────────────────────────────────── */
+
+.kb-hits {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-6);
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* A result is a row, not a tile. Hover fills, chosen fills harder, and that
+   is the whole vocabulary. */
+.kb-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.kb-hit:hover {
+  background: var(--bg-hover);
+}
+.kb-hit-on,
+.kb-hit-on:hover {
+  background: var(--accent-soft);
+}
+
+/*
+ * A result was three sizes of almost the same size: a 12.5px title over an
+ * 11.5px snippet over a 10.5px path — a ratio of 1.09 between the name of the
+ * note and the text quoted out of it, which is to say no ratio at all. What
+ * separated them was a rounded grey pill on the source label. The pill is gone
+ * and the type does the work: 15px/650 title, 12.5px snippet, and a ratio of
+ * 1.20. Cover the whole list and the titles are still the first thing you see.
+ */
+.kb-hit-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.kb-hit-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Which source a hit came from — one word of provenance, in the metadata line
+   with the path, not in a box of its own beside the title. */
+.kb-tag {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-hit-path {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-hit-snip {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/*
+ * The search highlight has to survive 39 palettes, including the ones whose
+ * yellow is a pale sand and the ones whose yellow is nearly orange. A --*-soft
+ * wash alone (10–14% alpha) disappears on half of them, so the mark carries
+ * two signals: a mid-strength wash for the shape, and a rule under it that is
+ * legible whatever the wash does. The rule is a text-decoration, which is what
+ * an underline is — it was an inset shadow, and a shadow that draws a line is
+ * a line wearing the wrong name.
+ */
+.kb-mark {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--yellow) 22%, transparent);
+  color: var(--text);
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: var(--yellow);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* ── reader ───────────────────────────────────────────────────── */
+
+.kb-reader {
+  flex: 0 0 clamp(360px, 42%, 620px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border-soft);
+}
+/* Narrow pane: the reader takes the whole centre instead of squeezing both. */
+.kb[data-narrow] .kb-reader {
+  flex: 1 1 auto;
+}
+.kb[data-narrow][data-reading] .kb-center {
+  display: none;
+}
+
+.kb-reader-head {
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.kb-back {
+  margin: 0 0 var(--space-4);
+}
+
+.kb-reader-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  line-height: 1.3;
+  color: var(--text);
+}
+.kb-reader-meta {
+  margin-top: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+/* Where the note came from. One line of monospace under the title — it was a
+   bordered strip, which made a filename look like a control. */
+.kb-reader-path {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.kb-reader-path code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  background: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/*
+ * Frontmatter is kept in the copy — its tags are worth searching — but a wall
+ * of YAML keys is not the first thing anybody wants to read, so it folds.
+ *
+ * It sits at the top of the scrolling body rather than in the fixed head. In
+ * the head it needed a 140px cap and a scrollbar of its own, which put a second
+ * vertical scroller inside the reader's chrome: open the disclosure, and where
+ * the wheel went depended on which half of a header the pointer was over. Here
+ * it is simply the first thing in the note, and it pushes the note down.
+ */
+.kb-front {
+  margin: 0 0 var(--space-5);
+}
+.kb-front > summary {
+  padding: var(--space-2) 0;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+.kb-front > summary:hover {
+  color: var(--text-dim);
+}
+.kb-front > summary::-webkit-details-marker {
+  display: none;
+}
+.kb-front > summary::before {
+  content: "▸ ";
+}
+.kb-front[open] > summary::before {
+  content: "▾ ";
+}
+.kb-front pre {
+  margin: 0;
+  padding: 0 0 var(--space-3);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/*
+ * The reading column.
+ *
+ * Measure is the whole job: past about 75 characters the eye loses the start
+ * of the next line. The pane itself has to stay full width — it is the
+ * scroller, and a scrollbar down the middle of the pane would be absurd — so
+ * the measure is held by a padding that only grows once there is room for it.
+ * At the reader's normal 42% width the max() picks --space-5 and nothing
+ * changes; widen the window, or open a note in the narrow single-column
+ * layout, and the column centres itself instead of running to 140 characters.
+ */
+.kb-reader-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-5) var(--space-5) var(--space-6);
+  padding-inline: max(var(--space-5), calc((100% - 58ch) / 2));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
+ * The reading measure belongs to the note and to nothing else on this screen.
+ * The rail, the hit list, the header and the toolbar are chrome: they are
+ * scanned, not read, and a 58ch column through any of them would be a paragraph
+ * pretending to be a UI.
+ */
+.kb-reader-body {
+  line-height: 1.7;
+}
+
+/* Prose rhythm. Every value is relative to the reading size, so it survives
+   the font-scale preference and stays proportional at 0.9x and 1.2x. */
+.md.kb-reader-body .md-h {
+  margin: 1.5em 0 0.4em;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+.md.kb-reader-body .md-h1 {
+  font-size: var(--fs-lg);
+  letter-spacing: var(--ls-display);
+}
+.md.kb-reader-body .md-h2 {
+  font-size: var(--fs-md);
+}
+.md.kb-reader-body .md-h3 {
+  font-size: var(--fs);
+}
+/* The renderer emits h4 with no size of its own; without this it is a bold
+   paragraph and the fourth level simply vanishes. */
+.md.kb-reader-body .md-h4 {
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+.md.kb-reader-body > .md-h:first-child {
+  margin-top: 0;
+}
+
+/* Blank lines come through as .md-gap divs, so the paragraph gap lives there.
+   Two of them in a row is one blank line too many, and a gap in front of a
+   heading would add to the heading's own margin — both are collapsed here so
+   the vertical rhythm stays on one scale instead of compounding. */
+.md.kb-reader-body .md-gap {
+  height: 0.85em;
+}
+.md.kb-reader-body .md-gap + .md-gap {
+  height: 0;
+}
+.md.kb-reader-body .md-gap + .md-h {
+  margin-top: 0.75em;
+}
+
+.md.kb-reader-body ul {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.md.kb-reader-body li {
+  margin: 0.25em 0;
+}
+.md.kb-reader-body blockquote {
+  margin: 0.9em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 2.5px solid var(--border-strong);
+  color: var(--text-dim);
+}
+.md.kb-reader-body strong {
+  color: var(--text);
+  font-weight: 650;
+}
+.md.kb-reader-body .codeblock {
+  margin: 0.9em 0;
+  padding: var(--space-3) var(--space-4);
+  line-height: 1.6;
+}
+.md.kb-reader-body .codelang {
+  font-size: var(--fs-micro);
+  margin-bottom: var(--space-2);
+}
+
+/*
+ * Said at the end of the note, where somebody reaches the end of what was
+ * imported. It was a full-width filled yellow bar pinned across the foot of the
+ * reader — a banner outweighing the title of the thing it was a footnote to,
+ * and permanently occupying the bottom of the pane. It is the last line of the
+ * body now: a dot, and the sentence.
+ */
+.kb-reader-cut {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-6) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+.kb-reader-cut::before {
+  content: "";
+  flex-shrink: 0;
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+/* A resolved wikilink is navigation and looks like it. */
+.kb-wiki {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 3px;
+  transition: var(--t-color), text-decoration-color var(--dur-fast) var(--ease);
+}
+.kb-wiki:hover {
+  text-decoration-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* A wikilink with nothing behind it is text. Styling it would promise a
+   destination that does not exist. */
+.kb-wiki-dead {
+  color: inherit;
+  cursor: help;
+  text-decoration: none;
+}
+
+/* ── empty and blank states ───────────────────────────────────── */
+
+.kb-blank {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  text-align: center;
+  min-height: 0;
+  overflow-y: auto;
+}
+.kb-blank-mark {
+  color: var(--accent);
+  opacity: 0.8;
+}
+.kb-blank-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  color: var(--text);
+}
+.kb-blank-text {
+  margin: 0;
+  max-width: 46ch;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+.kb-blank-promises {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 46ch;
+  text-align: left;
+}
+.kb-blank-promises li {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.kb-blank-promises b {
+  color: var(--text);
+  font-weight: 650;
+}
+.kb-blank-glyph {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.kb-blank-acts {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ── ask an agent ─────────────────────────────────────────────── */
+/*
+ * Lives in a side panel: one column, roughly 460px, and the panel's own body is
+ * the scroller. Nothing here sets a width or a scroller of its own.
+ */
+
+.kb-ask-hint {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+/* Reaches for the note the reader is showing, so it sits under the list it
+   would join rather than beside the heading, where it would read as the
+   heading's own control. */
+.kb-ask-add {
+  margin-top: var(--space-3);
+}
+
+/* At most DEFAULT_CONTEXT_NOTES rows ever land here plus whatever you attach by
+   hand, so the 232px cap and the scroller under it were a second vertical
+   scroller for a list that fits. The panel body scrolls; this does not. */
+.kb-ask-notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+/* Rows in a list. Each was a filled, outlined card, which turned a list of five
+   notes into a stack of five objects; then a hairline between each pair, which
+   is four more lines than a five-item list has ever needed. */
+.kb-ask-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-1);
+}
+.kb-ask-note-text {
+  flex: 1;
+  min-width: 0;
+}
+.kb-ask-note-title {
+  display: block;
+  font-size: var(--fs);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-ask-note-meta {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-ask-note-chars {
+  flex-shrink: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  padding-top: 2px;
+}
+
+/* The budget. The bar is the signal and it changes colour; the box around it
+   was a second copy of the same sentence. */
+.kb-ask-meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.kb-ask-meter-line {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text);
+}
+.kb-ask-meter[data-level="high"] .kb-ask-meter-line b {
+  color: var(--yellow);
+}
+.kb-ask-meter[data-level="over"] .kb-ask-meter-line b {
+  color: var(--red);
+}
+.kb-ask-meter-note {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.kb-ask-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+.kb-ask-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.kb-ask-meter[data-level="high"] .kb-ask-fill {
+  background: var(--yellow);
+}
+.kb-ask-meter[data-level="over"] .kb-ask-fill {
+  background: var(--red);
+}
+
+.kb-ask-preview {
+  margin-top: var(--space-6);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+.kb-ask-preview > summary {
+  padding: var(--space-2) 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+.kb-ask-preview > summary:hover {
+  color: var(--text);
+}
+.kb-ask-preview > summary::-webkit-details-marker {
+  display: none;
+}
+.kb-ask-preview > summary::before {
+  content: "▸ ";
+  color: var(--text-faint);
+}
+.kb-ask-preview[open] > summary::before {
+  content: "▾ ";
+}
+.kb-ask-preview pre {
+  margin: 0;
+  padding: 0 0 var(--space-3);
+  max-height: 280px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* A sentence in the tone of what it is warning about, not a filled block. Same
+   treatment as .kb-reader-cut, because it is the same kind of fact. */
+.kb-ask-warn {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.kb-ask-warn::before {
+  content: "";
+  flex-shrink: 0;
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+/* App.css zeroes the durations for both switches; these two loops still need a
+   resting frame that says the right thing when they stop. */
+:root[data-reduce-motion] .kb-prog-fill[data-indeterminate] {
+  animation: none;
+  width: 100%;
+  opacity: 0.55;
+}
+:root[data-reduce-motion] .kb-drop-veil {
+  animation: none;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-prog-fill[data-indeterminate] {
+    animation: none;
+    width: 100%;
+    opacity: 0.55;
+  }
+  .kb-drop-veil {
+    animation: none;
+    opacity: 1;
+  }
+  .kb-src,
+  .kb-hit,
+  .kb-mini,
+  .kb-vis,
+  .kb-drop,
+  .kb-src-acts,
+  .kb-search-icon,
+  .kb-search-clear,
+  .kb-front > summary,
+  .kb-ask-preview > summary,
+  .kb-wiki,
+  .kb-prog-fill,
+  .kb-ask-fill {
+    transition: none;
+  }
+}

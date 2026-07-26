@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible Spaces problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include tokens, pairing codes, private repository data, or full transcripts.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or release
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Desktop
+        - Portal
+        - Pairing and sync
+        - Agent runtime
+        - Provider integration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true

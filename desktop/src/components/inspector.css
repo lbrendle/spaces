@@ -1,0 +1,446 @@
+/* ── Inspector drawer ────────────────────────────────────────── */
+/*
+ * Imported from Inspector.tsx, so it lands in the bundle wherever the first
+ * import does — nothing here may depend on cascade order. Every rule is
+ * .insp-scoped and no shared primitive (.btn, .icon-btn, .md, .ec) is
+ * redefined. Focus is App.css's outline; the ring this sheet used to draw
+ * around a run row is gone.
+ *
+ * The drawer itself is chrome — a raised surface with one hairline against the
+ * pane it pushes. Inside it there are no cards: sections are a caps heading
+ * and the space under it, and rows are a hover fill.
+ *
+ * Colors are tokens only; the single tinted thing is the kind glyph, and that
+ * tint arrives inline as a var(--…) reference from entities.ts.
+ */
+
+.insp {
+  --insp-w: 384px; /* the live value arrives inline, from localStorage */
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--insp-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border-soft);
+  animation: insp-in var(--dur) var(--ease);
+}
+.insp:focus-visible {
+  outline: none; /* the panel takes focus on open; it is not a control */
+}
+
+@keyframes insp-in {
+  from { opacity: 0; transform: translateX(14px); }
+}
+
+/* ── resize handle ────────────────────────────────────────────── */
+/* Overhangs the border so the grab target is comfortable while the visible
+   line stays a hairline. The line is the handle — it is the thing you are
+   pointing at, not an accent painted beside something else. */
+
+.insp-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.insp-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease), width var(--dur-fast) var(--ease);
+}
+.insp-resize:hover::after,
+.insp-resize:focus-visible::after {
+  width: 2px;
+  background: var(--accent);
+}
+.insp-resize:focus-visible {
+  outline: none;
+}
+
+/* While dragging, the pointer is captured but the cursor and the selection
+   are the document's — without this a fast drag selects the whole page. */
+.insp-dragging,
+.insp-dragging * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* ── header ───────────────────────────────────────────────────── */
+
+.insp-head {
+  flex: 0 0 auto;
+  padding: calc(var(--titlebar) - 6px) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.insp-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.insp-nav {
+  display: flex;
+  gap: 2px;
+}
+.insp-nav .icon-btn {
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.insp-nav .icon-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+  background: none;
+  color: var(--text-faint);
+}
+
+.insp-kind {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.insp-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+/* .btn.tiny carries a top margin for form rows; in a toolbar it must not. */
+.insp-tools .btn.tiny {
+  margin-top: 0;
+}
+/* The GitHub escape hatch is an anchor so it keeps middle-click and copy-link,
+   but it must not pick up the global link underline while wearing .btn. */
+.insp-tools a.btn:hover {
+  text-decoration: none;
+}
+
+.insp-ident {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.insp-glyph {
+  flex-shrink: 0;
+  font-size: var(--fs-md);
+  line-height: 1.4;
+}
+
+.insp-ident-text {
+  min-width: 0;
+}
+
+.insp-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.insp-title.insp-gone {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.insp-sub {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ── body ─────────────────────────────────────────────────────── */
+
+.insp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+/* An aside about the thing you are looking at. It is one sentence, so it is
+   set as one sentence. */
+.insp-note {
+  margin: var(--space-4) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.insp-prose {
+  margin-top: var(--space-4);
+  color: var(--text-dim);
+}
+.insp-prose .md {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.insp-prose .md .codeblock {
+  font-size: var(--fs-xs);
+}
+
+/* Sections are separated by space. That is the whole mechanism. */
+.insp-section {
+  margin-top: var(--space-6);
+}
+
+.insp-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.insp-count {
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  letter-spacing: 0;
+}
+
+/* ── facts ────────────────────────────────────────────────────── */
+
+.insp-facts {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.insp-fact {
+  display: contents;
+}
+.insp-fact dt {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+.insp-fact dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.insp-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insp-none {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+.insp-pinned {
+  color: var(--yellow);
+  font-size: var(--fs-sm);
+}
+
+/* ── rows, chips, groups ──────────────────────────────────────── */
+
+.insp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.insp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.insp-group + .insp-group {
+  margin-top: var(--space-4);
+}
+
+.insp-group-head {
+  margin-bottom: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+/* ── run history ──────────────────────────────────────────────── */
+
+/* Rows in a list, not a stack of tiles: the hover fill is what says they are
+   clickable, and it is the same fill every other row in the app uses. */
+.insp-run {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.insp-run:hover {
+  background: var(--bg-hover);
+}
+
+.insp-run-who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+
+.insp-run-meta {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.insp-status {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+.insp-status.running {
+  background: var(--yellow-soft);
+  color: var(--yellow);
+}
+.insp-status.done {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.insp-status.error {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ── run activity summary ─────────────────────────────────────── */
+
+.insp-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+.insp-tally-err {
+  color: var(--red);
+}
+
+/* An excerpt of a log, so it keeps the recessed fill a code surface has. */
+.insp-last-event {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  /* Two lines of the last event is a summary; more is a log, and the run view
+     is where logs belong. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* ── connections ──────────────────────────────────────────────── */
+
+.insp-connections {
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ── narrow windows ───────────────────────────────────────────── */
+/*
+ * Below ~1100px there is not enough room for a drawer *and* a channel with a
+ * composer, so the drawer stops pushing and starts overlaying. It is still
+ * dismissible with Escape; the backdrop gives the pointer the same exit.
+ */
+
+.insp-backdrop {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .insp-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 88; /* under modals (100), the palette (200) and toasts (300) */
+    background: var(--backdrop);
+    animation: insp-fade var(--dur-fast) var(--ease);
+  }
+  /* Now genuinely floating over the pane, so it takes a real border and the
+     modal-weight shadow that says how far off the surface it is. */
+  .insp {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 89;
+    width: min(var(--insp-w), calc(100vw - 44px));
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+@keyframes insp-fade {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .insp,
+  .insp-backdrop {
+    animation: none;
+  }
+  .insp-resize::after,
+  .insp-run {
+    transition: none;
+  }
+}

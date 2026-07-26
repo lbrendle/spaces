@@ -1,0 +1,272 @@
+/* ── Feedback layer: toast stack + confirm dialog ─────────────── */
+/*
+ * toast.css is imported from Toasts.tsx, which App.tsx mounts exactly once and
+ * which portals to <body>. Both surfaces sit above modals (z 100) and the
+ * command palette (z 200): they report on what those just did, and a confirm is
+ * usually raised from inside one of them.
+ *
+ * Tokens only. The semantic hue is carried by the glyph and by the card's own
+ * border — not by a filled card, which would make long error text unreadable,
+ * and no longer by a 3px coloured rail down the left edge either. A card with a
+ * red icon and a red edge does not also need a red stripe; that stripe was the
+ * same invention as the accent bars that used to run down the sidebar rows.
+ */
+
+/* ── Stack ───────────────────────────────────────────────────── */
+
+.tst-stack {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 300;
+  width: 352px;
+  max-width: calc(100vw - var(--space-5) * 2);
+  max-height: calc(100vh - var(--space-5) * 2);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  /* Bottom-anchored, so the column grows upward and settled cards never move. */
+  pointer-events: none;
+}
+
+.tst-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: auto;
+}
+/* Expanded, the stack can outgrow the window; scroll it rather than clip it.
+   overflow-x is pinned so the scroll container never grows a second bar. */
+.tst-list.tst-expanded {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  max-height: calc(100vh - var(--space-6) * 3);
+}
+
+.tst-more {
+  align-self: flex-end;
+  pointer-events: auto;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.tst-more:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* ── Card ────────────────────────────────────────────────────── */
+
+.tst {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: tst-in var(--dur) var(--ease);
+}
+
+.tst-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 19px;
+  flex-shrink: 0;
+  color: var(--blue);
+}
+
+.tst-success { border-color: var(--green-border); }
+.tst-success .tst-glyph { color: var(--green); }
+
+.tst-warn { border-color: var(--yellow-border); }
+.tst-warn .tst-glyph { color: var(--yellow); }
+
+.tst-error { border-color: var(--red-border); }
+.tst-error .tst-glyph { color: var(--red); }
+
+.tst-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.tst-title {
+  font-size: var(--fs);
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.tst-count {
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tst-detail {
+  margin-top: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  /* Stack traces and CLI stderr arrive long: show the gist, keep the card small. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+.tst-action {
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  transition: background var(--dur-fast) var(--ease);
+}
+.tst-action:hover { background: var(--accent-soft-strong); }
+
+.tst-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -1px -1px 0 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.tst-close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* ── Motion ──────────────────────────────────────────────────── */
+
+@keyframes tst-in {
+  from { opacity: 0; transform: translateX(var(--space-5)) scale(0.98); }
+}
+@keyframes tst-out {
+  to { opacity: 0; transform: translateX(var(--space-5)) scale(0.98); }
+}
+
+/* Held in the DOM only to play its exit; already gone as far as input goes. */
+.tst-leaving {
+  pointer-events: none;
+  animation: tst-out var(--dur) var(--ease) forwards;
+}
+
+/* ── Confirm dialog ──────────────────────────────────────────── */
+
+.tcf-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  background: var(--backdrop);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  animation: tcf-fade var(--dur-fast) var(--ease);
+}
+
+.tcf {
+  width: 412px;
+  max-width: 100%;
+  padding: var(--space-5);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: tcf-in var(--dur) var(--ease);
+}
+
+.tcf-title {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+}
+
+.tcf-body {
+  margin-top: var(--space-3);
+  color: var(--text-dim);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.tcf-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+/* The shared .btn.danger is an outline; here it is the primary action, so it
+   carries a resting tint too — the weight difference is the whole warning. */
+.tcf-actions .btn.danger {
+  background: var(--red-soft);
+  border-color: var(--red-border);
+  font-weight: 600;
+}
+.tcf-actions .btn.danger:hover {
+  background: var(--red-soft);
+  border-color: var(--red);
+}
+
+@keyframes tcf-fade {
+  from { opacity: 0; }
+}
+@keyframes tcf-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+}
+
+/* ── Narrow windows ──────────────────────────────────────────── */
+
+@media (max-width: 520px) {
+  .tst-stack {
+    left: var(--space-4);
+    right: var(--space-4);
+    bottom: var(--space-4);
+    width: auto;
+  }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .tst,
+  .tst-leaving,
+  .tcf,
+  .tcf-backdrop {
+    animation: none;
+  }
+  .tst-more,
+  .tst-action,
+  .tst-close {
+    transition: none;
+  }
+}

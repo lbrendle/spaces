@@ -1,0 +1,737 @@
+/* ── Connections (graph) view ────────────────────────────────── */
+/*
+ * graph.css is imported from GraphView.tsx, so it lands in the bundle at
+ * whatever point the first import of that view does — nothing here may depend
+ * on cascade order. Every rule is .gr-scoped, and the two shared primitives it
+ * borrows (.btn, .field-label) are used as-is rather than restyled.
+ *
+ * The canvas paints itself from resolved token values (see readPalette); this
+ * file dresses the chrome around it. Colors are tokens only, both sides.
+ *
+ * Three things here float over the map and keep a surface for it: the zoom
+ * cluster, the selection card and the drop-in results list. Everything else in
+ * the rail is a row, and rows are made of a fill and a hairline.
+ *
+ * Focus is App.css's outline. Where a control sits inside a clipping parent it
+ * takes the one documented variant — a negative offset, so the ring is drawn
+ * just inside its own edge — rather than a coloured shadow of its own.
+ */
+
+.gr {
+  overflow: hidden; /* the stage scrolls nothing; it pans */
+}
+
+.gr-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+/* ── filter rail ──────────────────────────────────────────────── */
+
+.gr-rail {
+  width: 246px;
+  min-width: 246px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-4);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Nothing in the rail may shrink below its content: the rail scrolls instead.
+   (A flex column in an overflow container will happily crush its children.) */
+.gr-rail > * {
+  flex-shrink: 0;
+}
+
+.gr-rail .field {
+  margin-bottom: 0;
+}
+
+/* search — dims, never removes, so the label says so */
+.gr-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.gr-search-icon {
+  position: absolute;
+  left: var(--space-3);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.gr-search input {
+  padding: var(--space-2) var(--space-6) var(--space-2)
+    calc(var(--space-6) + var(--space-1));
+  font-size: var(--fs-sm);
+}
+.gr-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.gr-search-clear {
+  position: absolute;
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: var(--t-color);
+}
+.gr-search-clear:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.gr-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gr-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.gr-group-count {
+  letter-spacing: 0;
+}
+
+/* ── kind / relation toggles ──────────────────────────────────── */
+
+.gr-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gr-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: var(--t-color);
+}
+.gr-toggle:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.gr-toggle.on {
+  color: var(--text);
+}
+.gr-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* The wide variant is a standalone switch rather than one row of a list, so
+   it takes a resting fill to say it is pressable. --bg-input is the one that
+   reads on a --bg-raised rail in both appearances: it lifts to white on the
+   light themes and recesses on the dark ones. */
+.gr-toggle.wide {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  background: var(--bg-input);
+}
+.gr-toggle.wide.on {
+  background: var(--accent-soft);
+}
+
+/* Off state keeps the row in place and drains it of colour, so the rail never
+   reflows as things are toggled and the eye can compare on/off at a glance. */
+.gr-toggle:not(.on) .gr-dot,
+.gr-toggle:not(.on) .gr-glyph {
+  opacity: 0.3;
+}
+.gr-toggle:not(.on) .gr-toggle-label {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.gr-dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.gr-glyph {
+  flex-shrink: 0;
+  width: 11px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+.gr-glyph-assign {
+  color: var(--accent);
+}
+
+.gr-toggle-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gr-toggle-count {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+/* ── focus depth ──────────────────────────────────────────────── */
+
+.gr-depth {
+  display: flex;
+  gap: var(--space-1);
+}
+.gr-depth-btn {
+  flex: 1;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  transition: var(--t-color);
+}
+.gr-depth-btn:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.gr-depth-btn.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+.gr-depth-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ── node list (the keyboard route into the canvas) ───────────── */
+
+.gr-nodes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gr-node-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: var(--t-color);
+}
+.gr-node-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.gr-node-row.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+/* The list is a clipping scroller, so the ring sits just inside the row edge. */
+.gr-node-row:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+/* Dimmed on the canvas, dimmed in the list — one idea, two renderings. */
+.gr-node-row.off {
+  opacity: 0.42;
+}
+
+.gr-node-glyph {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+
+.gr-node-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gr-node-degree {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+.gr-note {
+  padding: var(--space-2) var(--space-2) 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.gr-rail-foot {
+  display: flex;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.gr-rail-foot .btn {
+  flex: 1;
+  margin-top: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* ── stage ────────────────────────────────────────────────────── */
+
+.gr-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
+  /* The canvas is a map: selecting text across it is never what was meant. */
+  user-select: none;
+}
+
+.gr-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.gr-canvas.gr-grabbing {
+  cursor: grabbing;
+}
+/* Edge to edge inside a clipping stage, so the ring is drawn just inside its
+   own boundary — App.css's outline, at the one offset that survives here. */
+.gr-canvas:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+/* Floats over the map, so it takes the overlay surface and a neutral shadow. */
+.gr-zoom {
+  position: absolute;
+  left: var(--space-4);
+  bottom: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.gr-zoom-btn {
+  width: 28px;
+  height: 28px;
+  color: var(--text-dim);
+  font-size: var(--fs);
+  line-height: 1;
+  transition: var(--t-color);
+}
+.gr-zoom-btn + .gr-zoom-btn {
+  border-top: 1px solid var(--border-soft);
+}
+.gr-zoom-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.gr-zoom-btn:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+.gr-hint {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+}
+
+/* ── selection card ───────────────────────────────────────────── */
+
+/* Also genuinely floating: overlay surface, real border, popover shadow.
+   --shadow-lg is the modal's; this is not a modal. */
+.gr-card {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  width: 264px;
+  max-width: calc(100% - var(--space-6));
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  animation: gr-card-in var(--dur) var(--ease);
+}
+
+@keyframes gr-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+.gr-card-close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: var(--t-color);
+}
+.gr-card-close:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.gr-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding-right: var(--space-5);
+}
+
+.gr-card-glyph {
+  flex-shrink: 0;
+  font-size: var(--fs-md);
+  line-height: 1.35;
+}
+
+.gr-card-ident {
+  min-width: 0;
+}
+
+.gr-card-title {
+  font-size: var(--fs);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  overflow-wrap: anywhere;
+}
+
+.gr-card-kind {
+  margin-top: 1px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.gr-card-meta {
+  margin-top: var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.gr-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.gr-card-actions .btn {
+  margin-top: 0;
+}
+/* The GitHub action is a real anchor (middle-click, copy link); the global
+   a:hover underline is the one thing .btn does not already override. */
+.gr-card-actions a.btn,
+.gr-card-actions a.btn:hover {
+  text-decoration: none;
+}
+.gr-card-actions .btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+
+/* ── empty states ─────────────────────────────────────────────── */
+
+.gr-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--bg);
+}
+
+/* A sentence in the middle of an empty map. It was a card floating on a blank
+   stage, which is a box drawn around nothing. */
+.gr-empty-card {
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+}
+.gr-empty-card.wide {
+  max-width: 430px;
+  text-align: left;
+}
+
+/* A three-node sketch of what this view is for, drawn in the same language as
+   the canvas itself: tinted disc, solid ring, hairline edges. */
+.gr-empty-mark {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-5);
+}
+.gr-empty-mark svg {
+  overflow: visible;
+}
+.gr-empty-mark line {
+  stroke: var(--border-strong);
+  stroke-width: 1.25;
+}
+.gr-empty-mark circle {
+  fill: var(--accent-soft);
+  stroke: var(--text-faint);
+  stroke-width: 1.5;
+}
+.gr-empty-mark .gr-empty-hub {
+  fill: var(--accent-soft-strong);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.gr-empty-title {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+}
+
+.gr-empty-text {
+  margin: var(--space-3) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.gr-empty-list {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.gr-empty-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.gr-empty-list li + li {
+  border-top: 1px solid var(--border-soft);
+}
+
+.gr-empty-glyph {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+}
+
+.gr-empty-why {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.gr-empty-actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+}
+.gr-empty-actions .btn {
+  flex: 1;
+  justify-content: center;
+}
+
+.gr-empty-card .btn {
+  margin-top: var(--space-5);
+}
+.gr-empty-card.wide .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ── connect modal ────────────────────────────────────────────── */
+
+.gr-connect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.gr-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.gr-picked {
+  padding: var(--space-1) 0;
+}
+
+/* A well: the recessed fill says it clips and scrolls. */
+.gr-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 178px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.gr-result {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 30px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.gr-result:hover {
+  background: var(--bg-hover);
+}
+/* Full-bleed inside a clipping scroller: the ring is drawn just inside it. */
+.gr-result:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+.gr-result-glyph {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  font-size: var(--fs-xs);
+}
+
+.gr-result-title {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.gr-result-sub {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  text-align: right;
+}
+
+.gr-results-empty {
+  padding: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+
+/* What you are about to write, on the one wash this app uses for "chosen". */
+.gr-connect-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.gr-connect-rel {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* ── narrow windows ───────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .gr-rail {
+    width: 200px;
+    min-width: 200px;
+  }
+  .gr-card {
+    width: 216px;
+  }
+}
+
+/* ── reduced motion ───────────────────────────────────────────── */
+/* The layout itself settles instantly in JS (see GraphView); this is the
+   chrome. Both signals are honoured: the OS setting and the app's own pref. */
+
+@media (prefers-reduced-motion: reduce) {
+  .gr-card {
+    animation: none;
+  }
+  .gr-toggle,
+  .gr-depth-btn,
+  .gr-node-row,
+  .gr-result,
+  .gr-zoom-btn,
+  .gr-card-close,
+  .gr-search-clear {
+    transition: none;
+  }
+}
+
+[data-reduce-motion] .gr-card {
+  animation: none;
+}
+[data-reduce-motion] .gr-toggle,
+[data-reduce-motion] .gr-depth-btn,
+[data-reduce-motion] .gr-node-row,
+[data-reduce-motion] .gr-result,
+[data-reduce-motion] .gr-zoom-btn,
+[data-reduce-motion] .gr-card-close,
+[data-reduce-motion] .gr-search-clear {
+  transition: none;
+}

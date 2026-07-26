@@ -1,0 +1,772 @@
+/* ── Chat ─────────────────────────────────────────────────────
+ *
+ * A transcript is a column of prose, not a stack of cards. Nothing in this
+ * sheet draws a box around a message, a run, a reaction or a mode. What
+ * separates one thing from the next is space, a hairline, or a heading —
+ * and where a thing is *chosen*, one fill: --accent-soft.
+ *
+ * App.css owns .msg, .msg-head, .msg-author, .msg-time, .bot-tag, .avatar and
+ * the focus ring. This sheet refines the chat rhythm on top of them and does
+ * not restate them; a second definition with slightly different numbers is how
+ * two surfaces quietly drift apart.
+ *
+ * Own vs agent is carried by the author line (name, AGENT tag) and by a
+ * recessed background on the agent's own turns — never by a coloured edge.
+ */
+
+.chat-body { flex: 1; display: flex; min-height: 0; }
+.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+/* ── Channel mode chip in the header ──────────────────────────
+   The mode changes what happens when you press Send, so it is
+   stated next to the roster rather than buried in settings.    */
+.mode-chip {
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  font-variant: none;
+  transition: var(--t-color);
+}
+.mode-chip svg { color: var(--accent); flex-shrink: 0; }
+.mode-chip-name { font-weight: 650; color: var(--text); }
+.mode-chip-lead { color: var(--text-faint); }
+.mode-chip:hover { background: var(--bg-hover); }
+.mode-chip:hover .mode-chip-lead { color: var(--text-dim); }
+
+/* ── Message rows ─────────────────────────────────────────────
+   Full-bleed to the pane gutter so hover and the agent tint read as bands
+   across the column rather than as floating tiles. `--msg-x` is the gutter
+   the surrounding scroller uses, so the bleed always lands on its edge.
+   `--reply-ring` is the surface a message sits on — the reply-pill avatars
+   punch their separator ring in it, so it follows the row's own state.  */
+:is(.messages, .thread-msgs) .msg {
+  --msg-x: var(--pane-x);
+  --reply-ring: var(--bg);
+  position: relative;
+  margin: var(--space-5) calc(var(--msg-x) * -1) 0;
+  padding: var(--space-2) var(--msg-x);
+  animation: msg-in var(--dur) var(--ease);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+/* A run from one author is one block: no seam, so the tint behind it is
+   continuous and the eye reads the run as a single utterance. */
+:is(.messages, .thread-msgs) .msg.grouped { margin-top: 0; padding-top: 0; }
+:is(.messages, .thread-msgs) .msg:hover {
+  background: var(--bg-hover);
+  --reply-ring: var(--bg-hover);
+}
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+/* Agent turns sit one step back in the surface ladder. That is the whole
+   distinction: no rail, no border, no glow. ChatView marks them with
+   `.msg-agent` when it can; until it does, the AGENT tag identifies the first
+   message of a run and its grouped continuations inherit the tint. */
+.msg:is(.msg-agent, :has(.bot-tag)),
+.msg:has(.bot-tag) + .msg.grouped,
+.msg:has(.bot-tag) + .msg.grouped + .msg.grouped,
+.msg:has(.bot-tag) + .msg.grouped + .msg.grouped + .msg.grouped {
+  background: var(--bg-inset);
+  --reply-ring: var(--bg-inset);
+}
+
+/* Streaming state: one breathing dot, never a spinning ring. */
+:is(.messages, .thread-msgs) .running-note .spinner {
+  width: 8px; height: 8px; border: none; border-radius: 50%;
+  background: var(--accent);
+  animation: hq-breathe 1.7s var(--ease) infinite;
+}
+@keyframes hq-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Day dividers ─────────────────────────────────────────────
+   A date between two rules. It was a pill on a rule, which is a label
+   wearing a box to say it is a label. */
+.day-divider {
+  display: flex; align-items: center; gap: var(--space-4);
+  margin: var(--space-6) 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-micro); font-weight: 700;
+  letter-spacing: var(--ls-caps); text-transform: uppercase;
+}
+.day-divider::before, .day-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border-soft);
+}
+
+/* ── Reply pill under a threaded root message ─────────────── */
+.reply-pill {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  min-height: 26px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
+  border-radius: 999px;
+  font-size: var(--fs-sm); color: var(--accent);
+  cursor: pointer; max-width: fit-content;
+  transition: var(--t-color);
+}
+/* --bg-active, not --bg-hover: hovering the pill necessarily hovers the message
+   under it, which is already --bg-hover — the pill has to clear that. */
+.reply-pill:hover {
+  background: var(--bg-active);
+  --reply-ring: var(--bg-active);
+}
+.reply-avatars { display: flex; }
+/* The one ring in this sheet, and it is not decoration: overlapping faces need
+   a cut-out in whatever surface they land on to stay countable. Neutral, and
+   it follows the row's state rather than naming a colour. */
+.reply-avatars .avatar {
+  width: 18px; height: 18px; font-size: 9px; border-radius: var(--radius-sm);
+  margin-right: -6px; box-shadow: 0 0 0 2px var(--reply-ring);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+.reply-avatars .avatar:last-child { margin-right: 0; }
+.reply-avatars .avatar-badge { display: none; }
+.reply-count { font-weight: 650; }
+.reply-last { color: var(--text-faint); }
+.reply-pill:hover .reply-last { color: var(--text-dim); }
+.reply-pill::after {
+  content: "›"; font-size: var(--fs-md); line-height: 1;
+  color: var(--text-faint); opacity: 0.6;
+  transition: transform var(--dur-fast) var(--ease), var(--t-fade);
+}
+.reply-pill:hover::after, .reply-pill:focus-visible::after {
+  opacity: 1; transform: translateX(2px);
+}
+
+/* ── Reactions and emoji ──────────────────────────────────── */
+.msg-reactions {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+/* A count on a fill. The outline it used to wear made a row of them read as a
+   row of buttons rather than as a tally. */
+.reaction-chip {
+  min-height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  font-size: var(--fs-sm); line-height: 1;
+  transition: var(--t-color);
+}
+.reaction-chip:hover { background: var(--bg-active); color: var(--text); }
+.reaction-chip.mine { color: var(--text); background: var(--accent-soft); }
+.reaction-count { color: inherit; font-size: var(--fs-micro); }
+
+/* Anchors for the emoji menus, which are absolutely placed against them. */
+.msg-action-wrap,
+.composer-emoji { position: relative; }
+/* Genuinely floating, so it takes level 3 of the elevation ladder — the one
+   place in this sheet where a border and a shadow are the material. */
+.emoji-pop {
+  position: absolute; z-index: 30;
+  display: grid; grid-template-columns: repeat(4, 34px);
+  gap: var(--space-1); padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+}
+.emoji-pop button {
+  width: 34px; height: 32px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-lg);
+}
+.emoji-pop button:hover,
+.emoji-pop button:focus-visible { background: var(--bg-active); }
+.composer-emoji-pop { left: 0; bottom: calc(100% + var(--space-3)); }
+.composer-emoji { align-self: flex-end; margin-bottom: var(--space-2); }
+.emoji-trigger {
+  width: 30px; height: 30px;
+  color: var(--text-faint); font-size: var(--fs-lg);
+}
+.emoji-trigger:hover,
+.emoji-trigger[aria-expanded="true"] { color: var(--text); background: var(--bg-active); }
+
+/* ── Thread panel ─────────────────────────────────────────── */
+.thread-panel {
+  width: 380px; min-width: 380px; flex-shrink: 0;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border-soft);
+  animation: thread-in var(--dur) var(--ease);
+}
+@keyframes thread-in {
+  from { opacity: 0; transform: translateX(14px); }
+}
+.thread-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+.thread-title { font-weight: 700; letter-spacing: var(--ls-title); }
+.thread-sub { color: var(--text-faint); font-size: var(--fs-xs); flex: 1; }
+.thread-msgs {
+  flex: 1; overflow-y: auto;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+}
+.thread-msgs .msg { --msg-x: var(--space-5); --reply-ring: var(--bg-raised); }
+.thread-msgs .msg:hover { --reply-ring: var(--bg-hover); }
+.thread-sep {
+  display: flex; align-items: center; gap: var(--space-4);
+  margin: var(--space-6) 0 var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-micro); font-weight: 700;
+  letter-spacing: var(--ls-caps); text-transform: uppercase;
+}
+.thread-sep::before, .thread-sep::after {
+  content: ""; height: 1px; background: var(--border-soft); flex: 1;
+}
+.composer-wrap.in-thread {
+  padding: var(--space-4) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.composer-wrap.in-thread .mention-pop {
+  left: var(--space-4); right: var(--space-4);
+}
+
+/* ── Composer: queued-turn notice ─────────────────────────────
+   A mention that lands while its agent is mid-run is parked in
+   SQLite. Without this the message just sits there unanswered.  */
+.queue-note {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  margin: 0 0 var(--space-3);
+}
+.queue-chip {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-3); border-radius: 999px;
+  font-size: var(--fs-xs); font-weight: 650; white-space: nowrap;
+  color: var(--yellow);
+  background: var(--yellow-soft);
+}
+.queue-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; flex-shrink: 0;
+  animation: hq-breathe 1.7s var(--ease) infinite;
+}
+/* Not decoration — it names who you are waiting on, so it reads at
+   secondary weight rather than the faint tier used for timestamps. */
+.queue-who {
+  color: var(--text-dim); font-size: var(--fs-xs);
+  min-width: 0; overflow-wrap: anywhere;
+}
+
+/* ── Composer: things that need attention ─────────────────────
+   Two signals, both of them the text's own: the word is yellow and the
+   strip it sits on is yellow. No outline — an outline is a third signal
+   saying what the first two already said. */
+.composer-hint.no-targets,
+.composer-hint.composer-warn {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  margin-top: var(--space-3);
+  width: fit-content;
+}
+
+/* ── Run inspect affordances on agent messages ────────────── */
+.msg-inspect {
+  opacity: 0; font-size: var(--fs-xs);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: var(--t-fade), color var(--dur-fast) var(--ease);
+}
+.msg:hover .msg-inspect { opacity: 1; }
+.msg-inspect:focus-visible { opacity: 1; }
+.msg-meta-btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-2) 0 0; text-align: left; cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+.msg-meta-btn::after {
+  content: "›"; font-size: var(--fs); line-height: 1; opacity: 0.7;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.msg-meta-btn:hover, .msg-meta-btn:focus-visible { color: var(--accent); }
+.msg-meta-btn:hover::after { transform: translateX(2px); }
+
+/* Footer strip under a message: run meta on the left, the diff
+   affordance beside it. Only rendered when there is something in it. */
+:is(.messages, .thread-msgs) .msg-foot {
+  display: flex; align-items: center; gap: var(--space-4);
+  flex-wrap: wrap; margin-top: var(--space-2);
+}
+:is(.messages, .thread-msgs) .msg-foot .msg-meta { margin-top: 0; }
+.msg-changes {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  min-height: 24px;
+  padding: 0 var(--space-3); border-radius: 999px;
+  background: var(--bg-active); color: var(--text-dim);
+  font-size: var(--fs-xs); font-weight: 600; white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.msg-changes svg { color: var(--green); flex-shrink: 0; }
+.msg-changes-count { color: var(--text-faint); font-weight: 500; }
+.msg-changes:hover { color: var(--text); background: var(--green-soft); }
+.msg-changes:hover .msg-changes-count { color: var(--text-dim); }
+
+/* ── Run inspector ────────────────────────────────────────── */
+.run-loading {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--space-3);
+  color: var(--text-dim); padding: var(--space-6) 0;
+}
+
+/* Shared with the task board's run chips (TasksView) — typography only;
+   board.css owns the per-status colors there. */
+.run-status {
+  text-transform: uppercase; font-weight: 700;
+  letter-spacing: var(--ls-caps); font-size: var(--fs-micro); flex-shrink: 0;
+}
+
+/* Who ran, when, how it ended, what it cost. This was a card wrapping a
+   header and a fact grid; it is now a header and a fact grid, with the one
+   hairline that actually divides them. */
+.run-card { margin-bottom: var(--space-6); }
+.run-head {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding-bottom: var(--space-4);
+}
+.run-head .avatar {
+  width: 34px; height: 34px; font-size: var(--fs-md);
+  border-radius: var(--radius);
+}
+.run-head-main { flex: 1; min-width: 0; }
+.run-agent-name {
+  font-weight: 700; font-size: var(--fs-md); letter-spacing: var(--ls-title);
+}
+.run-head-sub {
+  color: var(--text-faint); font-size: var(--fs-xs); margin-top: var(--space-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.run-chip {
+  display: inline-flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+  padding: var(--space-1) var(--space-3); border-radius: 999px;
+  font-size: var(--fs-micro); font-weight: 700;
+  letter-spacing: var(--ls-caps); text-transform: uppercase;
+  color: var(--text-dim); background: var(--bg-hover);
+}
+.run-chip-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor; flex-shrink: 0;
+}
+.run-chip.running { color: var(--accent); background: var(--accent-soft); }
+.run-chip.running .run-chip-dot { animation: hq-breathe 1.7s var(--ease) infinite; }
+.run-chip.done { color: var(--green); background: var(--green-soft); }
+.run-chip.error { color: var(--red); background: var(--red-soft); }
+.run-chip.cancelled { color: var(--text-faint); }
+
+.run-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-4) var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+}
+.run-fact {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  min-width: 0; font-size: var(--fs-sm);
+}
+.run-fact-wide { grid-column: 1 / -1; }
+.run-fact-label {
+  font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase;
+  letter-spacing: var(--ls-caps); color: var(--text-faint);
+}
+.run-fact-value {
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mono-trunc {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Activity log: a heading, then a scroller. The scroller keeps a recessed
+   fill because it is a well you look into — that is what says "this clips",
+   and it says it without an outline. */
+.run-timeline-head {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.run-ev-count {
+  margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs);
+}
+.run-timeline {
+  --run-rail: 68.5px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  max-height: 320px; overflow-y: auto;
+  padding: var(--space-2) 0; margin: 0 0 var(--space-6);
+}
+.run-ev {
+  position: relative;
+  display: grid; grid-template-columns: 40px 14px 32px minmax(0, 1fr);
+  align-items: start; gap: var(--space-3);
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--fs-xs); line-height: 1.5;
+}
+/* One rail segment per row: they stack into a continuous wire, trimmed
+   to the first and last dot. Neutral — it is a spine, not an accent. */
+.run-ev::before {
+  content: ""; position: absolute;
+  left: var(--run-rail); top: 0; bottom: 0;
+  width: 1px; background: var(--border);
+}
+.run-ev:first-child::before { top: 11px; }
+.run-ev:last-child::before { bottom: auto; height: 11px; }
+.run-ev:not(.stderr):hover { background: var(--bg-hover); }
+.run-ev-time {
+  font-family: var(--mono); font-size: var(--fs-micro);
+  color: var(--text-faint); text-align: right;
+}
+.run-ev-dot {
+  position: relative; /* paints over the rail */
+  width: 7px; height: 7px; margin: 5px auto 0;
+  border-radius: 50%; background: var(--text-faint);
+}
+.run-ev-kind {
+  font-family: var(--mono); font-size: var(--fs-micro);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.run-ev-detail {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-dim);
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+}
+.run-ev.tool .run-ev-dot { background: var(--cyan); }
+.run-ev.tool .run-ev-kind { color: var(--cyan); }
+.run-ev.text .run-ev-dot { background: var(--accent); }
+.run-ev.text .run-ev-kind { color: var(--accent); }
+.run-ev.text .run-ev-detail { color: var(--text); }
+.run-ev.stderr { background: var(--red-soft); }
+.run-ev.stderr .run-ev-dot { background: var(--red); }
+.run-ev.stderr .run-ev-kind, .run-ev.stderr .run-ev-detail { color: var(--red); }
+.run-ev.live .run-ev-dot {
+  background: var(--accent);
+  animation: hq-breathe 1.7s var(--ease) infinite;
+}
+.run-ev.live .run-ev-kind, .run-ev.live .run-ev-detail { color: var(--text-faint); }
+.run-empty {
+  color: var(--text-faint); font-size: var(--fs-sm);
+  padding: var(--space-5); text-align: center;
+}
+
+.run-prompt { border-top: 1px solid var(--border-soft); padding-top: var(--space-4); }
+.run-prompt summary {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  cursor: pointer; list-style: none;
+  color: var(--text-dim);
+  font-size: var(--fs-xs); font-weight: 700;
+  text-transform: uppercase; letter-spacing: var(--ls-caps);
+  transition: color var(--dur-fast) var(--ease);
+}
+.run-prompt summary::-webkit-details-marker { display: none; }
+.run-prompt summary::before {
+  content: "›"; display: inline-block;
+  font-size: var(--fs-md); line-height: 1;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.run-prompt[open] summary::before { transform: rotate(90deg); }
+.run-prompt summary:hover,
+.run-prompt summary:focus-visible { color: var(--text); }
+.run-prompt pre {
+  background: var(--code-bg);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-3) 0 0;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-dim);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow-y: auto;
+}
+
+/* ── Session chips in the members modal ───────────────────── */
+.member-row .session-chip {
+  margin-left: auto;
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: var(--green-border);
+}
+.session-reset { font-size: var(--fs-sm); flex-shrink: 0; }
+
+/* ── Channel settings: orchestration ──────────────────────────
+   A heading and the thing it names. The panel these sat in was a box
+   inside the settings modal's box. */
+.settings-section { margin: 0 0 var(--space-6); }
+.section-head {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.section-note {
+  margin-left: auto; color: var(--text-faint); font-size: var(--fs-xs);
+}
+
+.mode-options { display: flex; flex-direction: column; gap: var(--space-1); }
+.mode-option {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  width: 100%; min-height: 36px; text-align: left;
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  background: none;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.mode-option:hover { background: var(--bg-hover); }
+.mode-option.active { background: var(--accent-soft); }
+/* The radio itself: a circle is the control, not a container. */
+.mode-dot {
+  width: 13px; height: 13px; margin-top: 3px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-input);
+  transition: var(--t-color), box-shadow var(--dur-fast) var(--ease);
+}
+.mode-option:hover .mode-dot { border-color: var(--text-faint); }
+.mode-option.active .mode-dot {
+  border-color: var(--accent); background: var(--accent);
+  box-shadow: inset 0 0 0 2.5px var(--bg-input);
+}
+.mode-text { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.mode-name {
+  font-size: var(--fs); font-weight: 650; color: var(--text-dim);
+  transition: color var(--dur-fast) var(--ease);
+}
+.mode-option.active .mode-name { color: var(--text); }
+/* The blurb is the whole point of this control — it is what the user is
+   choosing between — so it stays at secondary, not faint. */
+.mode-blurb { font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.5; }
+
+.settings-section .lead-field { margin: var(--space-4) 0 0; }
+.lead-note { color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.5; }
+/* Same two signals as the composer's nudge, and the same absence of a third. */
+.lead-note.warn {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+}
+
+/* ── Channel settings: agent chaining checkbox ────────────── */
+.chaining-field {
+  display: flex; flex-direction: row; align-items: center; gap: var(--space-3);
+  min-height: 36px;
+  margin: 0 calc(var(--space-3) * -1) var(--space-4);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer; font-size: var(--fs);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.chaining-field:hover { background: var(--bg-hover); }
+.chaining-field input { width: auto; }
+.settings-section .chaining-field {
+  margin: var(--space-4) 0 0; font-size: var(--fs-sm); color: var(--text-dim);
+}
+
+/* ── Channel connections in the header ────────────────────────
+   The channel is an entity like any other: who is on it and what
+   it is about belong next to its name, not three clicks away.   */
+.chan-cx { display: inline-flex; align-items: center; gap: var(--space-2); }
+.chan-cx-open,
+.chan-cx-add {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  min-height: 22px;
+  padding: 0 var(--space-3); border-radius: 999px;
+  background: var(--bg-hover); color: var(--text-dim);
+  font-size: var(--fs-micro); white-space: nowrap; cursor: pointer;
+  transition: var(--t-color);
+}
+.chan-cx-open { padding-left: var(--space-2); }
+.chan-cx-open:hover,
+.chan-cx-add:hover { color: var(--text); background: var(--accent-soft); }
+/* The add affordance stays quiet until the header is worth reading. */
+.chan-cx-add { color: var(--text-faint); background: none; }
+.pane-header:hover .chan-cx-add,
+.chan-cx-add:focus-visible { background: var(--bg-hover); }
+
+/* ── Whose agent it is ────────────────────────────────────────
+   Never concatenated into the name: in a shared roster the name
+   is the teammate and this is provenance.                       */
+.owner-tag {
+  font-size: var(--fs-micro); color: var(--text-faint);
+  background: var(--bg-hover);
+  padding: 0 var(--space-2); border-radius: 999px; line-height: 1.7;
+  white-space: nowrap;
+}
+
+/* ── References inside a message body ─────────────────────────
+   The chip is portalled into this placeholder, so the span only
+   has to sit on the text baseline without disturbing the line.  */
+.msg-chip {
+  display: inline-flex; vertical-align: baseline;
+  margin: 0 1px; max-width: 100%;
+}
+
+/* Everything this message is connected to, under the body. Chips
+   already named in the prose are not repeated here.             */
+.msg-links {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.msg-links-label {
+  color: var(--text-faint); font-size: var(--fs-micro);
+  line-height: 1.9; flex-shrink: 0;
+}
+.msg-links-items {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  list-style: none; margin: 0; padding: 0; min-width: 0;
+}
+
+/* ── The hover toolbar on a message ───────────────────────────
+   One place for everything you can do to a message, revealed by
+   hover or by tabbing into it — never by hover alone. It genuinely
+   floats over the transcript, so it takes the overlay level. */
+:is(.messages, .thread-msgs) .msg-actions {
+  position: absolute; top: calc(var(--space-4) * -1); right: var(--space-4);
+  z-index: 4;
+  display: flex; align-items: center; gap: 1px;
+  padding: var(--space-1); border-radius: var(--radius);
+  background: var(--bg-overlay); box-shadow: var(--shadow-md);
+  opacity: 0; pointer-events: none;
+  transition: var(--t-fade);
+}
+:is(.messages, .thread-msgs) .msg:hover .msg-actions,
+:is(.messages, .thread-msgs) .msg:focus-within .msg-actions {
+  opacity: 1; pointer-events: auto;
+}
+.msg-action {
+  min-width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 var(--space-2); border-radius: var(--radius-sm);
+  color: var(--text-faint); font-size: var(--fs-sm); line-height: 1;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+/* --bg-active because the toolbar floats on --bg-overlay, which several themes
+   set equal to --bg-hover; a --bg-hover fill there would read as nothing. */
+.msg-action:hover { color: var(--text); background: var(--bg-active); }
+.msg-action:focus-visible { color: var(--text); }
+.msg-action:disabled { opacity: 0.35; cursor: default; }
+.msg-action:disabled:hover { color: var(--text-faint); background: none; }
+/* The toolbar hangs off the top-right, so its menu drops below it. */
+.action-pop { right: 0; top: calc(100% + var(--space-2)); }
+
+/* ── Composer: who this reaches ───────────────────────────────
+   Answered before Send, because finding out afterwards costs the
+   turn — and an agent whose host is offline cannot answer at all. */
+.compose-routing {
+  margin: var(--space-3) 0 0;
+  color: var(--text-dim); font-size: var(--fs-sm);
+}
+.cr-line {
+  display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+}
+.cr-arrow { color: var(--text-faint); }
+.cr-who {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-3); border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text); font-size: var(--fs-micro); line-height: 1.8;
+  white-space: nowrap;
+}
+.cr-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green); flex-shrink: 0;
+}
+.cr-dot-off { background: var(--yellow); }
+.cr-verb { color: var(--text-faint); font-size: var(--fs-micro); }
+.cr-none { color: var(--text-faint); }
+
+/* ── Composer: slash commands ─────────────────────────────── */
+.slash-pop { max-height: 260px; overflow-y: auto; }
+/* A real button, so the list is reachable and clickable either way. */
+.slash-opt { gap: var(--space-3); width: 100%; text-align: left; }
+.slash-opt:focus-visible { background: var(--accent-soft); }
+.slash-name {
+  font-family: var(--mono); font-size: var(--fs-sm);
+  font-weight: 600; color: var(--accent); white-space: nowrap;
+}
+.slash-args {
+  font-family: var(--mono); font-size: var(--fs-micro);
+  color: var(--text-faint); white-space: nowrap;
+}
+.slash-opt .mention-label {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.slash-scope { flex-shrink: 0; }
+/* A command Spaces answers itself never reaches a harness — worth saying,
+   because the difference is where the work happens. */
+.slash-local {
+  color: var(--accent); background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.mention-opt.mention-on { background: var(--accent-soft); }
+
+/* ── Composer: the keys, and the single-agent note ────────── */
+.composer-foot {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  flex-wrap: wrap; margin-top: var(--space-3);
+}
+.composer-foot .composer-hint { margin-top: 0; }
+.composer-keys {
+  margin-left: auto; display: inline-flex; gap: var(--space-4);
+  color: var(--text-faint); font-size: var(--fs-micro);
+}
+.composer-keys kbd {
+  font-family: var(--mono); font-size: var(--fs-micro);
+  padding: 0 var(--space-1); margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active); color: var(--text-dim);
+}
+
+/* ── Empty channel ────────────────────────────────────────────
+   A channel with no members routes nothing anywhere, so the blank
+   state teaches the routing rule rather than apologising.        */
+.chat-blank { gap: var(--space-3); max-width: 62ch; margin: 0 auto; }
+.chat-blank-rule { color: var(--text-faint); font-size: var(--fs-sm); }
+.chat-blank .btn { margin-top: var(--space-2); }
+
+/* An agent that cannot run right now, in the members list. */
+.member-off {
+  color: var(--yellow); background: var(--yellow-soft);
+  border-color: var(--yellow-border);
+}
+
+/* ── Motion preferences ───────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  :is(.messages, .thread-msgs) .msg,
+  :is(.messages, .thread-msgs) .running-note .spinner,
+  .thread-panel,
+  .reply-pill,
+  .reply-pill::after,
+  .reply-avatars .avatar,
+  .msg-inspect,
+  .msg-meta-btn,
+  .msg-meta-btn::after,
+  .msg-changes,
+  :is(.messages, .thread-msgs) .msg-actions,
+  .msg-action,
+  .chan-cx-open,
+  .chan-cx-add,
+  .mode-chip,
+  .mode-option,
+  .mode-dot,
+  .mode-name,
+  .queue-dot,
+  .run-chip.running .run-chip-dot,
+  .run-ev.live .run-ev-dot,
+  .run-prompt summary,
+  .run-prompt summary::before,
+  .reaction-chip,
+  .chaining-field {
+    animation: none;
+    transition: none;
+  }
+}

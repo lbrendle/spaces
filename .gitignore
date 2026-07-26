@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+dist/
+target/
+.next/
+.vinext/
+.wrangler/
+*.log
+*.pem
+.env
+.env.*
+!.env.example
+.dev.vars
+portal/.openai/hosting.json
+desktop/release/assets/*
+!desktop/release/assets/.gitkeep

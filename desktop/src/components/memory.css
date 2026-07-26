@@ -1,0 +1,824 @@
+/* ── Project memory ──────────────────────────────────────────── */
+/*
+ * Imported from MemoryView.tsx, so it lands wherever the first import of that
+ * view does — nothing here may rely on cascade order against App.css. Every
+ * rule is .mem-scoped and no shared primitive (.btn, .chip, .md, .rc, .cx, .ec)
+ * is redefined.
+ *
+ * Focus is App.css's. This file used to draw five copies of the same accent
+ * ring as a two-layer box-shadow, each naming the surface behind it; the one
+ * survivor is on .mem-card-open::after, because that pseudo-element *is* the
+ * card's hit area and there is nothing else for a ring to land on.
+ *
+ * Colours are theme tokens only. The three tinted things — a kind pill, the
+ * budget meter and the "not sent" flag — carry meaning in their tint, so they
+ * use the semantic tokens (purple/cyan, yellow, red) rather than the accent.
+ */
+
+.mem {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Two independent scrollers: reading a long entry must not scroll the list out
+   from under the person reading it. */
+.mem-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/*
+ * The list column's own chrome — the budget line and the two filter rows — is
+ * the price of admission before a single entry can be read, so it is charged at
+ * --space-4 between its parts rather than --space-6. Sections of a *page* need
+ * --space-6 to separate; a meter, a search box and the list they both describe
+ * are one thing.
+ */
+.mem-list-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5) calc(var(--space-6) * 1.7);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The floor is 400px and not 330px because that is what one row of filters
+   actually measures. A column narrower than its own toolbar does not save
+   space — it spends it, on a second row of chrome above every entry. */
+.mem[data-wide] .mem-list-col {
+  flex: 0 0 clamp(410px, 36%, 470px);
+  border-right: 1px solid var(--border-soft);
+}
+
+.mem-detail-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-5) var(--space-6) calc(var(--space-6) * 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ── shared small type ────────────────────────────────────────── */
+
+.mem-h3 {
+  margin: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.mem-sub {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.mem-none {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  font-style: italic;
+}
+.mem-none kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-style: normal;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-dim);
+}
+
+/* ── the budget meter ─────────────────────────────────────────── */
+/*
+ * How close the project is to spending its whole context slice. This is the
+ * one genuine data visualisation in the file, and the bar carries the reading —
+ * so the fill is tinted by level and the box around it is gone. It used to be a
+ * filled, bordered panel in the accent, then yellow, then red: three surfaces
+ * saying what one bar already said.
+ */
+
+/* One sentence and the bar it describes. It was a lead paragraph, a bar and a
+   three-item fact list — three blocks and about 100px, above the list, before
+   anybody had read one entry. The sentence carries all three facts. */
+.mem-meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The sentence itself. It is a <p>, so without this it takes the UA's 1em top
+   and bottom margins and reopens the gap the tightening just closed. */
+.mem-meter-lead {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.mem-meter-lead strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-meter-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+.mem-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.mem-meter[data-level="high"] .mem-meter-fill {
+  background: var(--yellow);
+}
+.mem-meter[data-level="over"] .mem-meter-fill {
+  background: var(--red);
+}
+
+/* The warning is a sentence in the tone of the level, not a rule down its
+   left edge. */
+.mem-meter-warn {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--yellow);
+}
+.mem-meter[data-level="over"] .mem-meter-warn {
+  color: var(--red);
+}
+
+/* ── toolbar ──────────────────────────────────────────────────── */
+
+/*
+ * Two rows, and it was three: a search row, a filter row and a count line of
+ * its own. The count now rides at the end of the filter row, where it is the
+ * answer to what that row just did.
+ *
+ * Which row a control belongs to is the rule-of-thumb the screen is built on:
+ * row one changes what you are looking *through* (a query, an order), row two
+ * changes what is *in* the list. They do not look alike — the sort is a
+ * labelled select, the filters are chips — so it is never ambiguous which of
+ * the two a control will do.
+ */
+.mem-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mem-tools-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.mem-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.mem-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+/* Height comes from --row-h, the app's hit-area floor, instead of from the
+   generic field padding — which was 9px top and bottom and made the one control
+   on this screen taller than every button beside it. */
+.mem-search-input {
+  height: var(--row-h);
+  padding: 0 var(--space-3) 0 30px;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+}
+/* Safari draws its own clear button; ours is the filter-reset in the list. */
+.mem-search-input::-webkit-search-decoration,
+.mem-search-input::-webkit-search-results-button {
+  appearance: none;
+}
+
+.mem-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mem-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.mem-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+/* This pill starts with a --bg-raised fill, and --accent-soft is 12–16% alpha:
+   painted here it replaces that fill rather than washing over it, which on a
+   light theme reads as *less* than the pills beside it. --accent-soft-strong is
+   the same treatment at the weight the app uses wherever a selected wash has to
+   land on something already filled. */
+.mem-toggle-on,
+.mem-toggle-on:hover {
+  background: var(--accent-soft-strong);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Ordering, not filtering — so it wears a word rather than a chip, and sits in
+   the row above the chips instead of on the end of them. */
+.mem-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.mem-sort-label {
+  white-space: nowrap;
+}
+.mem-sort select {
+  width: auto;
+  padding: var(--space-1) var(--space-6) var(--space-1) var(--space-3);
+  border-radius: 999px;
+  border-color: var(--border-soft);
+  background-color: var(--bg-raised);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.mem-count {
+  margin: 0 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* ── the list ─────────────────────────────────────────────────── */
+
+/*
+ * Entries were cards: filled, bordered, rounded, and the selected one grew an
+ * inset 2.5px accent bar down its left edge on top of that. Then they were rows
+ * with a hairline between every pair. The hairline has gone too — twenty of
+ * them down a column is twenty lines of noise, and nothing was ever in danger
+ * of running together: a 15px/700 title over 11.5px metadata, with 13px of
+ * padding above and below, separates itself. Delete every border on this
+ * screen and the list still scans; that is the test it now passes.
+ *
+ * Each entry reads top to bottom in the order it is wanted: title, what it
+ * says, and only then the metadata about it. The kind, the prompt rank, the
+ * flags and the time used to sit in a strip *above* the title, so the first
+ * thing the eye met on every row was bookkeeping.
+ */
+.mem-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mem-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.mem-card:hover {
+  background: var(--bg-hover);
+}
+.mem-card-on,
+.mem-card-on:hover {
+  background: var(--accent-soft);
+}
+/* Past the cutoff: written, stored, and never read by an agent. */
+.mem-card-out .mem-card-open,
+.mem-card-out .mem-card-md,
+.mem-card-out .mem-card-snip {
+  opacity: 0.72;
+}
+
+/* Title line: the title itself, and the pin, which is the only control on the
+   row that is not "open this". */
+.mem-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.mem-card-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mem-card-kind[data-kind="decision"] {
+  color: var(--purple);
+}
+.mem-card-kind[data-kind="context"] {
+  color: var(--cyan);
+}
+.mem-card-kind-glyph {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.mem-card-rank {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * "not sent" and "trimmed" are the outcome of the cutoff, and an outcome is
+ * metadata: a coloured dot and a word, in the footer with the time and the
+ * rank. They were filled, bordered, tinted pills sitting above the title, so on
+ * a screen of twelve entries the loudest things on it were two words about the
+ * two that had gone wrong.
+ */
+.mem-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.mem-flag::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.mem-flag-out {
+  color: var(--red);
+}
+.mem-flag-trim {
+  color: var(--yellow);
+}
+
+.mem-card-time {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Sits above the stretched hit area so the pin stays a control of its own. */
+.mem-pin {
+  position: relative;
+  z-index: 1;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  line-height: 1;
+  font-size: var(--fs-sm);
+  opacity: 0.3;
+  filter: grayscale(1);
+  transition: var(--t-fade), var(--t-color);
+}
+.mem-card:hover .mem-pin {
+  opacity: 0.55;
+}
+.mem-pin:hover {
+  opacity: 1;
+  filter: none;
+  background: var(--bg-active);
+}
+.mem-pin-on,
+.mem-card:hover .mem-pin-on {
+  opacity: 1;
+  filter: none;
+}
+
+/* The title is the accessible name of the row; ::after makes the whole row its
+   hit area without nesting anything inside a button — which is also why the
+   ring has to be drawn there. Same width, same colour, same offset as App.css:
+   it is the one treatment, applied to the only element that can carry it. */
+.mem-card-open {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: 1.35;
+  color: var(--text);
+}
+.mem-card-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+}
+.mem-card-open:focus-visible {
+  outline: none;
+}
+.mem-card-open:focus-visible::after {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+.mem-hit {
+  background: var(--accent-soft-strong);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.mem-card-snip {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+/* Clamped by height rather than by character count, so a preview never cuts a
+   fenced block open. It used to fade out under a mask gradient; the clamp says
+   the same thing without one, and gradients are not how this app draws. */
+.mem-card-md {
+  max-height: 7.4em;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.mem-card-md .md-h {
+  font-size: var(--fs-sm);
+  margin: var(--space-1) 0 2px;
+}
+
+/* Everything the entry is *about*, on one line under what it says: kind, where
+   it lands in the prompt, whether it got there, what it is linked to, when it
+   changed. The time is pushed to the right edge so it forms a column down the
+   list rather than landing wherever the sentence before it ended. */
+.mem-card-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  min-height: 18px;
+}
+.mem-card-foot:empty {
+  display: none;
+}
+
+.mem-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+}
+.mem-empty p {
+  margin: 0;
+}
+
+/* ── templates ────────────────────────────────────────────────── */
+
+/* Ways to start writing. They are hit targets, so they take a hover fill —
+   they were filled, bordered cards whose border warmed to the accent. */
+.mem-tpl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mem-tpl-compact {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.mem-tpl-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  min-height: 36px;
+  padding: var(--space-3);
+  text-align: left;
+  border-radius: var(--radius);
+  transition:
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.mem-tpl-btn:hover {
+  background: var(--bg-hover);
+}
+/* The shared press token, which the foundation blanks under reduced motion. */
+.mem-tpl-btn:active {
+  transform: var(--press);
+}
+.mem-tpl-glyph {
+  font-size: var(--fs-md);
+  line-height: 1.2;
+  color: var(--accent);
+}
+.mem-tpl-name {
+  font-size: var(--fs);
+  font-weight: 650;
+  color: var(--text);
+}
+.mem-tpl-help {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ── the blank detail pane ────────────────────────────────────── */
+
+.mem-blank {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 62ch;
+  padding-top: var(--space-2);
+}
+.mem-blank-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+.mem-blank-text {
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+/* ── the reader ───────────────────────────────────────────────── */
+
+.mem-read {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 78ch;
+}
+
+.mem-read-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.mem-read-spacer {
+  flex: 1 1 auto;
+}
+
+.mem-read-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mem-read-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  line-height: 1.25;
+}
+.mem-read-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.mem-read-body {
+  font-size: var(--fs);
+  line-height: 1.68;
+  color: var(--text);
+}
+
+/* Two sections of one document. Each has a heading and --space-6 of air above
+   it from .mem-read's own gap; a rule as well was the belt on top of the
+   braces. */
+.mem-read-prompt,
+.mem-read-cx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+/* The literal string, monospaced, because "roughly what agents see" is what
+   people already assume and are wrong about. A different medium, so it is one
+   of the two containers left in this file.
+
+   It does not scroll. It used to cap at 15em and grow a scrollbar — a second
+   vertical scroller inside the reader's own, on the same axis, so a wheel over
+   it moved one of two things depending on where the pointer happened to be. One
+   scroll region per surface: the reader's. */
+.mem-prompt-line {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── the editor ───────────────────────────────────────────────── */
+
+.mem-ed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 108ch;
+}
+
+.mem-ed-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.mem-ed-what {
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+/* Not a save state — the absence of one. The indicator (.svst) says nothing
+   here because there is nothing to save into, and this says why. */
+.mem-blocked {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--yellow-border);
+  border-radius: 999px;
+  background: var(--yellow-soft);
+  color: var(--yellow);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+.mem-ed-title {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  padding: var(--space-3) var(--space-4);
+}
+
+.mem-ed-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+/* Names the chip group beside it, so the two groups in this row are not the
+   same wordless control twice. Same voice as .mem-sort-label on the list. */
+.mem-ed-label {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.mem-ed-tpl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mem-ed-panes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  align-items: stretch;
+}
+.mem-ed-panes[data-view="both"] {
+  grid-template-columns: 1fr 1fr;
+}
+
+.mem-ed-text {
+  min-height: 42vh;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+/* The rendered half of the split. It sits beside a textarea and has to read as
+   the same object, so it keeps that object's frame. */
+.mem-ed-preview {
+  min-height: 42vh;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-size: var(--fs);
+  line-height: 1.68;
+}
+
+.mem-ed-count {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.mem-ed-count-over {
+  color: var(--yellow);
+}
+
+/* The consequence of what is being typed. Two lines of text in the tone of the
+   level — it was a filled box with a 2px accent or red rule down its left. */
+.mem-impact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mem-impact-line {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+.mem-impact-line strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.mem-impact-warn {
+  color: var(--yellow);
+}
+.mem-impact[data-level="out"] .mem-impact-line {
+  color: var(--red);
+}
+
+.mem-ed-cx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+.mem-ed-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+.mem-ed-foot-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* Motion is silenced globally in App.css — both by the media query and by the
+   data-reduce-motion attribute the appearance settings set — so nothing in
+   this file repeats it. */

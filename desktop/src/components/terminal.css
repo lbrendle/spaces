@@ -1,0 +1,409 @@
+/* ── Interactive terminal ─────────────────────────────────────── */
+/*
+ * terminal.css is imported from TerminalPane.tsx. Not one literal color lives
+ * here: the 16 ANSI slots resolve to theme tokens, so every one of the 14 light
+ * and dark themes renders a coherent terminal.
+ *
+ * Backgrounds go through color-mix() rather than raw tokens — a full-saturation
+ * ANSI background under body text is unreadable in half the themes, and mixing
+ * toward transparent lets --code-bg show through at the right weight in both
+ * appearances without a second set of variables.
+ *
+ * Overrides of shared primitives (.modal-wide, .btn, .banner) always carry a
+ * tm- class in the selector, so they win on specificity rather than on import
+ * order.
+ */
+
+/* A terminal needs real columns: 80 of them at 12px monospace is wider than the
+   640px .modal-wide used for forms. Scoped with :has() so only this modal
+   widens. */
+.modal-wide:has(.tm-root) {
+  width: 1020px;
+}
+
+.tm-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tm-embed {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  padding: 0;
+  background: var(--code-bg);
+}
+
+.tm-root-embedded {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  gap: 0;
+  background: var(--code-bg);
+}
+
+.tm-root-embedded .tm-bar {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--code-border);
+  background: color-mix(in srgb, var(--code-bg) 88%, var(--bg-raised));
+}
+
+.tm-root-embedded .tm-cmd,
+.tm-root-embedded .tm-cwd {
+  border: 1px solid var(--code-border);
+  background: color-mix(in srgb, var(--bg-raised) 52%, var(--code-bg));
+}
+
+.tm-root-embedded .tm-cwd {
+  padding-left: 7px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.tm-root-embedded .tm-screen {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  padding: 14px 16px 20px;
+  border: 0;
+  border-radius: 0;
+  background: var(--code-bg);
+  font-size: 12.5px;
+}
+
+/* Full-bleed inside a clipping parent, so it takes the one permitted focus
+   variant from App.css rather than painting a ring of its own. */
+.tm-root-embedded .tm-screen:focus-visible {
+  border-color: transparent;
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+.tm-root-embedded .tm-hint {
+  min-height: 27px;
+  padding: 5px 11px;
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--code-border);
+  background: color-mix(in srgb, var(--code-bg) 90%, var(--bg-raised));
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.015em;
+}
+
+/* ── toolbar ─────────────────────────────────────────────────── */
+
+.tm-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+}
+
+.tm-cmd,
+.tm-cwd {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--inline-code-bg);
+}
+.tm-cmd {
+  color: var(--text);
+  flex-shrink: 0;
+  max-width: 45%;
+}
+.tm-cwd {
+  color: var(--text-faint);
+  background: none;
+  padding-left: 0;
+}
+
+.tm-state {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.tm-state.live {
+  color: var(--green);
+}
+.tm-state.live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.btn.tm-restart {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.banner.warn.tm-error {
+  padding: 7px 10px;
+  font-size: 12px;
+  max-height: 120px;
+  overflow-y: auto;
+  word-break: break-word;
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: var(--red-border);
+  border-radius: var(--radius-sm);
+}
+
+/* ── screen ──────────────────────────────────────────────────── */
+
+.tm-screen {
+  /* Local metrics, so the caret can be positioned in exact line boxes. */
+  --tm-fs: 12px;
+  --tm-lh: 1.45;
+  --tm-line-h: calc(var(--tm-fs) * var(--tm-lh));
+
+  height: 56vh;
+  min-height: 220px;
+  overflow-x: auto;
+  /* Always reserve the vertical scrollbar. Letting it appear with the first
+     screenful would narrow the pane by 11px mid-session and change the column
+     count under the running process — the top of the scrollback would then be
+     wrapped at a width that no longer matches the bottom. */
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  padding: 9px 11px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: var(--tm-fs);
+  line-height: var(--tm-lh);
+  color: var(--text);
+  tab-size: 8;
+  cursor: text;
+}
+/* The pane takes keystrokes, so focus has to be unmistakable — but that is
+   what App.css's one outline is for. The border going accent is enough of a
+   second signal; the 2px coloured shadow it used to add was a glow. */
+.tm-screen:focus-visible {
+  border-color: var(--accent);
+}
+
+/* Positioning context for the caret and the measuring probe. Its width stays at
+   the visible width so the column count it reports is the column count the
+   process is told about; over-long lines overflow it and scroll. */
+.tm-rows {
+  position: relative;
+  min-height: 100%;
+  width: 100%;
+}
+
+/* pre, never wrap: one row per line is the geometry the caret and every \r
+   rewrite depend on. Ligatures off for the same reason — a fi ligature is one
+   glyph over two cells. */
+.tm-line {
+  min-height: var(--tm-line-h);
+  white-space: pre;
+  font-variant-ligatures: none;
+}
+
+/*
+ * Measures one character and one line box; never drawn. The 0×0 clipping box
+ * matters: an absolutely positioned probe still counts toward the scroll
+ * container's overflow, so without it the pane would report 40 columns of
+ * phantom horizontal scroll. offsetWidth/offsetHeight are unaffected by an
+ * ancestor's clip, so the measurement still works.
+ */
+.tm-probe-box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* Absolute so it shrink-wraps to its own text instead of inheriting the 0
+   width of the clipping box — offsetWidth has to be the real advance × 40. */
+.tm-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+}
+
+/* 1ch is exactly one advance in a monospace font, so the caret lands on the
+   cell the parser thinks the cursor is in. */
+.tm-caret {
+  position: absolute;
+  top: calc(var(--tm-row) * var(--tm-line-h));
+  left: calc(var(--tm-col) * 1ch);
+  width: 1ch;
+  height: var(--tm-line-h);
+  background: var(--accent);
+  opacity: 0.55;
+  border-radius: 1px;
+  pointer-events: none;
+  animation: tm-blink 1.1s steps(2, start) infinite;
+}
+@keyframes tm-blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+.tm-screen:not(:focus-within) .tm-caret {
+  animation: none;
+  opacity: 0.28;
+}
+
+.tm-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* ── could not start ─────────────────────────────────────────── */
+/*
+ * A terminal that never started used to be a blank rectangle with a thin banner
+ * floating above it. The reason belongs in the empty space itself, and it earns
+ * that space by being the only thing in it: what failed, and the words the
+ * process or the OS actually said.
+ *
+ * No container, no card. Type carries the hierarchy — the heading is the
+ * heading, the error is monospace because it is machine output, and the facts
+ * are a dim key/value pair. The one colour is on the error text.
+ */
+.tm-failure {
+  max-width: 62ch;
+  padding: var(--space-2) 0 var(--space-5);
+  font-family: var(--font);
+}
+
+.tm-failure strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.tm-failure-why {
+  margin: var(--space-2) 0 0;
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tm-failure-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-3);
+  margin: var(--space-3) 0 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.tm-failure-facts dt {
+  color: var(--text-faint);
+}
+
+.tm-failure-facts dd {
+  margin: 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ── SGR attributes ──────────────────────────────────────────── */
+
+/*
+ * Faux bold, on purpose. A real bold face swaps in different glyphs, and on
+ * macOS the bold monospace faces are missing the rounded box-drawing corners
+ * that every agent CLI draws its panels with — the fallback lands on a
+ * full-width symbol font, and a 48-character border comes out 60% too wide.
+ * Stroking the existing glyph emphasises it without touching a single advance,
+ * which keeps the character grid (and the caret) honest. Terminals render SGR 1
+ * as "brighter" anyway.
+ */
+.tm-bold {
+  -webkit-text-stroke: 0.3px currentColor;
+}
+.tm-dim {
+  opacity: 0.62;
+}
+.tm-italic {
+  font-style: italic;
+}
+.tm-under {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/*
+ * The 16 ANSI slots. There is no true black or white in a themeable palette —
+ * black would vanish on a dark theme and white on a light one — so slots 0/8
+ * and 7/15 map onto the text ramp instead, which keeps "bright white" brighter
+ * than "white" in both appearances.
+ */
+.tm-f0 { color: var(--text-faint); }
+.tm-f1 { color: var(--red); }
+.tm-f2 { color: var(--green); }
+.tm-f3 { color: var(--yellow); }
+.tm-f4 { color: var(--blue); }
+.tm-f5 { color: var(--purple); }
+.tm-f6 { color: var(--cyan); }
+.tm-f7 { color: var(--text-dim); }
+.tm-f8 { color: var(--text-faint); }
+.tm-f9 { color: var(--red); }
+.tm-f10 { color: var(--green); }
+.tm-f11 { color: var(--orange); }
+.tm-f12 { color: var(--blue); }
+.tm-f13 { color: var(--purple); }
+.tm-f14 { color: var(--cyan); }
+.tm-f15 { color: var(--text); }
+
+.tm-b0 { background: color-mix(in srgb, var(--text-faint) 30%, transparent); }
+.tm-b1 { background: color-mix(in srgb, var(--red) 30%, transparent); }
+.tm-b2 { background: color-mix(in srgb, var(--green) 30%, transparent); }
+.tm-b3 { background: color-mix(in srgb, var(--yellow) 30%, transparent); }
+.tm-b4 { background: color-mix(in srgb, var(--blue) 30%, transparent); }
+.tm-b5 { background: color-mix(in srgb, var(--purple) 30%, transparent); }
+.tm-b6 { background: color-mix(in srgb, var(--cyan) 30%, transparent); }
+.tm-b7 { background: color-mix(in srgb, var(--text-dim) 30%, transparent); }
+.tm-b8 { background: color-mix(in srgb, var(--text-faint) 42%, transparent); }
+.tm-b9 { background: color-mix(in srgb, var(--red) 42%, transparent); }
+.tm-b10 { background: color-mix(in srgb, var(--green) 42%, transparent); }
+.tm-b11 { background: color-mix(in srgb, var(--orange) 42%, transparent); }
+.tm-b12 { background: color-mix(in srgb, var(--blue) 42%, transparent); }
+.tm-b13 { background: color-mix(in srgb, var(--purple) 42%, transparent); }
+.tm-b14 { background: color-mix(in srgb, var(--cyan) 42%, transparent); }
+.tm-b15 { background: color-mix(in srgb, var(--text-dim) 42%, transparent); }
+
+/* Inverse video with no explicit colour set: the two defaults swap places. */
+.tm-f-inv { color: var(--code-bg); }
+.tm-b-inv { background: var(--text); }
+
+/* ── motion preferences ──────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-caret {
+    animation: none;
+  }
+}

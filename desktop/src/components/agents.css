@@ -1,0 +1,1218 @@
+/* ── Agents view: the roster, plus the harness editor ────────── */
+/*
+ * agents.css is imported from AgentsView.tsx, which App.tsx pulls in BEFORE
+ * "./App.css" — so anything that touches a shared primitive (.chip, .btn,
+ * .field) carries an extra class in the selector and wins on specificity, not
+ * order.
+ *
+ * Focus is NOT one of those things. App.css draws one focus treatment — an
+ * outline with an offset, which leaves a real hole so it survives whatever
+ * surface it lands on — and this file used to redraw it seven times as a
+ * two-layer accent box-shadow, each copy naming the surface behind it. All
+ * seven are gone.
+ *
+ * Selected is --accent-soft behind and --text on top: no edge, no bar, no ring.
+ * Colours are tokens only. No literal colour may appear in this file.
+ */
+
+/* ── the explainer ───────────────────────────────────────────── */
+
+.ag-about {
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
+}
+.ag-about-shut {
+  padding-bottom: var(--space-3);
+}
+.ag-about-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease);
+}
+.ag-about-toggle:hover {
+  color: var(--text);
+}
+.ag-about-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+.ag-about-chev {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.ag-about-body {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-5);
+}
+.ag-about-body dl {
+  margin: 0;
+  display: grid;
+  /* Two columns once the pane is wide enough that one would run to 140ch. */
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
+  gap: var(--space-5) var(--space-6);
+}
+.ag-about-body dt {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: var(--ls-title);
+}
+.ag-about-body dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-dim);
+  max-width: 82ch;
+}
+.ag-about-body code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 0.5px var(--space-2);
+  color: var(--text);
+}
+
+/* ── directory toolbar ───────────────────────────────────────── */
+
+.ag-h3-count {
+  margin-left: var(--space-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Sits at the top of the roster column, so its own margin would fight the
+   column's gap: the rule line is the separator, not whitespace. */
+.ag-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ag-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.ag-search input {
+  padding-left: 32px;
+  padding-right: 30px;
+  font-size: var(--fs-sm);
+}
+.ag-search input::-webkit-search-cancel-button {
+  display: none;
+}
+.ag-search-icon {
+  position: absolute;
+  left: 11px;
+  display: inline-flex;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.ag-search-clear {
+  position: absolute;
+  right: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  transition: var(--t-color);
+}
+.ag-search-clear:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+
+.ag-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+}
+.ag-filters .btn.tiny.ag-recheck {
+  margin-top: 0;
+  margin-left: auto;
+}
+
+/* ── the roster column ───────────────────────────────────────── */
+
+.ag {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Two independent scrollers: reading a long persona must not scroll the roster
+   out from under the person reading it. */
+.ag-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.ag-roster-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-5) calc(var(--space-6) * 1.7);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ag[data-wide] .ag-roster-col {
+  flex: 0 0 clamp(300px, 32%, 420px);
+  border-right: 1px solid var(--border-soft);
+}
+
+.ag-detail-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-5) var(--space-6) calc(var(--space-6) * 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ag-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ag-sec-head {
+  display: flex;
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ag-sec-empty {
+  margin: 0;
+}
+
+/* ── one agent, one line ─────────────────────────────────────── */
+
+.ag-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ag-rows:empty {
+  display: none;
+}
+
+/* A row is separated from its neighbours by being a row. It used to also carry
+   a 1px transparent border that turned --accent-border when selected. */
+.ag-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ag-row:hover {
+  background: var(--bg-hover);
+}
+.ag-row-on,
+.ag-row-on:hover {
+  background: var(--accent-soft);
+}
+
+.ag-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+.ag-row-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ag-row-name {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ag-row-sub {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+}
+.ag-row-role {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ag-row-handle {
+  font-family: var(--mono);
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+/* The state of a runtime, as a dot: green it can work, amber unknown, hollow
+   it lives on somebody else's machine. */
+.ag-row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.ag-row-dot-running {
+  background: var(--green);
+  animation: ag-pulse 1.9s var(--ease) infinite;
+}
+.ag-row-dot-ready {
+  background: var(--green);
+}
+.ag-row-dot-unknown {
+  background: var(--yellow);
+}
+.ag-row-dot-unavailable {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+}
+
+.ag-row-tail {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.ag-row-stat {
+  min-width: 18px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ag-row-flag {
+  padding: 0 var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Text that only assistive tech needs: "Scout — Running". */
+.ag-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── status ──────────────────────────────────────────────────── */
+
+@keyframes ag-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.ag-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+.ag-note-quiet {
+  margin-top: -3px;
+}
+
+/* A granted permission, wherever it is shown: extra class, so this never
+   redefines the shared .chip primitive. */
+.chip.risky {
+  font-family: var(--mono);
+  background: var(--yellow-soft);
+  border-color: var(--yellow-border);
+  color: var(--text);
+}
+
+/* ── blocks: workload, channels, teams ───────────────────────── */
+
+.ag-block {
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-4);
+}
+.ag-block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  min-height: 20px;
+}
+.ag-block-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+}
+.ag-block-count {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border-radius: 999px;
+  padding: 0 var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.ag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ag-role-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.ag-role-row:last-of-type {
+  margin-bottom: 0;
+}
+.ag-role-tag {
+  flex-shrink: 0;
+  width: 58px;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+}
+
+.ag-empty {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+
+.ag-more {
+  margin-top: var(--space-2);
+  padding: 1px 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+}
+.ag-more:hover {
+  text-decoration: underline;
+}
+
+.ag-via {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.ag-via-text {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* ── join a channel from here ────────────────────────────────── */
+
+.ag-pop-wrap {
+  position: relative;
+  margin-left: auto;
+}
+.ag-add {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-3) 1px var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  transition: var(--t-color);
+}
+.ag-add:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* Level 3: a popover. It floats, so it is one of the containers that earn it. */
+.ag-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  width: 252px;
+  max-width: 78vw;
+  padding: var(--space-2);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+.ag-pop-search {
+  font-size: var(--fs-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.ag-pop-list {
+  max-height: 216px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ag-pop-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ag-pop-item:hover {
+  background: var(--bg-hover);
+}
+/* The list scrolls inside a clipping parent, so this row's ring sits just
+   inside its edge — the one permitted variant, not a new treatment. */
+.ag-pop-item:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+.ag-pop-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ag-pop-sub {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.ag-pop-empty {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+/* ── teams ───────────────────────────────────────────────────── */
+
+.ag-team-members {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.ag-team-ready {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.ag-member-on {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--green);
+}
+
+/* ── the pane before anything is picked ──────────────────────── */
+
+.ag-blank-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 72ch;
+  padding-top: var(--space-1);
+}
+.ag-blank-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+.ag-blank-text {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+.ag-no-match {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.ag-no-match .btn.tiny {
+  margin-top: 0;
+}
+
+/* Three ways to start. They are hit targets, so they keep a shape — but the
+   shape is a hover fill, not a filled bordered card sitting on the pane. */
+.ag-preset-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.ag-preset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: left;
+  min-height: 36px;
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ag-preset:hover {
+  background: var(--bg-hover);
+}
+.ag-preset-label {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+.ag-preset-blurb {
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* ── the editor pane ─────────────────────────────────────────── */
+/*
+ * It replaced a modal, and it is allowed to breathe: a persona is prose, and
+ * prose written in a 480px dialog reads like a form field and gets written
+ * like one. Sections are separated by rule lines rather than cards so the eye
+ * runs straight down the column.
+ */
+
+.ag-ed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 112ch;
+}
+
+.ag-ed-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.ag-ed-bar .btn.tiny {
+  margin-top: 0;
+}
+.ag-ed-what {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ag-ed-spacer {
+  flex: 1 1 auto;
+}
+.ag-ed-keys {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.ag-ed-keys kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-dim);
+}
+
+/* Not a save state — the absence of one. The shared indicator (.svst) stays
+   silent while there is nothing to save into; this says why. */
+.ag-blocked {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--yellow-border);
+  border-radius: 999px;
+  background: var(--yellow-soft);
+  color: var(--yellow);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+.ag-ed-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-soft);
+}
+.ag-ed-sec:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+/* The shared field primitive carries its own bottom margin for stacked forms;
+   inside a gapped column that would double the rhythm. */
+.ag-ed-sec .field {
+  margin-bottom: 0;
+}
+
+.ag-h3 {
+  margin: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ag-ed-ident {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+}
+/* Dropped to sit on the input rather than on its label. */
+.ag-ed-ident .avatar {
+  margin-top: var(--space-5);
+  flex-shrink: 0;
+}
+.ag-ed-idfields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-5);
+  flex: 1;
+  min-width: 0;
+}
+.ag-ed-idfields .field {
+  min-width: 160px;
+}
+
+.ag-ed-mention {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.ag-ed-help {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 78ch;
+}
+
+/* Prose, in a box shaped like prose. */
+.ag-persona-text {
+  min-height: 32vh;
+  max-width: 84ch;
+  padding: var(--space-4) var(--space-5);
+  font-family: var(--font);
+  font-size: var(--fs);
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* What happens next. It used to be a paragraph with a 2px rule down its left
+   edge that turned green when the runtime was live — an accent bar, which is
+   the loudest tell in the app after emoji icons. The sentence says it. */
+.ag-next {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-faint);
+  max-width: 78ch;
+}
+.ag-next strong {
+  color: var(--text-dim);
+}
+.ag-next-live {
+  color: var(--text-dim);
+}
+.ag-next-live strong {
+  color: var(--text);
+}
+
+/* ── the assembled context ───────────────────────────────────── */
+
+/* A heading and a numbered list. It was a filled, bordered card whose only
+   content was that list, and every item in the list had a rule down its left
+   edge — one of which was drawn in the accent. The numerals do that job. */
+.ag-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.ag-ctx-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ag-ctx-title {
+  margin: 0;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ag-ctx-pick {
+  margin-left: auto;
+}
+.ag-ctx-pick select {
+  width: auto;
+  padding: 2px var(--space-6) 2px var(--space-3);
+  border-radius: 999px;
+  border-color: var(--border-soft);
+  background-color: var(--bg-raised);
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+}
+
+.ag-ctx-layers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ctx;
+}
+.ag-ctx-layer {
+  counter-increment: ctx;
+}
+.ag-ctx-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ag-ctx-label::before {
+  content: counter(ctx) ".";
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.ag-ctx-tag {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: none;
+  color: var(--accent);
+}
+
+.ag-ctx-body {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16em;
+  overflow-y: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* A layer that is not sent is described, not quoted — so it must not read as
+   text the agent receives. */
+.ag-ctx-layer[data-absent] .ag-ctx-body {
+  font-family: var(--font);
+  font-style: italic;
+  color: var(--text-faint);
+}
+
+.ag-ctx-foot {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.ag-reach {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 78ch;
+}
+.ag-reach-none {
+  color: var(--yellow);
+}
+/* Literal text an agent receives: a different medium, so it keeps its frame. */
+.ag-reach-block {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+}
+
+.ag-members {
+  display: flex;
+  flex-direction: column;
+  max-height: 44vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ag-ed-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.ag-ed-foot-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-faint);
+  max-width: 46ch;
+}
+
+/* ── editor: availability + handle collision ─────────────────── */
+
+/* One sentence about whether this machine can run the harness. It was a filled
+   box with a 2px green or grey rule down its left edge; it is a sentence. */
+.ag-avail {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  color: var(--text-faint);
+  max-width: 78ch;
+}
+.ag-avail-ready {
+  color: var(--text-dim);
+}
+
+/* A name collision is a thing you have to act on, so it keeps its fill. */
+.ag-clash {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--yellow-border);
+  background: var(--yellow-soft);
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.ag-clash svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--yellow);
+}
+.ag-clash strong {
+  color: var(--text);
+}
+
+/* ── harness picker ──────────────────────────────────────────── */
+
+.harness-blurb {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  margin: calc(var(--space-1) * -1) 0 var(--space-4);
+}
+
+/* ── generated option controls ───────────────────────────────── */
+
+.opt-group {
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-5);
+  margin-top: var(--space-6);
+}
+.opt-group:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: var(--space-1);
+}
+.opt-group-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+  margin-bottom: var(--space-4);
+}
+
+.opt {
+  margin-bottom: var(--space-5);
+}
+.opt:last-child {
+  margin-bottom: 2px;
+}
+.opt-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.opt-flag {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+.opt-hint {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  margin-top: var(--space-2);
+  max-width: 66ch;
+}
+
+.opt-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 30px;
+  cursor: pointer;
+  user-select: none;
+}
+.opt-check input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+.opt-check .opt-label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+}
+.opt-check + .opt-hint {
+  margin-left: var(--space-6);
+}
+
+.opt-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.opt-suggest .chip {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  padding: 1px var(--space-3);
+  transition: var(--t-color);
+}
+.opt-suggest .chip:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+.opt-suggest .chip.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.rep-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.rep-row input {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.rep-add {
+  margin-top: 2px;
+}
+
+.model-status {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.model-status.warn {
+  color: var(--yellow);
+}
+.model-link {
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  padding: 0;
+  text-align: left;
+}
+.model-link:hover {
+  text-decoration: underline;
+}
+
+/* ── command preview ─────────────────────────────────────────── */
+
+/* The exact argv about to be spawned: a different medium again, so it keeps
+   its frame. */
+.cmd-preview {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  padding: var(--space-4);
+  margin: var(--space-2) 0 var(--space-5);
+}
+.cmd-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+  margin-bottom: var(--space-2);
+}
+.cmd-preview-head .icon {
+  color: var(--accent);
+  display: inline-flex;
+}
+.cmd-preview-body {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+/* ── risk notice ─────────────────────────────────────────────── */
+
+/* Permissions being granted to something that runs shell commands. This one
+   genuinely has to be separable from everything around it. */
+.risk-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  background: var(--yellow-soft);
+  border: 1px solid var(--yellow-border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.risk-note .icon {
+  color: var(--yellow);
+  flex-shrink: 0;
+  margin-top: 2px;
+  display: inline-flex;
+}
+.risk-note code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--text);
+  background: var(--inline-code-bg);
+  border-radius: var(--radius-sm);
+  padding: 0.5px var(--space-2);
+}
+
+/* ── advanced disclosure ─────────────────────────────────────── */
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease);
+}
+.disclosure:hover {
+  color: var(--text);
+}
+.disclosure .icon {
+  display: inline-flex;
+  opacity: 0.7;
+}
+.disclosure-body {
+  margin-top: var(--space-2);
+  padding-top: 2px;
+}
+.disclosure-body input {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+/* Motion is silenced globally in App.css — both by the media query and by the
+   data-reduce-motion attribute the appearance settings set — so nothing in
+   this file repeats it. */

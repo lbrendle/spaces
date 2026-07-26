@@ -1,0 +1,300 @@
+/* ── Side panel ──────────────────────────────────────────────── */
+/*
+ * Imported from SidePanel.tsx, so it lands in the bundle wherever the first
+ * import does — nothing here may depend on cascade order. Every rule is
+ * `.sp-` scoped and no shared primitive (.btn, .icon-btn, .field, .modal-*)
+ * is redefined.
+ *
+ * Two rules deliberately name things this file does not own: #root, which the
+ * panel pads to make room for itself, and .tst-stack, which would otherwise
+ * pile toasts up underneath the panel. Both are written so specificity, not
+ * source order, decides them — an id plus an attribute beats `#root`, and an
+ * attribute plus a class beats `.tst-stack` — because this sheet can land at
+ * any point in the cascade. Neither reaches into another component's markup;
+ * they move an existing box out of the way of a new one.
+ *
+ * The panel is chrome, not a dialog: a raised surface with one hairline
+ * against the pane it sits beside. Inside it there are no cards — sections are
+ * a caps heading and the space under it. Colours are theme tokens only.
+ */
+
+/* ── the gutter ──────────────────────────────────────────────── */
+/*
+ * An open panel takes its width out of the app instead of covering it. This is
+ * what "non-blocking" means in practice: everything behind stays visible,
+ * clickable and scrollable, exactly as it does beside the inspector drawer.
+ *
+ * Not transitioned. The panel slides in over its own gutter, and animating the
+ * padding would re-layout every pane, terminal and canvas in the window on
+ * each of those frames to say the same thing the slide already says.
+ */
+@media (min-width: 1101px) {
+  :root[data-hq-panel="right"] #root { padding-right: var(--spaces-panel-w, 0px); }
+  :root[data-hq-panel="left"] #root { padding-left: var(--spaces-panel-w, 0px); }
+
+  /* Fixed to the viewport, so the gutter passes it by unless we say so. */
+  :root[data-hq-panel="right"] .tst-stack {
+    right: calc(var(--spaces-panel-w, 0px) + var(--space-5));
+  }
+}
+
+/* ── the surface ─────────────────────────────────────────────── */
+
+.sp {
+  --sp-w: 420px; /* the live value arrives inline, from localStorage */
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 89; /* the trailing-edge layer, shared with the inspector drawer:
+                  only one of the two is ever open — see SidePanel.tsx */
+  width: var(--sp-w);
+  max-width: calc(100vw - 44px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-raised);
+  --enter-dx: 16px;
+  animation: hq-slide var(--dur) var(--ease);
+}
+.sp[data-side="right"] {
+  right: 0;
+  border-left: 1px solid var(--border-soft);
+}
+.sp[data-side="left"] {
+  left: 0;
+  border-right: 1px solid var(--border-soft);
+  --enter-dx: -16px;
+}
+.sp:focus-visible {
+  outline: none; /* it takes focus on open; it is not a control */
+}
+
+/* A panel opened from this one is in front. Hidden rather than unmounted, so
+   the page behind keeps its scroll position and its half-typed fields — and
+   `visibility` rather than opacity, so it also leaves the tab order. */
+.sp[data-covered] {
+  visibility: hidden;
+}
+
+/* ── resize handle ───────────────────────────────────────────── */
+/* Overhangs the border so the grab target is comfortable while the visible
+   line stays a hairline. The line is the handle — it is the thing you are
+   pointing at, not an accent painted beside something else. */
+
+.sp-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sp[data-side="right"] .sp-grip { left: -3px; }
+.sp[data-side="left"] .sp-grip { right: -3px; }
+
+.sp-grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease), width var(--dur-fast) var(--ease);
+}
+.sp-grip:hover::after,
+.sp-grip:focus-visible::after {
+  width: 2px;
+  background: var(--accent);
+}
+.sp-grip:focus-visible {
+  outline: none;
+}
+
+/* While dragging, the pointer is captured but the cursor and the selection are
+   the document's — without this a fast drag selects the whole page. */
+.sp-dragging,
+.sp-dragging * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* ── header ──────────────────────────────────────────────────── */
+
+.sp-head {
+  flex: 0 0 auto;
+  /* The macOS traffic lights sit over the top strip everywhere, and matching
+     the inspector here is what lines a panel title up with a pane title. */
+  padding: calc(var(--titlebar) - 6px) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sp-head-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.sp-head-text {
+  min-width: 0;
+}
+
+.sp-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sp-sub {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sp-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* .btn.tiny carries a top margin for form rows; in a toolbar it must not. */
+.sp-tools .btn.tiny {
+  margin-top: 0;
+}
+.sp-tools a.btn:hover {
+  text-decoration: none;
+}
+
+/* The way back to the panel this one opened from. A row of its own above the
+   title, because a back affordance the width of a chevron is a target you have
+   to aim at, and the whole point of a panel is that it costs nothing to use. */
+.sp-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  margin-left: calc(var(--space-2) * -1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  transition: var(--t-color), var(--t-press);
+}
+.sp-back:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.sp-back:active {
+  transform: var(--press);
+}
+
+/* ── body ────────────────────────────────────────────────────── */
+
+.sp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5) var(--space-5) var(--space-6);
+}
+
+/* Sections are separated by space. That is the whole mechanism. */
+.sp-section + .sp-section {
+  margin-top: var(--space-6);
+}
+
+.sp-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+/* The body's own bottom padding is the space under the last thing in it. A
+   trailing .field margin on top of that reads as an empty row. */
+.sp-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── footer ──────────────────────────────────────────────────── */
+
+/* Pinned, so a long body cannot bury the primary action. `margin-right: auto`
+   on a child (a delete, a count, a hint) pushes it to the leading edge. */
+.sp-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+
+/* ── narrow windows ──────────────────────────────────────────── */
+/*
+ * Below ~1100px there is no room to sit beside anything: a 420px panel and a
+ * channel with a composer do not both fit. So the panel stops taking a gutter
+ * and starts floating over the surface — and once it covers the work rather
+ * than sitting next to it, a scrim is honest. It is still dismissible with
+ * Escape; the scrim gives the pointer the same exit.
+ *
+ * Focus is still not trapped, at any width. A panel that cannot be tabbed out
+ * of is a dialog, and this component exists because those were the wrong shape.
+ */
+
+.sp-scrim {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .sp-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 88; /* under modals (100), the palette (200) and toasts (300) */
+    background: var(--backdrop);
+    animation: hq-fade var(--dur-fast) var(--ease);
+  }
+
+  /* Genuinely floating now, so it takes the material a floating surface takes.
+     This is the `.glass.elev-4` treatment written out rather than applied as a
+     class, because which side of the breakpoint we are on is a media query,
+     not a prop — and glass.css already swaps --glass-fill and --glass-filter
+     for their opaque values where backdrop-filter is missing or unwanted, so
+     the solid fallback comes with it.
+
+     --shadow-lg, matching the inspector's own overlay form: at this width the
+     panel owns the window, and the two trailing-edge surfaces must read as the
+     same kind of thing. */
+  .sp {
+    background: var(--elev-4-bg);
+    box-shadow: var(--elev-4-shadow);
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+  }
+  .sp[data-side="right"] { border-left-color: var(--elev-4-border); }
+  .sp[data-side="left"] { border-right-color: var(--elev-4-border); }
+
+  /* backdrop-filter makes the panel a containing block for position:fixed
+     children, so anything floating out of it (a menu, a popover) must portal
+     to the body — as EntityChip and the toast stack already do. */
+}
+
+/* Motion is authored entirely against --dur / --dur-fast / --ease, which both
+   reduced-motion switches in App.css zero — the OS media query and the in-app
+   appearance pref. Nothing here needs its own block to go quiet. */

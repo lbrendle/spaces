@@ -1,0 +1,605 @@
+/* ── Agent write access, as UI ────────────────────────────────── */
+/*
+ * One sheet for the four surfaces in ActionQueue.tsx — the queue (.aq), the
+ * badge (.aq-badge), the log (.aq-log) and the message footer (.aq-sum) —
+ * because they share a vocabulary: a run groups rows, a row is a sentence with
+ * entity chips in it, and every row carries the same meta line.
+ *
+ * Imported from ActionQueue.tsx, so it lands wherever the first view importing
+ * it does — nothing here may depend on cascade order against App.css. Every
+ * selector is prefixed and no shared primitive (.btn, .avatar, .ec, .spinner)
+ * is redefined. Focus is App.css's outline; the four rings this sheet used to
+ * draw, each naming a different surface it expected to be sitting on, are
+ * gone.
+ *
+ * One container survives: the run group, because several proposals from one
+ * run genuinely have to be told apart from the next run's. Inside it there is
+ * no second surface — the header is a hairline, the rows are hairlines, and
+ * the failure that needs finding is a wash rather than a red edge.
+ *
+ * Colors are theme tokens only. The one thing that is deliberately loud is a
+ * failure: an audit trail whose failures read like everything else is not an
+ * audit trail.
+ */
+
+/* ── the queue ────────────────────────────────────────────────── */
+
+.aq {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.aq-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.aq-title {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.aq-count {
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.aq-groups,
+.aq-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.aq-groups {
+  gap: var(--space-5);
+}
+
+.aq-rows {
+  gap: 0;
+}
+
+/* A lone proposal is its own group. Several from one run share one, so the
+   header can speak for all of them and "Approve all" has something to sit on.
+   One fill, one radius, no outline around the fill. */
+.aq-group {
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  /* Level 1 of the elevation ladder, and its own neutral shadow — which is
+     what carries the edge on the light themes whose --surface-1 is two per
+     cent off the canvas. Height, not light. */
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.aq-group-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.aq-group-note {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+.aq-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.aq-all:hover:not(:disabled) {
+  background: var(--accent-soft-strong);
+}
+.aq-all:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.aq-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  min-width: 0;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.aq-row:hover {
+  background: var(--bg-hover);
+}
+.aq-row + .aq-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.aq-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── the sentence ─────────────────────────────────────────────── */
+/* Flex with a gap rather than literal spaces: the parts are chips, buttons and
+   text that must wrap as one line of prose without collecting stray spaces. */
+
+.aq-say {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.aq-who {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.aq-who .avatar {
+  width: 19px;
+  height: 19px;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+}
+.aq-who .avatar-badge {
+  display: none; /* at 19px the harness badge is a smudge, not information */
+}
+
+.aq-who-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+}
+
+/* The verb is the thing being judged, so it is the one word set apart. */
+.aq-verb {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.aq-join {
+  color: var(--text-faint);
+}
+
+/* An argument that no longer resolves to anything — a task deleted since it was
+   proposed, or a title the agent invented. Dashed on purpose: when you are
+   deciding whether to approve something, "we could not find this" is exactly
+   the part you must not read past, and a dashed edge is the one shape that
+   means "there is nothing behind this". */
+.aq-lit {
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 0.95em;
+}
+
+/* A literal the operation defines rather than a reference it failed to resolve
+   — a status, a role. Nothing is missing, so nothing is flagged. */
+.aq-val {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text);
+  font-size: 0.95em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── the arguments ────────────────────────────────────────────── */
+
+/* Indented under the sentence it belongs to, the way a quotation is. The
+   filled half-box this used to be made a two-line detail look like a panel. */
+.aq-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Shrink to its contents: a one-line "Due 2026-08-01" stretched across the
+     panel reads as an empty bar rather than as a detail. */
+  align-self: flex-start;
+  max-width: 100%;
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+.aq-detail-pair {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.aq-detail dt {
+  flex-shrink: 0;
+  width: 84px;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.aq-detail dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* ── the meta line ────────────────────────────────────────────── */
+
+.aq-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+/* Dots between the parts, drawn rather than typed so they never wrap alone. */
+.aq-meta > * + *::before {
+  content: "·";
+  margin-right: var(--space-4);
+  color: var(--text-faint);
+}
+
+.aq-op {
+  font-family: var(--mono);
+  font-size: 0.95em;
+}
+
+.aq-outcome {
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+.aq-when {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+/* ── approve / reject ─────────────────────────────────────────── */
+
+.aq-acts {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Two equal choices, so neither is dressed as the primary one. The fill is
+   what they wear at rest; the answer is what they wear on hover. --bg-active
+   rather than --bg-hover because they sit on --surface-1, which on a light
+   theme is already most of the way to --bg-hover. */
+.aq-yes,
+.aq-no {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  background: var(--bg-active);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.aq-yes:hover:not(:disabled) {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.aq-no:hover:not(:disabled) {
+  background: var(--red-soft);
+  color: var(--red);
+}
+.aq-yes:disabled,
+.aq-no:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+/* ── empty state ──────────────────────────────────────────────── */
+
+/* Nothing has been proposed, so there is nothing to put a surface under: the
+   dashed edge is the shape of what would be here. */
+.aq-blank {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* The mark itself, at the size it wants to be read at. The tinted tile behind
+   it was a box drawn around an icon. */
+.aq-blank-glyph {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: var(--space-1);
+  color: var(--accent);
+}
+
+.aq-blank-lead {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+}
+
+.aq-blank-text {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+}
+
+/* ── the badge ────────────────────────────────────────────────── */
+
+.aq-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.aq-badge-btn {
+  border: none;
+  transition: filter var(--dur-fast) var(--ease);
+}
+.aq-badge-btn:hover {
+  filter: brightness(1.1);
+}
+
+/* ── the log ──────────────────────────────────────────────────── */
+
+.aq-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.aq-log-blank {
+  margin: 0;
+  max-width: 62ch;
+  padding: var(--space-5);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+}
+
+.aq-log-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.aq-tally {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* A run in which something failed is findable while scrolling, not only while
+   reading — that is most of what makes the trail usable. The header wears the
+   wash; the group does not need a red edge to say it a second time. */
+.aq-group-bad .aq-log-head {
+  background: var(--red-soft);
+}
+.aq-group-bad .aq-tally {
+  color: var(--red);
+}
+
+.aq-log-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+.aq-log-row + .aq-log-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* The status, as a shape, for scanning a long trail. */
+.aq-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+.aq-off .aq-dot {
+  background: var(--text-faint);
+}
+.aq-bad .aq-dot {
+  background: var(--red);
+}
+
+.aq-off .aq-say {
+  color: var(--text-dim);
+}
+.aq-off .aq-verb {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.aq-bad {
+  background: var(--red-soft);
+}
+.aq-bad .aq-outcome {
+  color: var(--red);
+}
+
+/* The error text in full: a truncated reason is a reason you cannot act on.
+   Red text on a red wash — the 2px red rule down its left edge was a third
+   copy of a fact already stated twice. */
+.aq-err {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--red-soft);
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── the message footer ───────────────────────────────────────── */
+/* Lands under every agent message, so: no layout it has to measure, nothing
+   that can reflow a transcript mid-scroll. */
+
+.aq-sum {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+  font-size: var(--fs-xs);
+}
+
+.aq-sum-link {
+  padding: 0;
+  color: var(--text-faint);
+  font-size: inherit;
+  text-align: left;
+  transition: color var(--dur-fast) var(--ease);
+}
+.aq-sum-link:hover {
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* Dots between the parts, so the strip reads as one sentence. The flex gap
+   supplies the space on the left, the margin the one on the right. */
+.aq-sum-link + .aq-sum-link::before {
+  content: "·";
+  margin-right: var(--space-2);
+  color: var(--text-faint);
+}
+
+.aq-sum-wait {
+  color: var(--accent);
+  font-weight: 650;
+}
+.aq-sum-wait:hover {
+  color: var(--accent);
+}
+
+.aq-sum-bad {
+  color: var(--red);
+}
+.aq-sum-bad:hover {
+  color: var(--red);
+}
+
+/* ── compact ──────────────────────────────────────────────────── */
+/* A rail is too narrow for a row of labelled buttons beside a sentence. */
+
+.aq-compact {
+  gap: var(--space-4);
+}
+.aq-compact .aq-row {
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.aq-compact .aq-acts {
+  align-self: stretch;
+}
+.aq-compact .aq-yes,
+.aq-compact .aq-no {
+  flex: 1;
+  justify-content: center;
+}
+.aq-compact .aq-detail dt {
+  width: auto;
+}
+.aq-compact .aq-detail-pair {
+  flex-direction: column;
+  gap: 1px;
+}
+.aq-compact .aq-blank {
+  padding: var(--space-4);
+}
+.aq-compact .aq-blank-text {
+  font-size: var(--fs-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aq-row,
+  .aq-all,
+  .aq-yes,
+  .aq-no,
+  .aq-badge-btn,
+  .aq-sum-link {
+    transition: none;
+  }
+}

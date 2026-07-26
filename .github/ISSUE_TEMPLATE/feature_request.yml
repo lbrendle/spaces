@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a focused Spaces improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What cannot a person or agent do today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Local/cloud and permission boundary
+      description: What data or external action would this require?
+    validations:
+      required: true

@@ -1,0 +1,308 @@
+/* ═══════════════════════════════════════════════════════════
+   AccountMenu — the account footer at the bottom of the rail.
+
+   Two surfaces, and only one of them floats:
+
+   .am      pinned chrome. Sticky at the foot of the rail, wearing the
+            rail's own background so nav rows disappear behind it rather
+            than through it, with a hairline where they do. That contact
+            edge is the whole reason it is allowed a border.
+   .am-pop  a real float: portalled to <body>, positioned in script, and
+            therefore the one thing here that takes .glass.
+
+   Everything else is space, type and the shared row states. No accent
+   bars, no coloured shadows, no second focus ring — App.css already
+   defines all three and this file only joins in.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── the footer row ────────────────────────────────────────── */
+
+.am {
+  /* The rail scrolls and this does not, so it has to paint over what
+     passes behind it — hence a background at all. --am-bleed cancels the
+     host's horizontal padding so the fill and the hairline reach both
+     edges of the rail; a host that pads differently sets it and nothing
+     else changes. */
+  --am-bleed: var(--rail-x, var(--space-3));
+
+  /* A normal flex item now: the rail no longer scrolls, so there is
+     nothing for it to stick to. */
+  flex: 0 0 auto;
+  z-index: 2;
+  margin-top: auto; /* bottom of the rail even when the nav is short */
+  margin-inline: calc(var(--am-bleed) * -1);
+  /* The bleed takes the fill out to both edges; --rail-pad then puts the
+     content back on the rail's own columns, so the face lands in the glyph
+     column, the name in the label column and the gear on the same right
+     edge as the unread badges above. Without that second term this is a
+     box parked under the nav rather than the last row of it. */
+  padding: var(--space-2) calc(var(--am-bleed) + var(--rail-pad, var(--space-3)));
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border-soft);
+
+  display: flex;
+  align-items: center;
+  gap: var(--rail-gap, var(--space-3));
+  min-width: 0;
+}
+
+.am[data-collapsed] {
+  --am-bleed: var(--space-2); /* the mini rail pads by one step less */
+  justify-content: center;
+}
+
+/* ── the face ──────────────────────────────────────────────── */
+
+/* Face draws the circle and its own colours; this is only the hit target
+   around it. */
+.am-face {
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: var(--t-press);
+}
+/* In the row — and only in the row, the popover's header face is bigger —
+   the hit target is the rail's glyph column, so the circle stands on the
+   same axis as the nav icons above it, expanded or collapsed. The circle
+   fills a column that a 16px icon is centred inside: round marks are drawn
+   larger than square ones to look the same size, which is why these share a
+   centre rather than an edge. */
+.am > .am-face {
+  width: var(--rail-glyph, 20px);
+  height: var(--rail-glyph, 20px);
+}
+.am-face:active:not(:disabled) { transform: var(--press); }
+
+/* Face carries a title of its own — the person's name — and an inner title
+   beats the button's. Collapsed, the button's tooltip is the only text the
+   footer has left, so the face stops being a hover target and the button
+   becomes one again. Clicks are unaffected: they land on the button either
+   way. */
+.am-face .face { pointer-events: none; }
+
+/* ── name and secondary line ───────────────────────────────── */
+
+.am-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: inherit;
+  transition: var(--t-color);
+}
+.am-who:hover { background: var(--bg-hover); }
+
+/* In the row, two lines have to make one row. The stack is given --row-h and
+   leading tight enough to sit inside it, so the footer keeps the rhythm of
+   the rows above instead of being however tall two paragraphs happen to be.
+   No padding of its own: the name starts on the rail's label column and the
+   hover fill starts there with it, rather than the fill sitting on the column
+   and pushing the name off it. */
+.am > .am-who {
+  gap: 0;
+  min-height: var(--row-h);
+  padding: 0;
+}
+.am > .am-who .am-name { line-height: 1.25; }
+.am > .am-who .am-sub { line-height: 1.2; }
+
+.am-name {
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Quiet on purpose: it answers "which one of us is this" and nothing else,
+   so it must never compete with the name above it. */
+.am-sub {
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sized to sit exactly where the name was, so committing a rename does not
+   move the row under the pointer. The button it replaces has neither padding
+   nor a border, so the field pulls both back out and its text stays on the
+   label column. */
+.am-rename {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  margin-inline-start: calc((var(--space-2) + 1px) * -1);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  border-radius: var(--radius-sm);
+}
+
+/* The same box the rail gives its other trailing icon buttons, so the gear
+   lands on the column the unread badges above it are right-aligned to. */
+.am-gear {
+  flex-shrink: 0;
+  min-width: var(--rail-glyph, 20px);
+  min-height: var(--rail-glyph, 20px);
+  padding: 0;
+}
+
+/* While the menu is up, the button that raised it stays lit — a floating
+   panel with nothing pressed behind it reads as unattached. The ordinary
+   hover fill, not a new state. The collapsed face needs no equivalent: the
+   panel opens against it in a 56px rail and the attachment is obvious. */
+.am[data-open] .am-gear {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+/* ── the popover ───────────────────────────────────────────── */
+
+/* .glass carries the fill, the hairline, the radius, the shadow and the
+   backdrop filter. glass.css already swaps --glass-fill for the opaque
+   --bg-overlay under `@supports not (backdrop-filter)` and under
+   prefers-reduced-transparency, so the solid fallback is inherited here
+   rather than restated — one definition of the material, not two. */
+.am-pop {
+  position: fixed;
+  /* over the floating rail (93), under modals (100): this is chrome, and a
+     dialog opened from anywhere must still cover it */
+  z-index: 95;
+  min-width: 248px;
+  max-width: 320px;
+  max-height: calc(100vh - var(--space-5));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  animation: am-in var(--dur-fast) var(--ease);
+}
+
+/* Rises the few pixels it flipped over, so where it came from is legible
+   at a glance. The global reduced-motion block collapses this to nothing. */
+@keyframes am-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── the popover's identity header ─────────────────────────── */
+
+.am-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+.am-head .am-name { font-size: var(--fs); }
+
+/* ── the menu ──────────────────────────────────────────────── */
+
+.am-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Groups are separated by space and a label, not a rule: three items and a
+   heading are already legible as a set. */
+.am-group + .am-group { margin-top: var(--space-3); }
+
+.am-group-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-faint);
+  padding: var(--space-2) var(--space-3) var(--space-1);
+}
+
+.am-item {
+  width: 100%;
+  min-height: var(--row-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs);
+  text-align: left;
+  transition: var(--t-color), var(--t-press);
+}
+/* The same three states every row in the app draws, and no fourth one:
+   hover and keyboard focus both fill with --bg-hover, and the focus ring
+   itself is App.css's. */
+.am-item:hover,
+.am-item:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.am-item:active { transform: var(--press); }
+
+.am-item-icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+  transition: var(--t-fade);
+}
+.am-item:hover .am-item-icon,
+.am-item:focus-visible .am-item-icon { opacity: 1; }
+
+.am-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.am-item-hint {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+/* ── this machine ──────────────────────────────────────────── */
+
+.am-machine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+/* Colour because it is status: green means an agent started here will run,
+   yellow means it will not. Nothing else in this file is coloured. */
+.am-machine-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.am-machine-dot.ok { background: var(--green); }
+.am-machine-dot.none { background: var(--yellow); }
+
+.am-machine-text { min-width: 0; }
+.am-machine-rest { color: var(--text-faint); opacity: 0.75; }

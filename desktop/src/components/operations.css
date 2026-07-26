@@ -1,0 +1,2070 @@
+/*
+ * Documents, Mail and Content Studio.
+ *
+ * Three surfaces, one grammar: a rail you can search, a list, and one thing
+ * open. Nothing here invents a token. Colour, spacing, type, radius, motion and
+ * the focus ring all come from App.css and src/themes.ts, because 39 themes in
+ * light and dark plus a user-set density, radius and font scale ride on them —
+ * a literal colour or a fixed 11px breaks somebody's workspace, not just this
+ * file. For the same reason nothing here redefines a shared utility: .num,
+ * .prose, .grow, .focus-inset and the .anim-* helpers belong to App.css, and a
+ * component stylesheet that restates one silently changes every other surface.
+ *
+ * Three ideas run through all of it:
+ *
+ *  1. Documents is a *reading* surface wrapped in a *work* surface. The body of
+ *     a document gets --measure, a tall line height and calm. The rail, the
+ *     toolbar and the lists around it are data, and are tuned to be scanned.
+ *  2. Depth is a ladder, not a mood. --bg-raised is chrome (rails), --surface-1
+ *     is a thing you can pick up, and only a modal is allowed --shadow-lg.
+ *  3. A section is made of a heading and space, not of an outline. The rails,
+ *     the version list, the connections panel and the board columns used to be
+ *     bordered cards holding one list each; they are now headings with room
+ *     under them, which is what a section actually is.
+ *
+ * The calendar rules that used to live at the bottom went with the month grid;
+ * calendar.css owns that surface now.
+ */
+
+.ops {
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* The only definition in the app — several views outside this file use it. */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+}
+
+/* ── the header, identical on all three ───────────────────────── */
+
+.ops .sh-pane-head-row {
+  align-items: center;
+}
+.ops .sh-pane-title {
+  align-items: center;
+  gap: var(--space-2);
+}
+.ops .sh-pane-title svg {
+  color: var(--accent);
+}
+/* The primary action is the last thing on the right. Always, on every surface. */
+.ops-header-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.ops-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-4) var(--pane-x) 0;
+}
+.ops-notice > span {
+  min-width: 0;
+}
+.ops-notice .icon-btn {
+  margin-left: auto;
+  flex: none;
+}
+.ops-modal-lead {
+  max-width: var(--measure);
+  margin: 0 0 var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.6;
+}
+
+/* ── the quiet button ─────────────────────────────────────────── */
+
+/* A dozen equal-weight buttons in a toolbar is noise. These stay legible at
+   rest — never invisible until hover — and only take a surface once you are
+   actually pointing at them. */
+.ops .btn.subtle {
+  min-height: 26px;
+  padding: var(--space-1) var(--space-3);
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+/* --bg-active, not --bg-hover: the toolbar is --bg-raised, and on the light
+   themes --bg-hover is a hair off it — a hover nobody can see is not one. */
+.ops .btn.subtle:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--bg-active);
+  color: var(--text);
+}
+.ops .btn.subtle.active,
+.ops .btn.subtle[aria-pressed="true"] {
+  color: var(--text);
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+/* Destructive, but not loud until you reach for it. A permanently red word in
+   a toolbar you use all day is the reddest thing on the screen, and red in this
+   app is reserved for something having actually gone wrong. */
+.ops .btn.danger.subtle {
+  color: var(--text-dim);
+}
+.ops .btn.danger.subtle:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ── connection state ─────────────────────────────────────────── */
+
+/* Green means "this can actually reach the network", and nothing else is
+   allowed to wear it — which is what makes the grey ones informative rather
+   than merely sad. The dot and the word carry it; there is no outline, because
+   an outline says nothing about whether anything is connected. */
+.provider-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.provider-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+}
+.provider-state.connected {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.provider-state.connected::before {
+  opacity: 1;
+}
+
+/* ── the segmented switcher ───────────────────────────────────── */
+
+/* The track is the control, so it keeps its fill. What it lost is the hairline
+   around the fill, which drew the same boundary twice. */
+.ops-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+.ops-seg-btn {
+  min-height: 24px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: calc(var(--radius) - 3px);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  white-space: nowrap;
+  transition: var(--t-color), var(--t-press);
+}
+.ops-seg-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.ops-seg-btn:active {
+  transform: var(--press);
+}
+.ops-seg-btn.on {
+  color: var(--text);
+  background: var(--bg-raised);
+  font-weight: 650;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── search and filter ────────────────────────────────────────── */
+
+/* This one is a field, and a field is the one thing that does keep an edge:
+   its border is what says "you can type here". */
+.ops-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  background: var(--bg-input);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+/* The wrapper is the field, so it wears the field's focus border — the same
+   one App.css gives every input, and nothing on top of it. */
+.ops-search:focus-within {
+  border-color: var(--accent);
+}
+/* The real input inside is borderless, so the keyboard ring has to be
+   forwarded to the wrapper. Same ring, same offset — App.css's, relocated. */
+.ops-search:has(input:focus-visible) {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+.ops-search input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-sm);
+}
+.ops-search input:focus,
+.ops-search input:focus-visible {
+  outline: none;
+}
+.ops-search-clear {
+  flex: none;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  transition: var(--t-color);
+}
+.ops-search-clear:hover {
+  color: var(--text);
+  background: var(--bg-active);
+}
+/* The shortcut the sidebar already taught, repeated where it now lands. */
+.ops-search-key {
+  flex: none;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+.ops-filter {
+  padding-block: var(--space-2);
+  font-size: var(--fs-xs);
+}
+.ops-filter.inline {
+  width: auto;
+  min-width: 132px;
+}
+
+/* ── skeletons ────────────────────────────────────────────────── */
+
+/*
+ * Bars in the shape of the rows that are coming. A spinner says "wait"; this
+ * says "a list is arriving, roughly this long" — and it keeps the layout from
+ * jumping when it does. It breathes rather than sweeping: a moving highlight
+ * is a gradient travelling across a surface, and this app has no gradients.
+ */
+.ops-skel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+}
+.ops-skel-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-1);
+}
+.ops-skel-bar {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  animation: ops-pulse calc(var(--dur) * 7) var(--ease) infinite;
+}
+.ops-skel-bar.thin {
+  height: 7px;
+  opacity: 0.7;
+}
+@keyframes ops-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* ── empty states ─────────────────────────────────────────────── */
+
+/* Every one of these teaches the next step, and most hand you the button that
+   takes it. An empty state that only apologises is a dead end. */
+.ops-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  color: var(--text-dim);
+  text-align: center;
+}
+.ops-empty svg {
+  color: var(--accent);
+  opacity: 0.85;
+}
+.ops-empty h2 {
+  margin: var(--space-1) 0 0;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  letter-spacing: var(--ls-title);
+}
+.ops-empty strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.ops-empty p {
+  max-width: 44ch;
+  margin: 0 0 var(--space-2);
+  color: var(--text-dim);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.6;
+}
+.ops-empty.compact {
+  min-height: 140px;
+  padding: var(--space-6) var(--space-4);
+}
+.ops-empty.compact p {
+  font-size: var(--fs-xs);
+}
+
+/* ── the shared two-pane shell ────────────────────────────────── */
+
+.ops-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(232px, 292px) minmax(0, 1fr);
+  min-height: 0;
+}
+.ops-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+.ops-rail-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+.ops-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-3) var(--space-2) var(--space-6);
+}
+
+/* ── documents: the rail ──────────────────────────────────────── */
+
+/*
+ * Pinned, Recent, then the folder tree.
+ *
+ * The tree on its own answered "where does this live" and nothing else, which
+ * is the one question somebody opening the view has not asked yet. The two
+ * groups above it answer "what is mine" and "where was I", and they are what
+ * make the first glance orienting rather than archaeological.
+ */
+.doc-group + .doc-group {
+  margin-top: var(--space-6);
+}
+.doc-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.doc-group-head small {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+
+.doc-folder {
+  margin-bottom: 1px;
+}
+.doc-folder-head {
+  width: 100%;
+  min-height: var(--row-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-left: calc(var(--space-2) + var(--doc-depth, 0) * var(--space-4));
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  text-align: left;
+  transition: var(--t-color), var(--t-press);
+}
+.doc-folder-head:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.doc-folder-head:active {
+  transform: var(--press);
+}
+.doc-folder-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.doc-folder-head small {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+/* The caret turns rather than being swapped for a different glyph: a rotation
+   is one object moving, which is what open and shut actually are. */
+.doc-folder-caret {
+  width: 10px;
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.doc-folder-caret.open {
+  transform: rotate(90deg);
+}
+/* Children arrive from under the folder head they belong to. */
+.doc-folder-body {
+  --enter-dy: -4px;
+  animation: hq-rise var(--dur-fast) var(--ease);
+}
+
+.ops-list-row {
+  width: 100%;
+  min-height: calc(var(--row-h) + var(--space-4));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  padding-left: calc(var(--space-3) + var(--doc-depth, 0) * var(--space-4));
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  text-align: left;
+  transition: var(--t-color), var(--t-press);
+}
+.ops-list-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.ops-list-row:active {
+  transform: var(--press);
+}
+/* Chosen. One fill, and the title steps up a weight — the leading edge that
+   used to sit here said the same thing a third time. */
+.ops-list-row.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.doc-row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.doc-row-title strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+}
+.ops-list-row.active .doc-row-title strong {
+  font-weight: 700;
+}
+.doc-row-pin {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  line-height: 1;
+}
+.doc-row-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.doc-row-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Dates line up down the right edge, which is the whole point of a list. */
+.doc-row-meta > .num {
+  margin-left: auto;
+  flex: none;
+}
+.ops-list-row .ds-badge {
+  flex: none;
+  max-width: 45%;
+}
+
+/* ── documents: the toolbar ───────────────────────────────────── */
+
+/*
+ * Four groups rather than fifteen buttons: is my work safe, what can I do to
+ * the file, how am I looking at it, and what do I do with it. The separators
+ * are what turn a queue of controls into something you can aim at.
+ */
+.doc-bar {
+  min-height: 48px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--pane-x);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+.doc-bar-state {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  margin-right: auto;
+}
+.doc-bar-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+/* --border rather than --border-soft: this is the thing doing the grouping, and
+   on a light theme a soft hairline is not there at all. */
+.doc-bar-group::before {
+  content: "";
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin-right: var(--space-3);
+  margin-left: var(--space-2);
+  background: var(--border);
+}
+.doc-bar .ops-seg {
+  margin-inline: var(--space-1);
+}
+
+/*
+ * The save state.
+ *
+ * One job, and it never borrows the slot for anything else — every other
+ * message this view has goes to the notice line. The chip re-mounts when the
+ * state changes so the switch is something you watch happen; the dot carries
+ * the colour so a permanently green word is not sitting in the toolbar
+ * shouting at somebody who is trying to write.
+ */
+.doc-save {
+  --doc-save-tone: var(--text-faint);
+  --enter-dy: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  animation: hq-rise var(--dur) var(--ease);
+}
+.doc-save-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--doc-save-tone);
+}
+.doc-save.saved {
+  --doc-save-tone: var(--green);
+}
+.doc-save.dirty {
+  --doc-save-tone: var(--yellow);
+  color: var(--text);
+}
+.doc-save.error {
+  --doc-save-tone: var(--red);
+  color: var(--red);
+}
+.doc-save.saving .doc-save-dot {
+  opacity: 0.5;
+}
+/* Read-only is the hollow dot: same shape, nothing in it. */
+.doc-save.readonly .doc-save-dot {
+  background: transparent;
+  border: 1.5px solid var(--text-faint);
+}
+.doc-stats {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+/* ── documents: the sheet ─────────────────────────────────────── */
+
+.doc-editor {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.doc-sheet {
+  /*
+   * One column width for the whole sheet, so the title, the body, the link
+   * rails and the connections panel share a left edge. Split widens all of
+   * them together rather than letting the editor run out past everything else.
+   */
+  --sheet-w: var(--measure);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-6) var(--pane-x) calc(var(--space-6) * 2);
+}
+.doc-sheet:has(.doc-write.split) {
+  --sheet-w: min(100%, calc(var(--measure) * 2 + var(--space-6)));
+}
+.doc-head,
+.doc-write,
+.doc-versions,
+.doc-rails,
+.doc-connections {
+  width: 100%;
+  max-width: var(--sheet-w);
+  margin-inline: auto;
+}
+
+.doc-title {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: calc(var(--fs-lg) * 1.45);
+  font-weight: 720;
+  letter-spacing: var(--ls-display);
+  line-height: 1.2;
+}
+.doc-title:focus {
+  border-color: transparent;
+}
+
+/* Where a document lives and who it belongs to is part of reading it, so it
+   sits above the body rather than being buried under it. */
+.doc-props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+  margin-top: var(--space-5);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+}
+.doc-prop {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.doc-prop.grow {
+  flex: 1;
+  min-width: 140px;
+}
+.doc-prop .field-label {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.doc-prop input,
+.doc-prop select {
+  width: auto;
+  min-width: 118px;
+  padding: var(--space-1) var(--space-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  transition: var(--t-color);
+}
+.doc-prop select {
+  padding-right: var(--space-6);
+}
+.doc-prop.grow input {
+  width: 100%;
+}
+.doc-prop input:hover:not(:disabled),
+.doc-prop select:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.doc-prop input:focus,
+.doc-prop select:focus {
+  border-color: var(--accent);
+  background: var(--bg-input);
+  color: var(--text);
+}
+.doc-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  transition: var(--t-color), var(--t-press);
+}
+.doc-pin:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.doc-pin:active:not(:disabled) {
+  transform: var(--press);
+}
+.doc-pin:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.doc-pin.on {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.doc-write {
+  display: grid;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+}
+.doc-write.split {
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+/* The one place in this view that is a page rather than a screen: reading
+   measure, tall lines, and proportional figures instead of the app-wide
+   tabular ones, which are for columns of data and not for sentences. */
+.doc-body,
+.doc-preview {
+  min-height: 58vh;
+  font-size: var(--fs);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.75;
+}
+.doc-body {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  resize: none;
+}
+.doc-body:focus {
+  border-color: transparent;
+}
+.doc-body[readonly] {
+  color: var(--text-dim);
+}
+.doc-preview {
+  color: var(--text);
+}
+.doc-preview > :first-child {
+  margin-top: 0;
+}
+/* In Split the preview is the reference, not the page. A hairline and a step
+   back keep it from competing with the column you are typing in. */
+.doc-write.split .doc-preview {
+  padding-left: var(--space-6);
+  border-left: 1px solid var(--border-soft);
+}
+.wiki-link {
+  display: inline;
+  padding: 0 2px;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 3px;
+  transition: var(--t-color);
+}
+.wiki-link:hover {
+  text-decoration-color: var(--accent);
+}
+
+/* ── documents: history ───────────────────────────────────────── */
+
+/* A heading and a list of versions. It was a card holding a heading and a list
+   of versions, on a sheet that is already its own surface. */
+.doc-versions {
+  --enter-dy: -6px;
+  display: grid;
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+  animation: hq-rise var(--dur) var(--ease);
+}
+.doc-versions > header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: 0 var(--space-2) var(--space-3);
+}
+.doc-versions > header strong {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.doc-versions > header span {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  text-align: right;
+}
+.doc-versions > button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-1) var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: var(--t-color);
+}
+.doc-versions > button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.doc-versions > button strong,
+.doc-versions > button span {
+  font-size: var(--fs-micro);
+}
+.doc-versions > button span,
+.doc-versions > button small {
+  color: var(--text-faint);
+}
+.doc-versions > button small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+}
+
+/* ── documents: links and connections ─────────────────────────── */
+
+/* Two columns of links under the sheet. Each was a bordered card wrapping one
+   list; a heading in caps and the space around it says "group" just as well,
+   and the two columns no longer read as two objects sitting on a page. */
+.doc-rails {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.doc-rail-card {
+  min-width: 0;
+}
+.doc-rail-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.doc-rail-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: var(--space-1) 0;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.doc-rail-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.doc-rail-card small {
+  display: block;
+  padding: var(--space-1) 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.doc-rail-card small code {
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--inline-code-bg);
+  font: var(--fs-micro) var(--mono);
+}
+/* Making a link belongs beside the links, not in a toolbar three groups away. */
+.doc-rail-insert {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.doc-rail-insert select {
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  padding-right: var(--space-6);
+  border-color: var(--border-soft);
+  font-size: var(--fs-micro);
+}
+
+.doc-connections {
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.doc-connections > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+}
+.doc-connections > header strong {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.doc-connections > header span {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.doc-connections-why {
+  max-width: var(--measure);
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.6;
+}
+
+/* ── templates ────────────────────────────────────────────────── */
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+/* A grid of choices. The grid gap is what separates them, the hover fill is
+   what says they are choices — the resting tile and its outline were saying
+   "these are objects", which they are not until you pick one. */
+.template-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: var(--t-color);
+}
+.template-card:hover {
+  background: var(--accent-soft);
+}
+.template-card:active {
+  transform: var(--press);
+}
+.template-card strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.template-card span {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.5;
+}
+.template-card small {
+  margin-top: auto;
+  padding-top: var(--space-1);
+  color: var(--text-faint);
+  font: var(--fs-micro) var(--mono);
+}
+
+/* ── handing work to an agent ─────────────────────────────────── */
+
+.dispatch {
+  display: flex;
+  flex-direction: column;
+}
+.dispatch-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+.dispatch-preset {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--space-4);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: var(--t-color), var(--t-press);
+}
+.dispatch-preset:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.dispatch-preset:active {
+  transform: var(--press);
+}
+.dispatch-preset input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.dispatch-preset.on {
+  color: var(--text);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+/* The radio itself is hidden, so the label has to carry its focus ring. */
+.dispatch-preset:has(input:focus-visible) {
+  outline: var(--focus-w) solid var(--accent);
+  outline-offset: var(--focus-gap);
+}
+/* What is going with the request. A heading and a list. */
+.dispatch-included {
+  margin-bottom: var(--space-5);
+}
+.dispatch-included ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.65;
+}
+.dispatch-body {
+  min-height: 220px;
+  font: var(--fs-sm) / 1.65 var(--mono);
+  resize: vertical;
+}
+
+/* ── mail ─────────────────────────────────────────────────────── */
+
+.mail-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 176px minmax(258px, 340px) minmax(0, 1fr);
+}
+.mail-folders {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+.mail-folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mail-folder {
+  width: 100%;
+  min-height: var(--row-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: var(--t-color), var(--t-press);
+}
+.mail-folder:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.mail-folder:active {
+  transform: var(--press);
+}
+.mail-folder.active {
+  color: var(--text);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+.mail-folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Unread is the only count worth colouring — it is the one that means there is
+   work in here. A plain total stays grey. */
+.mail-folder-unread {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  line-height: 1.6;
+}
+.mail-folder-total {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+
+.mail-facets {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.mail-facets .field-label {
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.mail-facet {
+  width: 100%;
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  text-align: left;
+  transition: var(--t-color), var(--t-press);
+}
+.mail-facet:hover {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+.mail-facet:active {
+  transform: var(--press);
+}
+.mail-facet.on {
+  color: var(--text);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.mail-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+
+/*
+ * A conversation row.
+ *
+ * Sender and date on one line, subject on the next, preview last — so the
+ * dates form a column down the right edge and the list can be read in one
+ * downward sweep. The star lives outside the row button, because a control
+ * inside a control is invalid markup, and its space is reserved at rest so
+ * lighting it up never moves anything.
+ */
+.mail-row-wrap {
+  position: relative;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.mail-row-wrap:hover {
+  background: var(--bg-hover);
+}
+.mail-row-wrap.active {
+  background: var(--accent-soft);
+}
+.mail-row {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  padding-right: calc(var(--space-6) + var(--space-2));
+  text-align: left;
+}
+.mail-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mail-from {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+.mail-date {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.mail-count {
+  flex: none;
+  min-width: 16px;
+  padding: 0 var(--space-1);
+  border-radius: 999px;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  text-align: center;
+}
+.mail-subject,
+.mail-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-subject {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+}
+.mail-preview {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: proportional-nums;
+}
+/* Unread earns weight *and* a dot: weight alone is unreadable on the themes
+   with the gentlest --text-dim, and one signal that some themes swallow is not
+   a signal. The dot is a dot — a mark, not an edge. */
+.mail-row-wrap.unread .mail-subject,
+.mail-row-wrap.unread .mail-from {
+  color: var(--text);
+  font-weight: 700;
+}
+.mail-row-wrap.unread::before {
+  content: "";
+  position: absolute;
+  left: var(--space-1);
+  top: calc(var(--space-3) + 6px);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.mail-star {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  opacity: 0.55;
+  transition: var(--t-color), var(--t-fade), var(--t-press);
+}
+.mail-row-wrap:hover .mail-star,
+.mail-star:focus-visible {
+  opacity: 1;
+}
+.mail-star:hover {
+  color: var(--yellow);
+  background: var(--bg-active);
+}
+.mail-star:active {
+  transform: var(--press);
+}
+.mail-star.on {
+  color: var(--yellow);
+  opacity: 1;
+}
+
+.mail-reader {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+}
+.mail-reader-head {
+  padding: var(--space-6) var(--pane-x) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+}
+.mail-reader-head h2 {
+  max-width: var(--measure);
+  margin: var(--space-2) 0 var(--space-1);
+  font-size: calc(var(--fs-lg) * 1.05);
+  letter-spacing: var(--ls-title);
+  line-height: 1.35;
+}
+.mail-reader-head p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.mail-reader-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+.mail-thread {
+  display: flex;
+  flex-direction: column;
+}
+.mail-message {
+  padding: var(--space-6) var(--pane-x);
+  border-bottom: 1px solid var(--border-soft);
+}
+.mail-message:last-child {
+  border-bottom: 0;
+}
+.mail-message > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.mail-message > header strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.mail-message > header span,
+.mail-message > header time {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.mail-message > header time {
+  margin-left: auto;
+}
+/* A message is somebody's prose: reading measure, tall lines, proportional
+   figures. The list that got you here is data; this is not. */
+.mail-copy {
+  max-width: var(--measure);
+  color: var(--text);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.7;
+}
+.mail-copy p {
+  margin: 0 0 var(--space-4);
+  white-space: pre-wrap;
+}
+.mail-copy p:last-child {
+  margin-bottom: 0;
+}
+/* A quotation rule, in the neutral border token: this is typography, the
+   thing a blockquote has always had, not a coloured marker. */
+.mail-quote {
+  margin: var(--space-2) 0 var(--space-5);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border);
+}
+.mail-quote summary {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.mail-quote summary:hover {
+  color: var(--text-dim);
+}
+.mail-quote pre {
+  margin: var(--space-2) 0 0;
+  color: var(--text-faint);
+  font: var(--fs-xs) / 1.65 var(--font);
+  white-space: pre-wrap;
+}
+
+/* ── content studio ───────────────────────────────────────────── */
+
+/* What can actually publish, said once and up front, rather than discovered
+   one card at a time. */
+.content-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-4) var(--pane-x) 0;
+}
+.social-provider-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.board-hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.board-hint kbd {
+  margin: 0 1px;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  font: var(--fs-micro) var(--mono);
+}
+
+.content-board {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(200px, 1fr));
+  gap: var(--space-5);
+  overflow-x: auto;
+  padding: var(--space-5) var(--pane-x) var(--space-6);
+  background: var(--bg);
+
+  /* A final column flush against the window edge reads as broken rather
+     than as "there is more this way". */
+  padding-inline-end: var(--space-6);
+  scroll-padding-inline-end: var(--space-6);
+}
+/* A column is a heading with cards under it. It was a bordered, filled panel
+   containing bordered, filled cards — a box inside a box, five times across. */
+.content-column {
+  min-width: 200px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+/* Only the column under the pointer lights up. Lighting all five said "you may
+   drop anywhere", which is true and tells you nothing. */
+.content-column.over {
+  background: var(--accent-soft);
+}
+.content-column > header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+.content-column > header strong {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.content-column-count {
+  min-width: 20px;
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  font-size: var(--fs-micro);
+  text-align: center;
+  /* Re-keyed on the value, so a card arriving makes the count move rather than
+     silently swap one digit for another. */
+  animation: hq-pop var(--dur-fast) var(--ease);
+}
+.content-column-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+/* The one object on this board you can actually pick up, so it is the one
+   thing with a surface and a height. */
+.content-card {
+  margin-bottom: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm);
+  transition: var(--t-lift);
+}
+.content-card:last-child {
+  margin-bottom: 0;
+}
+.content-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+/* The card you picked up steps back, so the column you are aiming at reads. */
+.content-card.dragging {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.content-card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.platform-badge {
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-active);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+.platform-badge.connected {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.content-campaign {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-when {
+  margin-left: auto;
+  flex: none;
+  color: var(--yellow);
+  font-size: var(--fs-micro);
+}
+.content-card h3 {
+  margin: var(--space-2) 0 var(--space-1);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+.content-card p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.5;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.content-project-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: var(--t-color);
+}
+.content-project-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The radius here is a clip on the image, not a frame around it. */
+.content-media {
+  margin-top: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+.content-media img,
+.content-media video {
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  object-fit: cover;
+}
+.content-media-link {
+  display: block;
+  overflow: hidden;
+  margin-top: var(--space-2);
+  color: var(--cyan);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-media-check {
+  max-width: 260px;
+  margin: calc(var(--space-2) * -1) 0 var(--space-5);
+}
+.content-published {
+  display: block;
+  overflow: hidden;
+  margin-top: var(--space-2);
+  color: var(--green);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Red text on a red wash. Two signals, and no third. */
+.content-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--red);
+  background: var(--red-soft);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+.content-error span {
+  color: var(--text-dim);
+}
+.content-error-actions {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
+}
+.content-error-actions button {
+  color: var(--red);
+  font-size: var(--fs-micro);
+  font-weight: 650;
+}
+.content-error-actions button:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.content-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+/*
+ * Present, legible, dimmed — not hidden until hover. A row action nobody can
+ * see is a feature nobody has, and it is invisible to the keyboard entirely.
+ */
+.card-act {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 650;
+  transition: var(--t-color), var(--t-press);
+}
+.card-act:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.card-act:active:not(:disabled) {
+  transform: var(--press);
+}
+.card-act:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.card-act.publish {
+  color: var(--accent);
+}
+.card-act.publish:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+/* What sits where the Publish button would have been, when publishing is not
+   on offer. A disabled button reads as "not yet"; the truth is "not from
+   here", and that fits in two words. */
+.card-act-note {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-style: italic;
+  cursor: help;
+}
+/* Its own line, always. Sharing one with the buttons let a long name push
+   "Advance" onto a third row and a short one pull it back — the action row
+   changed shape card by card, which is exactly what a board must not do. */
+.content-owner {
+  flex: 1 0 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-bottom: var(--space-1);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.content-owner.unowned {
+  font-style: italic;
+  opacity: 0.8;
+}
+.column-empty {
+  padding: var(--space-6) var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: proportional-nums;
+  line-height: 1.6;
+  text-align: center;
+}
+/* A sentence about where this will publish. It is text, and it now looks
+   like text. */
+.target-state {
+  max-width: var(--measure);
+  margin: calc(var(--space-1) * -1) 0 var(--space-5);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+/* ── content studio: the board and the piece beside it ────────── */
+
+/*
+ * Board on the left, one piece open on the right.
+ *
+ * The panel is a *pane*, not a card: it runs to the edges, it scrolls on its
+ * own, and the only line between it and the board is the same structural
+ * divider the rails on the other two surfaces use. Inside it there are no boxes
+ * at all — the pane is already the container, and a card in here would be the
+ * second one around the same content.
+ */
+.content-shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.content-shell.open {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+}
+/* With the panel open the columns give up width rather than the board giving
+   up columns. A pipeline you have to scroll sideways stops reading as one, so
+   the floor comes down and the gap tightens instead — and the column's own
+   minimum has to come with it, or the tracks shrink under the cards and every
+   column reads on top of its neighbour. */
+.content-shell.open .content-board {
+  gap: var(--space-3);
+  grid-template-columns: repeat(5, minmax(168px, 1fr));
+}
+.content-shell.open .content-column {
+  min-width: 0;
+}
+.content-search {
+  min-width: 180px;
+  max-width: 260px;
+}
+
+/* The card is the control now — opening a piece is a click on it, and moving
+   one is a drag of it. Nothing else on the board is clickable. */
+.content-card {
+  cursor: pointer;
+}
+/* The one you have open. A background, and nothing else: no ring, no bar. */
+.content-card.on {
+  background: var(--accent-soft);
+}
+/* State on a card is one line of text. The actions that answer it are in the
+   panel, which is why this is a sentence rather than a panel of its own. */
+.content-card-flag {
+  overflow: hidden;
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-card-flag.error {
+  color: var(--red);
+}
+.content-card-flag.live {
+  color: var(--green);
+}
+.content-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+/* An empty column recruits: what the stage is for, and the button that fills
+   it. An empty state that only apologises is a dead end with manners. */
+.column-empty p {
+  margin: 0 0 var(--space-3);
+}
+
+.content-detail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-soft);
+  background: var(--bg);
+}
+.content-detail-head {
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+.content-detail-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.content-detail-top .icon-btn {
+  margin-left: auto;
+}
+.content-detail-stage {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.content-title {
+  margin-top: var(--space-3);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: 1.3;
+}
+.content-title:focus {
+  border-color: transparent;
+}
+.content-detail-save {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.content-detail-save .doc-save {
+  margin-right: auto;
+}
+.content-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5) var(--space-5) calc(var(--space-6) * 2);
+}
+/* A section is a heading and the room under it. Related things sit close;
+   unrelated ones are a whole --space-6 apart, and that is the only separator. */
+.content-block + .content-block {
+  margin-top: var(--space-6);
+}
+/* A section heading, not another field label. The fields inside already wear
+   the uppercase micro-caps, and two levels in the same voice is no levels. */
+.content-block > .field-label,
+.content-byhand > .field-label {
+  display: block;
+  margin-bottom: var(--space-3);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--ls-title);
+  text-transform: none;
+}
+.content-block .form-row {
+  gap: var(--space-3);
+}
+.content-block .field {
+  margin-bottom: var(--space-3);
+}
+.content-copy,
+.content-brief {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.content-count {
+  margin: var(--space-2) 0 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+}
+.content-count .over {
+  color: var(--red);
+  font-weight: 650;
+}
+/* The line under a control that says what it will actually do. */
+.content-note {
+  max-width: var(--measure);
+  margin: var(--space-2) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.content-note.warn {
+  color: var(--yellow);
+}
+.content-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.content-owner-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+.content-blockers {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-4);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+.content-publish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+/* The manual route sits inside the publishing block rather than off to one
+   side, because for half the targets it is the only route there is. */
+.content-byhand {
+  margin-top: var(--space-6);
+}
+.content-byhand input,
+.content-byhand .btn {
+  margin-top: var(--space-3);
+}
+
+/* The panel keeps its width and the board stops being one; stacking is the
+   honest answer once five columns and a reading column cannot both fit. */
+@media (max-width: 1120px) {
+  .content-shell.open {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(180px, 38vh) minmax(0, 1fr);
+  }
+  .content-shell.open .content-board {
+    grid-template-columns: repeat(5, minmax(160px, 1fr));
+  }
+  .content-detail {
+    border-top: 1px solid var(--border-soft);
+    border-left: 0;
+  }
+}
+
+/* ── focus and responsiveness ─────────────────────────────────── */
+
+/*
+ * The ring itself is App.css's job, and the rows that would clip an outset one
+ * carry .focus-inset in the markup. All that is left is the board card, whose
+ * column has exactly enough padding to hold a ring drawn tight to its edge.
+ */
+.content-card:focus-visible {
+  outline-offset: 1px;
+}
+
+@media (max-width: 1240px) {
+  .content-board {
+    grid-template-columns: repeat(5, minmax(190px, 1fr));
+  }
+}
+@media (max-width: 1120px) {
+  .ops .sh-pane-actions .provider-state {
+    display: none;
+  }
+  .ops-split {
+    grid-template-columns: minmax(204px, 250px) minmax(0, 1fr);
+  }
+  .mail-shell {
+    grid-template-columns: 144px minmax(220px, 288px) minmax(0, 1fr);
+  }
+  .doc-rails {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+  }
+  /* Two half-measures are worse than one whole one, so Split stacks rather
+     than shrinking. The mode still means something at this width. */
+  .doc-write.split {
+    grid-template-columns: 1fr;
+  }
+  .doc-write.split .doc-preview {
+    padding-top: var(--space-5);
+    padding-left: 0;
+    border-top: 1px solid var(--border-soft);
+    border-left: 0;
+  }
+  .doc-body,
+  .doc-preview {
+    min-height: 42vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-skel-bar,
+  .doc-save,
+  .doc-folder-body,
+  .content-column-count {
+    animation: none;
+  }
+  .content-card,
+  .template-card,
+  .content-column,
+  .ops-seg-btn,
+  .ops-list-row,
+  .mail-folder,
+  .mail-facet,
+  .mail-row-wrap,
+  .mail-star,
+  .doc-pin,
+  .doc-folder-head,
+  .doc-folder-caret,
+  .card-act {
+    transition: none;
+  }
+}

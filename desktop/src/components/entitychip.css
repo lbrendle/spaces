@@ -1,0 +1,358 @@
+/* ── Entity chips, hover cards, avatar stacks ────────────────── */
+/*
+ * entitychip.css is imported from EntityChip.tsx, which lands in the bundle
+ * at whatever point the first view importing a chip does — so nothing here
+ * may depend on cascade order. Every rule is .ec-scoped and no shared
+ * primitive (.chip, .avatar, .md) is redefined. Focus is App.css's outline;
+ * the two rings this sheet used to draw, each naming the surface it hoped to
+ * be sitting on, are gone.
+ *
+ * A chip is a fill with a word in it. It carried an outline as well, which is
+ * what made a sentence with three references in it read as a row of buttons.
+ *
+ * Colors are tokens only. The one tinted part is the kind glyph, and even
+ * that tint arrives as an inline var(--…) reference from entities.ts.
+ */
+
+/* ── chip ─────────────────────────────────────────────────────── */
+
+.ec-wrap {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  max-width: 100%;
+}
+
+.ec {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px var(--space-3);
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: var(--ls-title);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color);
+}
+
+a.ec,
+a.ec:hover {
+  text-decoration: none;
+}
+
+.ec:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.ec-sm {
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  font-size: var(--fs-micro);
+}
+
+.ec-glyph {
+  flex-shrink: 0;
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.ec-title {
+  min-width: 0;
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ec-type {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+/* Inline in a paragraph of chat: no fill until pointed at. With the pill
+   invisible its side padding reads as a hole in the sentence, so it is pulled
+   back out with a negative margin — the hover pill keeps its breathing room,
+   the words keep their rhythm. The shorter box also fits chat's 1.6 line. */
+.ec-muted {
+  padding: 1px var(--space-2);
+  background: transparent;
+  color: var(--text-dim);
+}
+/* On the wrapper, never on the chip: a negative margin on a flex item is
+   taken out of the item's own width, which would ellipsise the title. */
+.ec-wrap-muted {
+  margin: 0 -3px;
+}
+.ec-muted.ec-sm {
+  padding: 0 var(--space-1);
+}
+.ec-muted:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Off-app destination. */
+.ec-external::after {
+  content: "↗";
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 0.85em;
+}
+
+/* Tombstone: the target is gone, the link is not. The struck-through title is
+   the signal — it is unambiguous, it survives every palette, and it does not
+   need a dashed outline repeating it. */
+.ec-dead,
+.ec-dead:hover {
+  background: transparent;
+  color: var(--text-faint);
+}
+.ec-dead .ec-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.ec[aria-disabled="true"] {
+  cursor: default;
+}
+
+/* ── remove affordance ────────────────────────────────────────── */
+/* Rendered as a sibling, not a child: a button inside a button is not a
+   thing, and both halves need their own accessible name. The two halves are
+   one pill split down the middle — the seam is the 1px gap in the fill, which
+   is all a seam has ever needed to be. */
+
+.ec-has-remove .ec {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: 1px;
+  padding-right: var(--space-2);
+}
+
+.ec-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex-shrink: 0;
+  padding: 0 var(--space-2);
+  border-radius: 0 999px 999px 0;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+/* A muted chip has no pill, so its remove half must not float there as one. */
+.ec-wrap-muted .ec-remove {
+  background: transparent;
+}
+.ec-remove:hover,
+.ec-wrap-muted .ec-remove:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ── hover card ───────────────────────────────────────────────── */
+
+/* Genuinely floating, so it takes level 3 of the elevation ladder: the
+   overlay surface, a real border and the neutral popover shadow. --shadow-lg
+   belongs to modals; a preview is not a modal. */
+.ec-card {
+  position: fixed;
+  z-index: 400; /* above modals (100) and the command palette (200) */
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow: hidden;
+  /* A preview that can be hovered is a preview that flickers. */
+  pointer-events: none;
+  animation: ec-card-in var(--dur-fast) var(--ease);
+}
+
+@keyframes ec-card-in {
+  from { opacity: 0; transform: translateY(-3px); }
+}
+
+.ec-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.ec-card-glyph {
+  flex-shrink: 0;
+  font-size: var(--fs-md);
+  line-height: 1.35;
+}
+
+.ec-card-ident {
+  min-width: 0;
+}
+
+.ec-card-title {
+  font-size: var(--fs);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  overflow-wrap: anywhere;
+}
+
+.ec-card-kind {
+  margin-top: 1px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.ec-card-gone .ec-card-title {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Inside a card that is already a card, so: a wash, not a second frame. */
+.ec-card-note {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* Body text is trimmed in JS; the cap here is the guard against one long
+   unbroken block still running the card off the screen. */
+.ec-card-body {
+  margin-top: var(--space-3);
+  max-height: 7.5em;
+  overflow: hidden;
+  color: var(--text-dim);
+}
+.ec-card-body .md {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.ec-card-body .md .md-h {
+  margin: var(--space-1) 0 2px;
+  font-size: var(--fs-sm);
+}
+.ec-card-body .md .md-gap {
+  height: 5px;
+}
+.ec-card-body .md .codeblock {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  max-height: 4.4em;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+}
+.ec-card-body .md ul {
+  padding-left: var(--space-5);
+}
+
+.ec-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.ec-card-who {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ec-card-who-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.ec-card-count {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ── avatar stack ─────────────────────────────────────────────── */
+
+.ec-stack {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ec-face {
+  display: inline-flex;
+  margin-right: -6px;
+  border-radius: var(--radius-sm);
+  /* Not decoration: overlapping faces need a cut-out to stay countable, and a
+     hairline in the neutral border token is the only version of it that reads
+     on --bg, --bg-raised, --surface-1 and --bg-overlay alike. */
+  box-shadow: 0 0 0 1.5px var(--border-strong);
+}
+.ec-face:last-child {
+  margin-right: 0;
+}
+.ec-face .avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+}
+.ec-face .avatar-badge {
+  display: none; /* at 20px the harness badge is noise, not information */
+}
+
+.ec-stack-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: var(--space-3);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ec-card {
+    animation: none;
+  }
+  .ec,
+  .ec-remove {
+    transition: none;
+  }
+}

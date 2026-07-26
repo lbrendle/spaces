@@ -1,0 +1,34 @@
+# Spaces portal — local development variables
+#
+# Copy this file to `.dev.vars` and fill only the providers you intend to use.
+# Production values are managed by Sites and must never be committed here.
+
+# Production deployments should set invite-only explicitly. Leave these
+# commented during local bootstrap so a fresh clone can create its first
+# workspace, then lock admission down before exposing the deployment.
+# SPACES_SIGNUP_MODE=invite_only
+# SPACES_SIGNUP_ALLOWLIST=
+
+# OAuth token encryption. Changing this invalidates existing stored tokens.
+INTEGRATION_TOKEN_KEY=
+
+# Google Workspace
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Microsoft 365
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+
+# X (optional)
+X_CLIENT_ID=
+X_CLIENT_SECRET=
+
+# TikTok Login Kit + Content Posting API
+TIKTOK_CLIENT_KEY=
+TIKTOK_CLIENT_SECRET=
+
+# Instagram API with Instagram Login
+META_APP_ID=
+META_APP_SECRET=
+META_GRAPH_VERSION=v25.0

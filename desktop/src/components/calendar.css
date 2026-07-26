@@ -1,0 +1,1809 @@
+/* ── Calendar ─────────────────────────────────────────────────── */
+/*
+ * calendar.css is imported from CalendarView.tsx. Everything is prefixed `cal-`
+ * so it can lean on shared primitives (.chip, .btn, .field, .center-note)
+ * without ever out-specifying them by accident.
+ *
+ * Four rules run through the whole file:
+ *
+ *  1. No literal colours. A calendar's identity colour arrives per element as
+ *     --cal-c (from calendarColor(), which is a theme value or the calendar's
+ *     own). It is spent on exactly two things: a low-opacity wash under a
+ *     block, and a small solid dot in front of a row. Never on text, because a
+ *     hashed hue cannot be trusted to contrast with 39 themes in two
+ *     appearances — and no longer on a 3px rule down an element's left edge,
+ *     which four different things in this file used to draw and which is the
+ *     single loudest tell in the app.
+ *  2. No literal spacing either. --space-1..6 and --row-h come from the user's
+ *     density preference; a raw px gap here is a preference that silently stops
+ *     working. Geometry the tokens do not cover — an hour's height, the width
+ *     of the time gutter — is derived from them instead of guessed.
+ *  3. Redacted blocks look categorically different, not merely dimmer: hatching
+ *     reads as "withheld" at a glance where grey reads as "past".
+ *  4. Motion is transform and opacity, nothing else. The grid is the one
+ *     surface in the app where a dropped frame is felt rather than seen, and
+ *     anything that animates a box's geometry drops frames.
+ */
+
+.cal-view {
+  /* How many columns the view is showing. A month is always a week wide; the
+     week and day grids override it on .cal-grid-wrap from the days they were
+     handed. Everything that draws columns reads this and nothing else. */
+  --cal-cols: 7;
+  /* An hour is a little over a row tall, so a compact density really does fit
+     more of the day on screen instead of only tightening the lists. */
+  --cal-hour-h: calc(var(--row-h) * 1.55);
+  /* Wide enough for "12 PM" at the largest font scale, and it grows with it. */
+  --cal-gutter-w: calc(var(--fs-micro) * 5.2 + var(--space-2));
+  /* Every mark in the time gutter — the hour labels and the now read-out —
+     ends this far from the gutter's right edge. One number, so the column of
+     times has one right margin instead of a per-element opinion. */
+  --cal-gutter-pad: var(--space-3);
+  /* The now-line's thickness, named because three things need it: the line, the
+     dot that caps it, and the arithmetic that centres the dot on the line. */
+  --cal-now-w: 1.5px;
+  /* The provider rows carry both an account label and an action. Let the rail
+     use a modest share of a wide pane so neither one is forced into a false
+     alignment, while retaining a type-scaled floor and ceiling. */
+  --cal-rail-w: clamp(
+    calc(var(--fs) * 15.5),
+    21%,
+    calc(var(--fs) * 18.5)
+  );
+  /* The air a block leaves for the one beside it. Taken out of the box rather
+     than the width, so layoutDay's fractions stay exactly true. */
+  --cal-ev-gap: calc(var(--space-1) / 2);
+}
+
+/* ── header ──────────────────────────────────────────────────── */
+
+.cal-view .sh-pane-head-row {
+  align-items: center;
+}
+
+.cal-view .sh-pane-head-text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.cal-range {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* Local-only is a legitimate state, so it is a note, not a warning. */
+.cal-note {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 0 var(--space-3);
+  cursor: help;
+}
+
+.cal-header-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cal-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-1) / 2);
+}
+
+.icon-btn.cal-step {
+  font-size: var(--fs-md);
+  line-height: 1;
+  padding: var(--space-1) var(--space-3);
+  transition: var(--t-color), var(--t-press);
+}
+.icon-btn.cal-step:active {
+  transform: var(--press);
+}
+
+.btn.cal-today.on {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* segmented switcher */
+.cal-seg {
+  display: inline-flex;
+  padding: calc(var(--space-1) / 2);
+  gap: calc(var(--space-1) / 2);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+
+.cal-seg-btn {
+  padding: var(--space-1) var(--space-4);
+  border-radius: calc(var(--radius) - 3px);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: var(--t-color), var(--t-press);
+}
+.cal-seg-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.cal-seg-btn:active {
+  transform: var(--press);
+}
+/* The app's one selected treatment. It used to be a raised fill with a
+   --shadow-sm under it: a 30px-tall button does not float. */
+.cal-seg-btn.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* ── body: rail + surface ────────────────────────────────────── */
+
+.cal-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.cal-surface {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cal-empty {
+  gap: var(--space-4);
+  max-width: 62ch;
+  margin: 0 auto;
+}
+.cal-empty p {
+  margin: 0;
+  max-width: 58ch;
+}
+.cal-empty .btn {
+  margin-top: var(--space-3);
+}
+
+.cal-empty-accounts {
+  width: 100%;
+  max-width: 34ch;
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-4);
+}
+
+.cal-empty-or {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+.cal-empty .cal-acct .btn {
+  margin-top: 0;
+}
+
+/* ── the rail: whose calendar is whose ───────────────────────── */
+
+.cal-rail {
+  width: var(--cal-rail-w);
+  min-width: var(--cal-rail-w);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  padding: var(--space-4) var(--space-3) var(--space-5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cal-rail-section {
+  margin-bottom: var(--space-5);
+}
+.cal-rail-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.cal-rail-title {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  cursor: help;
+}
+
+.cal-rail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--t-color);
+}
+.cal-rail-row:hover,
+.cal-rail-row:focus-within {
+  background: var(--bg-hover);
+}
+.cal-rail-row:active {
+  background: var(--bg-active);
+}
+.cal-rail-row input {
+  width: auto;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* A calendar switched off is still listed — it is a thing you can bring back —
+   but it should not read as loud as the ones you are actually looking at. */
+.cal-rail-row:has(input:not(:checked)) .cal-swatch {
+  opacity: 0.4;
+}
+.cal-rail-row:has(input:not(:checked)) .cal-rail-cal {
+  color: var(--text-dim);
+}
+
+.cal-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  display: inline-block;
+  box-sizing: border-box;
+  transition: var(--t-fade);
+  /* The hue can be near-identical to a pale theme's surface; a neutral hairline
+   * keeps a swatch findable in every one of them. It was an inset box-shadow,
+   * which is the same picture drawn with the one property this app reserves
+   * for height. */
+  border: 1px solid var(--border);
+}
+
+.cal-rail-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.cal-rail-cal {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-rail-owner {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-rail-lock {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.cal-rail-note {
+  margin: var(--space-4) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-3);
+}
+
+/* Which source the grid is narrowed to. It sits above the calendars because it
+ * is the thing that decides which of them are there at all. */
+.cal-rail-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: 0 var(--space-1);
+}
+
+.cal-rail-filter-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cal-rail-filter select {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  padding: var(--space-1) var(--space-2);
+}
+
+.cal-rail-empty {
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-2);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+
+/* ── connected accounts ──────────────────────────────────────── */
+
+.cal-acct-list {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+}
+
+.cal-acct {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+.cal-acct:hover {
+  background: var(--bg-hover);
+}
+
+.cal-acct-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.cal-acct-label {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Connected is the only state worth colouring; the rest are simply facts. */
+.cal-acct-state {
+  font-size: var(--fs-micro);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-acct-state.on {
+  color: var(--green);
+}
+
+.cal-acct .btn {
+  min-width: max-content;
+}
+
+/* ── week / day chrome ───────────────────────────────────────── */
+
+.cal-grid-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* The drag hint and the live region are positioned against this. */
+  position: relative;
+}
+
+/* A resize wants the axis cursor, so it opts out of the app-wide drag lock
+   (which is [data-dragging], and is set for moves) and states its own. */
+.cal-grid-wrap.cal-resizing,
+.cal-grid-wrap.cal-resizing * {
+  cursor: ns-resize;
+  user-select: none;
+}
+
+/*
+ * The week's columns, in one declaration.
+ *
+ * Four things draw the same seven columns: the day headers, the tint bands
+ * behind the all-day strip, the all-day bars themselves, and the grid. They
+ * used to be two flex rows and two inline repeat() strings written in the JSX,
+ * which agreed only as long as their containers did — and their containers did
+ * not, because the grid's was a scroller and the other three were not.
+ *
+ * Now the count arrives once as --cal-cols, on .cal-grid-wrap, and all four
+ * live inside the scroller's single content box (see .cal-sticky). minmax(0,
+ * 1fr) rather than 1fr so a long title can never widen its own column.
+ */
+.cal-headdays,
+.cal-days,
+.cal-allday-cols,
+.cal-allday-row,
+.cal-month-head,
+.cal-month-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cal-cols), minmax(0, 1fr));
+}
+
+/*
+ * The day headers and the all-day strip, held above the hours they label.
+ *
+ * They are inside .cal-scroll rather than above it. That is the whole fix for
+ * the column drift: a scrollbar takes its width off the scroller's content
+ * box, so anything laid out *outside* that box is laid out over a width the
+ * grid never had, and the error fans out column by column. In here there is one
+ * content box and one answer, whatever the scrollbar is doing — classic and
+ * always present, classic and only present once the grid overflows, or a macOS
+ * overlay bar that reports zero width until the moment it is drawn over the
+ * content. None of those three can be measured once at mount and trusted; none
+ * of them has to be, because nothing here measures anything.
+ *
+ * Above z-index 9, which is the drag proxy and its read-out: a block dragged
+ * past 8 AM goes under the headers, exactly as it did when they were a
+ * separate element and the scroller clipped it.
+ */
+.cal-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  /* The width the columns are actually laid out over, published for the one
+     descendant that cannot read it any other way — see .cal-allday-rows. This
+     block never scrolls, so its inline size is the honest one. Containment
+     lands here rather than on .cal-scroll deliberately: this is three rows of
+     chrome, not the grid, the events and the drag proxy. */
+  container-type: inline-size;
+}
+
+.cal-headrow {
+  display: flex;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.cal-gutter-head {
+  width: var(--cal-gutter-w);
+  min-width: var(--cal-gutter-w);
+  flex-shrink: 0;
+}
+
+.cal-headdays {
+  flex: 1;
+  min-width: 0;
+}
+
+.cal-dayhead {
+  position: relative;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-2);
+  border-left: 1px solid var(--border-soft);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  transition: var(--t-color);
+}
+
+/* The day a dragged block would land on. It used to also grow a 2px accent bar
+   along the bottom of the header — an accent strip drawn with ::after, which is
+   the pattern this pass removes everywhere. The wash and the column tint under
+   it are already unmistakably one column. */
+.cal-dayhead.drop {
+  background: var(--accent-soft);
+}
+.cal-dayhead.drop .cal-dayhead-name,
+.cal-dayhead.drop .cal-dayhead-num {
+  color: var(--text);
+}
+
+.cal-dayhead-name {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  transition: var(--t-color);
+}
+
+.cal-dayhead-num {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.cal-dayhead.today .cal-dayhead-num {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 999px;
+  padding: 0 var(--space-2);
+}
+.cal-dayhead.today .cal-dayhead-name {
+  color: var(--accent);
+}
+
+/* per-owner lane labels, only when a single day has room for them */
+.cal-lanehead {
+  display: flex;
+  width: 100%;
+  margin-top: var(--space-1);
+  gap: 0;
+}
+
+.cal-lane-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-right: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-lane-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--cal-gutter-w);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-inset);
+  flex-shrink: 0;
+}
+
+.cal-lane-legend-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.chip.cal-lane-chip {
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+/* ── all-day strip ───────────────────────────────────────────── */
+
+/* A week with six overlapping all-day events stacks past this cap and scrolls
+   inside itself — the one scroller left in the view that is not .cal-scroll,
+   and therefore the one place the column drift could come back. It does, in
+   mirror image: this scrollbar takes its 11px off the *strip*, so the bands and
+   bars would walk left as the headers stayed put. .cal-allday-rows below is
+   what stops that; the horizontal clip is what keeps the compensation from
+   growing a second scrollbar at right angles to the first. */
+.cal-allday {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-inset);
+  flex-shrink: 0;
+  max-height: 108px;
+  overflow: hidden auto;
+}
+
+.cal-allday-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: var(--space-2) var(--space-2) 0 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cal-allday-rows {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-1) / 2);
+  padding: var(--space-1) 0;
+  /* The columns area, measured from outside the strip's own scrollbar.
+   *
+   * A flex child can only ever be given what its parent's content box has
+   * left, and once the strip scrolls that box is a scrollbar short — which is
+   * the same disagreement .cal-sticky exists to prevent, one level down. A
+   * container query is the only way to ask for a width the strip's own
+   * scrollbar has not already been taken out of: .cal-sticky is the query
+   * container, it never scrolls, and its inline size *is* the grid's full
+   * width. Everything the strip overflows by is clipped, so the far edge of
+   * Sunday ends up under the scrollbar rather than dragging the week left —
+   * which is what an overlay scrollbar does to it anyway.
+   *
+   * Declared twice on purpose: an engine without container query units drops
+   * the second and keeps the first, which is exactly today's behaviour rather
+   * than a strip that sizes itself to its longest title.
+   */
+  min-width: calc(100cqw - var(--cal-gutter-w));
+}
+
+/* The strip carries the grid's columns behind its bars, so a bar spanning
+   Tuesday to Thursday is read rather than measured. */
+.cal-allday-cols {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cal-allday-col {
+  border-left: 1px solid var(--border-soft);
+}
+.cal-allday-col.today {
+  background: var(--accent-soft);
+}
+
+.cal-allday-empty {
+  height: 12px;
+}
+
+/* The bars' row shares the tint bands' tracks exactly, so it may not carry
+   padding or a gap: both shrink the tracks, and a track that is 1.29px narrow
+   walks a bar off the column it names — this row's used to, by up to 0.65px at
+   the far end of the week, on top of the scrollbar drift. The air a bar needs
+   on either side is the bar's own margin, where it costs the geometry nothing
+   and where two adjacent bars still end up the same 1.5px apart. */
+.cal-allday-row {
+  position: relative;
+}
+
+/* An all-day bar. Its calendar's identity used to be a 3px rule down its left
+   edge; it is now the dot in front of the title — the same dot the month view
+   has always used, so the two views finally say it the same way. */
+.cal-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 19px;
+  /* The hairline that keeps a bar off the column rules it spans, taken from the
+     bar so every bar gets the same one wherever it starts. */
+  margin: 0 calc(var(--space-1) / 4);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  position: relative;
+  transition: var(--t-color), var(--t-press);
+}
+.cal-bar::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cal-c, var(--accent));
+}
+/* Withheld: the dot goes hollow rather than inheriting the hatch .cal-ev-busy
+   paints over a full-size block. Same reading, at 6px. */
+.cal-bar.cal-ev-busy::before {
+  opacity: 1;
+  background: none;
+  border: 1px solid var(--border-strong);
+}
+button.cal-bar:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+button.cal-bar:active {
+  transform: var(--press);
+}
+
+/* ── the grid ────────────────────────────────────────────────── */
+
+.cal-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* A drag label reaching past the last column must not grow the page a
+     scrollbar it then has to fight. */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+.cal-grid {
+  display: flex;
+  height: calc(var(--cal-hour-h) * 24);
+  min-height: calc(var(--cal-hour-h) * 24);
+}
+
+.cal-gutter {
+  position: relative;
+  width: var(--cal-gutter-w);
+  min-width: var(--cal-gutter-w);
+  flex-shrink: 0;
+}
+
+.cal-hour {
+  height: var(--cal-hour-h);
+  position: relative;
+}
+/* Centred on the hour rule it names, by halving the label rather than by
+   guessing at its height in ems: -0.65em was one font's half-leading and sat
+   1.3px low in this one, and would sit differently again at another type scale
+   or in another face. translateY(-50%) is exact at every size. */
+.cal-hour span {
+  position: absolute;
+  top: 0;
+  transform: translateY(-50%);
+  right: var(--cal-gutter-pad);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.cal-days {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  /* A drag that selects the hour labels behind it looks like a bug, and there
+     is nothing in a grid of blocks anyone wants to select. */
+  user-select: none;
+}
+
+.cal-day {
+  min-width: 0;
+  position: relative;
+  border-left: 1px solid var(--border-soft);
+  /* A vertical pan still scrolls the grid on a trackpad or a touchscreen; a
+     press that stays put is still a tap, and still makes an event. */
+  touch-action: pan-y;
+  transition: background-color var(--dur-fast) var(--ease);
+  /* Hour rules and their half-hour ticks. These are the grid's axis — the same
+   * exemption a chart's gridlines take — and they are drawn as backgrounds so
+   * the column stays a single element for pointer maths. */
+  background-image:
+    linear-gradient(to bottom, var(--border) 0 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border-soft) 0 1px, transparent 1px);
+  background-size:
+    100% var(--cal-hour-h),
+    100% calc(var(--cal-hour-h) / 2);
+  background-repeat: repeat-y;
+}
+
+.cal-day.today {
+  background-color: var(--accent-soft);
+}
+
+/* The column a dragged block would land in. Deliberately quiet — the proxy is
+   already the loud thing on screen — but unmistakably one column. The inset
+   accent ring it used to carry was a coloured shadow, which this app does not
+   have; the wash on its own says the same thing. */
+.cal-day.drop {
+  background-color: var(--accent-soft);
+}
+
+/* In Day view "today" is the whole grid, so tinting it says nothing and only
+ * costs contrast against the blocks. The date pill in the header carries it. */
+.cal-days.single .cal-day.today {
+  background-color: transparent;
+}
+.cal-days.single .cal-day.drop {
+  background-color: var(--accent-soft);
+}
+
+.cal-lane-rule {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+/* ── an event ────────────────────────────────────────────────── */
+
+.cal-ev {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  padding: 2px var(--space-2);
+  margin-right: var(--cal-ev-gap);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  text-align: left;
+  line-height: 1.3;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+/* The whole of a block's identity: a wash of its calendar's colour, under the
+   text and never on it. It used to share the job with a 3px rule down the left
+   edge; the wash on its own is the "subtle background tint" that reads as
+   identity without reading as an accent bar, so it carries a little more. */
+.cal-ev::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--cal-c, var(--accent));
+  opacity: 0.18;
+  pointer-events: none;
+  transition: var(--t-fade);
+}
+
+.cal-ev > * {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-ev-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cal-ev-time,
+.cal-ev-where {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-ev.short {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.cal-ev.short .cal-ev-title {
+  font-size: var(--fs-xs);
+}
+
+/* A week split four ways leaves lanes barely wider than a word. Titles are the
+ * only thing worth the pixels there — the times are in the tooltip and in the
+ * editor, and the row's vertical position already says roughly when it is. */
+.cal-grid-wrap.narrow .cal-ev {
+  padding-left: var(--space-2);
+  padding-right: var(--space-1);
+  margin-right: 2px;
+}
+.cal-grid-wrap.narrow .cal-ev-time,
+.cal-grid-wrap.narrow .cal-ev-where {
+  display: none;
+}
+.cal-grid-wrap.narrow .cal-ev-title {
+  font-size: var(--fs-xs);
+}
+
+.cal-ev:hover,
+.cal-ev:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  z-index: 3;
+}
+/* The ring is drawn outside the box, so the block has to be above whatever it
+   is overlapping or a neighbour paints over half of it. */
+.cal-ev:focus-visible {
+  z-index: 6;
+}
+
+.cal-ev.editable {
+  cursor: grab;
+}
+.cal-ev.editable:active {
+  cursor: grabbing;
+}
+/* Acknowledge the press, but never while the block is standing in as the
+   origin of a drag — the ghost should be perfectly still. */
+.cal-ev.editable:active:not(.ghost) {
+  transform: var(--press);
+}
+
+/* Read-only, and it says so. Present at low contrast rather than revealed on
+   hover: in a workspace where half the grid belongs to somebody else, which
+   blocks you can actually touch is something to know before you reach. */
+.cal-ev.locked {
+  cursor: default;
+}
+.cal-ev .cal-ev-lock {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  display: inline-flex;
+  color: var(--text-faint);
+  opacity: 0.5;
+  overflow: visible;
+  transition: var(--t-fade);
+}
+.cal-ev.locked:hover .cal-ev-lock,
+.cal-ev.locked:focus-visible .cal-ev-lock {
+  opacity: 1;
+}
+.cal-ev.locked .cal-ev-title {
+  padding-right: 13px;
+}
+
+/* The block a drag left behind. It stays exactly where it was and says so —
+   dimmed and dashed — because a move you cannot see the start of is just a
+   block that teleported. */
+.cal-ev.ghost {
+  opacity: 0.36;
+  box-shadow: none;
+  border-style: dashed;
+  border-color: var(--border);
+  z-index: 1;
+}
+.cal-ev.ghost::before {
+  opacity: 0.05;
+}
+.cal-ev.ghost .cal-ev-grip {
+  display: none;
+}
+
+/* ── resize grips ────────────────────────────────────────────── */
+
+.cal-ev-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+  overflow: visible;
+}
+.cal-ev-grip.top {
+  top: 0;
+}
+.cal-ev-grip.bottom {
+  bottom: 0;
+}
+.cal-ev-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 20px;
+  height: 2px;
+  margin-left: -10px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  /* Visible at rest, stronger under the pointer. An affordance nobody can see
+     is one nobody finds, and hover-to-reveal is invisible to a keyboard. */
+  opacity: 0.35;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+.cal-ev-grip.top::after {
+  top: 2px;
+}
+.cal-ev-grip.bottom::after {
+  bottom: 2px;
+}
+.cal-ev:hover .cal-ev-grip::after,
+.cal-ev:focus-visible .cal-ev-grip::after {
+  opacity: 0.85;
+  transform: scaleX(1.25);
+}
+.cal-ev-grip:hover::after {
+  opacity: 1;
+  background: var(--accent);
+  transform: scaleX(1.5);
+}
+/* Half an hour is 23 pixels: two grips and a body do not fit, and the top edge
+   is the one you can do without. */
+.cal-ev.short .cal-ev-grip {
+  height: 6px;
+}
+.cal-ev.short .cal-ev-grip.top {
+  display: none;
+}
+.cal-ev.editable {
+  touch-action: none;
+}
+
+/* Withheld. No title, no tooltip about the event, no way in — and visibly a
+ * different kind of thing from an event you are allowed to read. */
+.cal-ev-busy {
+  cursor: default;
+  color: var(--text-dim);
+  border-color: var(--border);
+  border-style: dashed;
+  background-color: var(--bg-inset);
+}
+/* Genuine texture, not decoration: hatching is what "withheld" looks like, and
+   there is no way to draw a hatch without a repeating gradient. The same
+   exemption the ruled hour grid takes below. */
+.cal-ev-busy::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--cal-c, var(--border-strong)) 0 1px,
+    transparent 1px 7px
+  );
+  opacity: 0.45;
+}
+.cal-ev-busy .cal-ev-title {
+  font-weight: 550;
+  letter-spacing: 0.2px;
+}
+.cal-ev-busy:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── the drag proxy ──────────────────────────────────────────── */
+
+/*
+ * The one thing that moves during a drag. It is out of flow and driven only by
+ * transform, so following the pointer costs no layout at all; the block it came
+ * from stays put as a ghost, and the columns underneath never reflow.
+ */
+.cal-drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  /* Padding stays tiny and the title is clipped rather than pushing the box
+     out: with border-box sizing anything thicker becomes a floor the resize
+     could never go under, and the minimum has to be the *event's* minimum. */
+  overflow: hidden;
+  /* Its height really does change while resizing. Containment keeps that
+     inside this one out-of-flow box instead of letting it reach the grid. */
+  contain: layout;
+  will-change: transform;
+}
+
+.cal-drag::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--cal-c, var(--accent));
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+/* Drawing a new block rather than moving an old one: dashed, in the accent,
+   because there is nothing there yet. */
+.cal-drag.new {
+  border-style: dashed;
+  border-color: var(--accent);
+  background: var(--accent-soft-strong);
+}
+.cal-drag.new::before {
+  opacity: 0;
+}
+
+/* Released. The magnetic offset can be half an increment from the snap, so the
+   block is *seen* to travel the last few pixels rather than jumping them. */
+.cal-drag.settling {
+  transition:
+    transform var(--dur-fast) var(--ease),
+    height var(--dur-fast) var(--ease);
+}
+
+/* The running read-out. A sibling of the proxy rather than a child, so the
+   block stays free to shrink to a fifteen-minute sliver; it rides just above
+   the block it belongs to, and drops inside only at the top of the day. */
+.cal-drag-time {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  /* Fixed, and paired with LABEL_H in CalendarView: the paint loop has to know
+     how tall this is to place it clear of the block without measuring it. */
+  line-height: 18px;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+  will-change: transform;
+}
+.cal-drag-time.settling {
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.cal-drag-title {
+  min-height: 0;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What the modifiers do, said while they are useful and never before. */
+.cal-drag-hint {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-5);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: hq-fade var(--dur) var(--ease);
+}
+
+.cal-drag-hint kbd {
+  font-family: var(--font);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
+
+.cal-drag-hint i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  margin: 0 var(--space-1);
+}
+
+/* Announcements for the keyboard path: heard, never seen. */
+.cal-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── now ─────────────────────────────────────────────────────── */
+
+/* Drawn as a box with a height rather than a zero-height box with a border,
+   so the line has an inside for the dot to be centred in. With the border the
+   dot's containing block began *below* the rule, which put the dot 0.75px low
+   against the very line it caps. */
+.cal-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--cal-now-w);
+  background: var(--red);
+  /* Straddling the instant rather than starting at it. The top edge is what
+     the percentage places, so without this the line — and the dot centred in
+     it — sit half their thickness later than the read-out beside them, which
+     is centred on the same percentage in the gutter. */
+  transform: translateY(calc(var(--cal-now-w) / -2));
+  z-index: 7;
+  pointer-events: none;
+}
+/* The dot at the head of the "now" line. It used to sit in a 3px halo of its
+   own colour; the line it caps is the thing that carries the reading. Centred
+   on the line's start in both axes by the line's own middle, so its size and
+   the line's thickness can change without the two coming apart. */
+.cal-now i {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  transform: translate(-50%, -50%);
+}
+
+/* The clock the line is claiming. Opaque, because it sits on top of an hour
+   label and two of them in the same place is a smudge, not a reading. It ends
+   where the hour labels end — it stands in for one, and standing 3px proud of
+   the column of times it interrupts was the only ragged edge in the gutter. */
+.cal-now-label {
+  position: absolute;
+  right: var(--cal-gutter-pad);
+  z-index: 2;
+  transform: translateY(-50%);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--red-border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--red);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* ── month ───────────────────────────────────────────────────── */
+
+.cal-month {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The one scroller in the month view; the weekday names ride inside it. */
+.cal-month-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.cal-month-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.cal-month-weekday {
+  padding: var(--space-2) var(--space-3);
+  /* Directly over the day number and the events below it, which carry the
+     cell's padding *and* their own — one column of text per weekday, not a
+     label three pixels adrift of everything it labels. */
+  padding-left: calc(var(--space-2) * 2);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Grows into the room the weekday names leave and never shrinks past its
+   cells' own height, so a tall month scrolls rather than squeezing. */
+.cal-month-grid {
+  flex: 1 0 auto;
+  grid-auto-rows: 1fr;
+}
+
+.cal-month-cell {
+  border-right: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  min-height: 92px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.cal-month-cell:nth-child(7n) {
+  border-right: none;
+}
+.cal-month-cell.outside {
+  background: var(--bg-inset);
+}
+.cal-month-cell.today {
+  background: var(--accent-soft);
+}
+
+.cal-month-num {
+  align-self: flex-start;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  transition: var(--t-color), var(--t-press);
+}
+.cal-month-num:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.cal-month-num:active {
+  transform: var(--press);
+}
+.cal-month-cell.outside .cal-month-num {
+  color: var(--text-faint);
+}
+.cal-month-cell.today .cal-month-num {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.cal-month-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cal-mini {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  transition: var(--t-color), var(--t-press);
+}
+button.cal-mini:hover {
+  background: var(--bg-hover);
+}
+button.cal-mini:active {
+  transform: var(--press);
+}
+
+.cal-mini-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--cal-c, var(--accent));
+}
+
+.cal-mini-time {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.cal-mini-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-mini.cal-ev-busy {
+  border: 1px dashed var(--border);
+  gap: var(--space-1);
+  color: var(--text-dim);
+}
+
+.cal-more {
+  align-self: flex-start;
+  font-size: var(--fs-micro);
+  font-weight: 650;
+  color: var(--text-faint);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+.cal-more:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+/* ── agenda ──────────────────────────────────────────────────── */
+
+.cal-agenda {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--pane-x) var(--space-6);
+}
+
+.cal-agenda-day {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.cal-agenda-day:first-child {
+  border-top: none;
+}
+
+.cal-agenda-date {
+  margin: 0;
+  width: 130px;
+  min-width: 130px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+
+.cal-agenda-num {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.cal-agenda-date.today .cal-agenda-num {
+  color: var(--accent);
+}
+
+.cal-agenda-name {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+.cal-agenda-month {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  width: 100%;
+}
+
+.cal-agenda-rows {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* A row in the agenda. Its calendar's identity is the dot in front of the time,
+   the same as in the month grid — it used to be a 3px rule down the left edge,
+   which turned a plain list of appointments into a stack of tabbed folders. */
+.cal-agenda-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+  transition: var(--t-color), var(--t-press);
+}
+.cal-agenda-row::before {
+  content: "";
+  align-self: center;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cal-c, var(--accent));
+}
+button.cal-agenda-row:hover {
+  background: var(--bg-hover);
+}
+button.cal-agenda-row:active {
+  transform: var(--press);
+}
+
+.cal-agenda-time {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  /* Wide enough for a 12-hour range on one line: wrapping here would break the
+   * column that makes the list scannable. */
+  width: 19ch;
+  min-width: 19ch;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.cal-agenda-title {
+  font-size: var(--fs);
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cal-agenda-where {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-agenda-owner {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  flex-shrink: 0;
+  padding-left: var(--space-3);
+}
+
+/* Withheld: the dot goes hollow, which is the same "you may not read this"
+   the hatched blocks in the grid say. */
+.cal-agenda-row.cal-ev-busy {
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+}
+.cal-agenda-row.cal-ev-busy::before {
+  opacity: 1;
+  background: none;
+  border: 1px solid var(--border-strong);
+}
+
+/* ── editor ──────────────────────────────────────────────────── */
+
+/*
+ * The editor is a panel beside the grid, not a dialog over it. SidePanel owns
+ * the surface, the header, the scroll and the footer; everything here only
+ * places what this file puts inside one.
+ *
+ * The panel is 420px by default against a modal's 640px, so the two-up rows
+ * wrap rather than crush their controls, and the date/time pairs get first call
+ * on the width they need.
+ */
+.cal-event-panel .fields-row {
+  flex-wrap: wrap;
+}
+.cal-event-panel .fields-row > .field {
+  min-width: 14ch;
+}
+/* Starts and Ends are a date *and* a time each. Four controls do not cross a
+   420px panel, and a form that scrolls sideways is a form you cannot read, so
+   the pair takes a line apiece and the inputs share it. */
+.cal-event-panel .cal-when-row > .field {
+  flex: 1 1 100%;
+}
+.cal-event-panel .cal-when input {
+  min-width: 0;
+  flex: 1 1 9ch;
+}
+
+/* Destructive action to the leading edge: .sp-foot pushes its children right,
+   and Delete is the one control that must not sit next to anything. */
+.cal-event-del {
+  margin-right: auto;
+}
+
+/* An existing event has no Save button, so this is what says why. Faint: it is
+   a standing fact about the panel, not an event. */
+.cal-event-state {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+/* One clear primary. The title is what the event *is*; everything under it is
+   detail, and a form where six fields shout equally has no hierarchy at all. */
+.cal-editor .cal-title-input {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+}
+
+.cal-editor .cal-when {
+  display: flex;
+  gap: var(--space-2);
+}
+.cal-editor .cal-when input[type="time"] {
+  max-width: 118px;
+}
+
+/* How long it is, read back. An end before its start is a state the form can
+   be in, so it is drawn here rather than saved up for a toast on submit. */
+.cal-span {
+  margin: calc(var(--space-4) * -1) 0 var(--space-4);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.cal-span.bad {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.cal-editor .checkbox-field.cal-allday-toggle {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin-bottom: var(--space-4);
+  white-space: nowrap;
+}
+
+/* Where saving really goes. A sentence, not a tinted panel: the tag in front of
+ * it already names the destination, and "Google Calendar" versus "This Mac" is
+ * the difference — the fill was saying it a second time, in the accent, at the
+ * bottom of a form. */
+.cal-dest {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+.cal-dest-tag {
+  flex: none;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.cal-dest-note {
+  line-height: 1.5;
+}
+
+.cal-readonly-note {
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* `.cal-connections` was a border-top and a --field-label — a rule and a heading
+   drawn because the modal had no other way to start a new section. Inside a
+   panel the space does it, and the connections block already names itself. */
+.cal-connections {
+  margin-top: var(--space-6);
+}
+
+.cal-connections-hint {
+  margin: var(--space-2) 0 var(--space-3);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+
+.cal-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.cal-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.cal-link-kind {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+  width: 12ch;
+  min-width: 12ch;
+  text-align: right;
+}
+
+.cal-links-empty {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+
+/* ── narrow panes ────────────────────────────────────────────── */
+
+@media (max-width: 1000px) {
+  .cal-view {
+    --cal-rail-w: calc(var(--fs) * 13);
+  }
+  /* The gutter narrows faster than the word does. */
+  .cal-allday-label {
+    font-size: var(--fs-micro);
+    letter-spacing: var(--ls-caps);
+    padding-right: var(--space-1);
+  }
+}
+
+@media (max-width: 820px) {
+  /* The rail becomes a strip above the grid rather than disappearing: knowing
+   * whose calendar you are looking at is the point of the view. */
+  .cal-body {
+    flex-direction: column;
+  }
+  .cal-rail {
+    width: auto;
+    min-width: 0;
+    max-height: 116px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+  .cal-rail-section {
+    margin-bottom: 0;
+    min-width: calc(var(--fs) * 13);
+  }
+  .cal-rail-accounts {
+    min-width: calc(var(--fs) * 16);
+  }
+  /* The filter is a column of its own here rather than a band above the strip,
+   * which would push the grid down for a control most people never touch. */
+  .cal-rail-filter {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: calc(var(--space-1) / 2);
+    margin-bottom: 0;
+    min-width: calc(var(--fs) * 11);
+  }
+  .cal-rail-filter select {
+    width: 100%;
+  }
+  /* The header's "Local only" chip carries the same sentence in its tooltip;
+   * repeating it here would cost a column the calendars need. */
+  .cal-rail-note,
+  .cal-rail-empty {
+    display: none;
+  }
+  .cal-agenda-date {
+    width: calc(var(--fs) * 8);
+    min-width: calc(var(--fs) * 8);
+  }
+}
+
+/* ── stillness ───────────────────────────────────────────────── */
+
+/*
+ * App.css zeroes every transition and animation duration under a motion
+ * preference, so nothing here needs repeating. What does need saying is the
+ * one thing duration cannot switch off: the drag proxy's settle is a real
+ * transition of a real property, and with the duration gone it lands
+ * instantly — which is correct, and is why nothing else has to change.
+ * These are the states that would otherwise animate a *size*.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .cal-drag.settling,
+  .cal-drag-time.settling {
+    transition: none;
+  }
+}
+:root[data-reduce-motion] .cal-drag.settling,
+:root[data-reduce-motion] .cal-drag-time.settling {
+  transition: none;
+}

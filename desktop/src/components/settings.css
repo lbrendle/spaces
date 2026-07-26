@@ -1,0 +1,392 @@
+/* ── Settings view ───────────────────────────────────────────── */
+/*
+ * The settings page is a stack of sections, and a section is a heading with its
+ * controls under it. Nothing in this file draws a box around a list, a form or a
+ * status line: they are separated by space and by their headings, which is what
+ * a settings page has always been made of.
+ *
+ * Roughly 180 lines are gone from the top of this file. They drew a theme
+ * gallery — .theme-card, .theme-preview, the whole .tp-* miniature IDE and the
+ * .segmented switch — that AppearanceSettings replaced with .ap-* equivalents.
+ * Nothing rendered them any more; they were 13 rounded, bordered boxes being
+ * maintained twice.
+ *
+ * Colours are theme tokens only, and light comes from one place: --shadow-sm /
+ * --shadow-md say how high something is and nothing else casts one. Selection is
+ * --accent-soft behind and --text on top; focus is drawn once, in App.css, and
+ * inherited. Neither is ever re-invented here.
+ */
+
+/* ── The page is sections, not cards ─────────────────────────── */
+
+/*
+ * Settings is a long form: eleven stacked sections, each of which was a filled,
+ * bordered, shadowed card carrying its own padding — and most of them contained
+ * exactly one list or one row of controls, so the box was drawing a boundary
+ * around a boundary that was already there.
+ *
+ * A section is now its heading and what is under it, separated from the next by
+ * space. The scope is the settings page and nothing else: .connected-spaces-card is
+ * rendered once, by SettingsView, so :has() on it names this page exactly
+ * without touching the dashboard, git activity or anything else that uses
+ * .dash-card. AppearanceSettings, CalendarSettings and SetupGuide render their
+ * own sections as direct children of the same .dash-body, so they come with it.
+ */
+.dash-body:has(> .connected-spaces-card) {
+  gap: var(--space-6);
+}
+.dash-body:has(> .connected-spaces-card) > .dash-card {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.dash-body:has(> .connected-spaces-card) > .dash-card + .dash-card {
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-soft);
+}
+.dash-body:has(> .connected-spaces-card) > .dash-card > h3 {
+  margin-bottom: var(--space-2);
+}
+
+.set-label {
+  font-size: var(--fs);
+  font-weight: 600;
+  color: var(--text);
+}
+.set-hint {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  margin-top: var(--space-1);
+}
+/* The sentence under a section heading. It reads as prose, so it gets a
+   comfortable measure and a gap before whatever it introduces. */
+.about-hint {
+  max-width: var(--measure);
+  margin: calc(var(--space-1) * -1) 0 var(--space-5);
+}
+
+.set-count {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px var(--space-2);
+  line-height: 1.6;
+}
+
+/* ── Buttons local to this page ──────────────────────────────── */
+
+.primary-btn,
+.quiet-btn {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  transition: var(--t-color);
+}
+.primary-btn {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+.quiet-btn {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.quiet-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.primary-btn:disabled,
+.quiet-btn:disabled {
+  opacity: 0.5;
+}
+
+/* ── Provider connections ───────────────────────────────────── */
+
+/*
+ * A list of providers, one per row, ruled off from each other. It used to be a
+ * grid of bordered, filled cards inside the bordered, filled section card that
+ * already contained them — a box inside a box, twelve times over.
+ */
+.connection-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 var(--space-6);
+}
+
+.connection-cards article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.connection-monogram {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+}
+
+.connection-cards article > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.connection-cards strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.connection-cards article > div > span {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-status {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.connection-status.connected {
+  color: var(--green);
+}
+
+.connection-cards .quiet-btn {
+  grid-column: 2 / -1;
+  width: fit-content;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-xs);
+}
+
+/* ── Connected private Spaces workspace ─────────────────────────── */
+
+.connected-spaces-card h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.portal-state {
+  padding: 1px var(--space-3);
+  border-radius: 999px;
+  color: var(--text-faint);
+  background: var(--bg-inset);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.portal-state.online {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.portal-state.error {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.portal-pair-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(150px, 0.7fr) minmax(170px, 0.8fr) auto;
+  align-items: end;
+  gap: var(--space-4);
+}
+
+.portal-pair-form label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.portal-pair-form label > span {
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+/* Fields take App.css's border, radius and focus. The 3px --accent-soft halo
+   that used to sit under them is the treatment the foundation deleted. */
+.portal-pair-form input {
+  height: 36px;
+  padding: 0 var(--space-4);
+  font-size: var(--fs-sm);
+}
+
+/* The paired device: a heading-and-facts block, not a panel. */
+.portal-connected {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(300px, 1fr) auto;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.portal-connected-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.portal-device-mark {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+}
+
+.portal-connected-main > div {
+  min-width: 0;
+}
+.portal-connected-main .set-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portal-connected dl {
+  display: flex;
+  gap: var(--space-6);
+  margin: 0;
+}
+.portal-connected dt {
+  margin-bottom: 2px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+.portal-connected dd {
+  margin: 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.portal-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* A failure and an outcome both need separating from the form they are about,
+   so these two keep their fill. Everything else on the page does not. */
+.portal-error,
+.portal-message {
+  grid-column: 1 / -1;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  color: var(--red);
+  background: var(--red-soft);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.portal-message {
+  color: var(--text-dim);
+  background: var(--bg-inset);
+}
+
+@media (max-width: 980px) {
+  .portal-pair-form { grid-template-columns: 1fr 1fr; }
+  .portal-connected { grid-template-columns: 1fr; }
+  .portal-actions { justify-content: flex-end; }
+}
+
+/* ── Detected tools ──────────────────────────────────────────── */
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 calc(var(--space-3) * -1);
+  border-radius: var(--radius-sm);
+  transition: var(--t-color);
+}
+.tool-row:hover { background: var(--bg-hover); }
+
+/* The dot is the state. It used to sit in a 3px halo of its own colour — a
+   coloured shadow, which is the one thing shadows in this app never are. */
+.tool-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.tool-dot.ok { background: var(--green); }
+.tool-dot.missing { background: var(--red); }
+
+.tool-name {
+  font-size: var(--fs);
+  font-weight: 600;
+}
+.tool-cmd {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  background: var(--inline-code-bg);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.tool-note {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+.tool-state {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tool-state.ok { color: var(--green); }
+.tool-state.missing { color: var(--red); }
+
+@media (max-width: 720px) {
+  .tool-note { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-row,
+  .primary-btn,
+  .quiet-btn { transition: none; }
+}

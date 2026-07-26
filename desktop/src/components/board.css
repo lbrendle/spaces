@@ -1,0 +1,1361 @@
+/* ── Task board (TasksView) ───────────────────────────────── */
+/*
+ * Layers on top of the shared .kanban / .task-card primitives in App.css.
+ * board.css is imported from TasksView.tsx, which App.tsx pulls in BEFORE
+ * "./App.css" — so anything this file means to own is written board-scoped
+ * (.kanban-col .task-card …, .btn.board-menu-btn …) and wins on specificity,
+ * not order.
+ *
+ * Colors are tokens only. Tints come from the *-soft / *-border tokens so
+ * light themes stay light instead of washing out.
+ *
+ * ── What this file is for ─────────────────────────────────────────────
+ *
+ * The board used to build its hierarchy out of boxes: four bordered columns,
+ * a count pill in each head, a chip around every filter, a chip around every
+ * due date, a filled full-width bar reporting the last run, and a card title
+ * set one pixel bigger than the sentence underneath it. Ninety rounded, filled
+ * or bordered boxes on one screen, and 204px of furniture above the first task.
+ *
+ * It now builds hierarchy out of type and space, which is the only way a board
+ * of forty cards stays scannable:
+ *
+ *   pane title     20px / 700          what surface this is
+ *   lane name      15px / 700          only in swimlanes
+ *   card title     15px / 600 --text   the thing itself
+ *   column head    12.5px / 700 caps   a label, not a competitor
+ *   description    12.5px / 400 --text-dim, one line
+ *   metadata       11.5px --text-faint one quiet row
+ *
+ * Delete every border on this screen and that ladder still reads. That is the
+ * test the columns are held to, which is why they have no fill, no edge and no
+ * radius: a column is a heading with cards under it, separated from the next
+ * one by --space-6 of nothing.
+ *
+ * Two things still carry meaning through colour and nothing else does: urgency
+ * (a due date going red) and life (a run in flight). Everything else — counts,
+ * labels, subtask progress — stays in the grey scale, so those two read at a
+ * glance across the whole board.
+ *
+ * ── What is still allowed to be a box ─────────────────────────────────
+ *
+ * A card, because a kanban is legitimately made of cards and dragging one
+ * needs an object to grab. A popover, because it floats. A kbd cap, because it
+ * is a picture of a key. A filter count badge, because it is a number *on* a
+ * control. That is the list.
+ *
+ * Elevation follows the app ladder: the canvas is --bg and a card is
+ * --surface-2 sitting straight on it — the column that used to be the rung in
+ * between is now made of space. Shadows are neutral and elevation-only: a
+ * resting card gets none, a hovered card --shadow-sm, a card actually picked up
+ * --shadow-md, and a popover --shadow-md. Nothing on this board is lit.
+ *
+ * ── Movement ──────────────────────────────────────────────────────────
+ *
+ * One scroll region per surface. The board is a single scroller: it moves
+ * sideways when the window is too narrow for four columns and downwards when
+ * the tallest column runs off the bottom, and the columns move with it. They
+ * used to carry a vertical scrollbar each, which meant three nested scrollers
+ * and a wheel gesture whose meaning depended on which pixel it started over.
+ * Column heads are sticky inside that one scroller, so the labels survive it.
+ *
+ * Spacing rides --space-1..6 so the density preference reaches the board, and
+ * the horizontal gutter is --pane-x — the same token .pane-header uses — so the
+ * column edges land under the title instead of near it.
+ *
+ * Motion is transform and opacity only. Nothing here animates a box-shadow,
+ * a width or an inset — on a 120Hz display those repaint the whole card and
+ * read as cheap.
+ *
+ * Focus is App.css's outline, inherited, everywhere. The only thing left here
+ * is the documented inset offset, for rows that are full-bleed inside a
+ * clipping container.
+ */
+
+.pop-row:focus-visible,
+.pop-clear:focus-visible,
+.assign-row:focus-visible,
+.run-row:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+/* ── header: one row ──────────────────────────────────────── */
+
+/*
+ * Everything that used to take three rows — a title, a strip of project chips,
+ * a toolbar, and a whole second strip of assignee and due-date chips — is one
+ * row. Content starts within 100px of the top of the pane, which is the number
+ * that decides whether this is a board or a control panel with a board under it.
+ */
+.pane-header.board-header {
+  align-items: center;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.board-ident {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/*
+ * Scope, not a filter — it says which project's board you are looking at, so
+ * it sits with the title and reads as part of it. As chips it was a row of
+ * three to five bordered pills that looked exactly like the filter chips a row
+ * below, which is how the board came to have two filter systems.
+ */
+.board-scope {
+  width: auto;
+  padding: 3px calc(var(--space-6) + var(--space-1)) 3px var(--space-2);
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  transition: var(--t-color);
+}
+.board-scope:hover {
+  background-color: var(--bg-hover);
+  color: var(--text);
+}
+.board-scope:focus {
+  background-color: var(--bg-input);
+  border-color: var(--accent);
+}
+
+.board-summary {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+/* ── toolbar ──────────────────────────────────────────────── */
+
+.board-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.board-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 178px;
+}
+/* Padding here is optical — it clears the glyph and the "/" hint, not a
+   rhythm, so it stays in pixels. */
+.board-search input {
+  padding: 4px 22px 4px 27px;
+  border-radius: var(--radius);
+  font-size: var(--fs-sm);
+}
+/* Safari draws its own clear button; ours is Escape, and two is one too many. */
+.board-search input::-webkit-search-decoration,
+.board-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+.board-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--text-faint);
+  pointer-events: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+.board-search:focus-within .board-search-icon { color: var(--text-dim); }
+/* The affordance without the box: a key cap here would be the fourth bordered
+   thing in a row of controls, to hint at one keystroke. */
+.board-search-key {
+  position: absolute;
+  right: 9px;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.board-search input:focus + .board-search-key,
+.board-search input:not(:placeholder-shown) + .board-search-key { opacity: 0; }
+
+/*
+ * How the board is *arranged*. A labelled select shows its current value, which
+ * is the whole job — the segmented "Status | Assignee | Project" it replaces
+ * looked like a set of tabs, so the board appeared to have a Status view and an
+ * Assignee view rather than one view grouped two ways.
+ */
+.board-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.board-pick-label {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+.board-pick select {
+  width: auto;
+  padding: 4px calc(var(--space-6) + var(--space-1)) 4px var(--space-3);
+  font-size: var(--fs-sm);
+}
+
+/* ── the two popovers ─────────────────────────────────────── */
+
+.board-menu { position: relative; }
+
+/*
+ * What the board is *hiding*, behind one control that says how much. Deliberately
+ * unlike the arrangement selects next to it: those show a value, this shows a
+ * count — one glance tells you whether anything is being kept off screen.
+ */
+.btn.board-menu-btn {
+  min-height: 0;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.btn.board-menu-btn:hover { color: var(--text); }
+.board-menu.on .btn.board-menu-btn,
+.btn.board-menu-btn.open {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text);
+}
+.board-menu-count {
+  min-width: 15px;
+  padding: 0 4px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.board-menu-caret {
+  color: var(--text-faint);
+  margin-right: -2px;
+}
+
+/* the "?" — a glyph, until you want it */
+.board-menu.board-help .btn.board-menu-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  justify-content: center;
+  background: none;
+  border-color: transparent;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+.board-menu.board-help .btn.board-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.board-menu.board-help .btn.board-menu-btn.open {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--text);
+}
+
+/* A sheet that floats, which is the one thing that has always earned an edge
+   and a shadow. */
+.board-pop {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 30;
+  min-width: 212px;
+  max-width: 288px;
+  max-height: min(62vh, 470px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  animation: board-pop-in var(--dur-fast) var(--ease);
+}
+.board-pop.left {
+  right: auto;
+  left: 0;
+}
+@keyframes board-pop-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Sections are a heading and a gap. Inside a 212px sheet, a rule between them
+   would be three-quarters of the sheet's width spent saying "and now, more". */
+.pop-head {
+  padding: var(--space-4) var(--space-2) var(--space-1);
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+.pop-head:first-child { padding-top: var(--space-1); }
+
+.pop-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: var(--t-color);
+}
+.pop-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.pop-row.on {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+/* The tick keeps its column whether or not it is ticked, so the labels line up
+   and the eye reads one edge down the sheet. */
+.pop-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.pop-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pop-label .avatar {
+  width: 17px;
+  height: 17px;
+  font-size: 9px;
+  border-radius: var(--radius-sm);
+}
+.pop-count {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.pop-tag {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--ls-body);
+}
+.pop-clear {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: var(--t-color);
+}
+.pop-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.pop-note {
+  margin: 0;
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.pop-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  padding: var(--space-1) var(--space-2) var(--space-1);
+  font-size: var(--fs-sm);
+}
+.pop-keys dt {
+  display: flex;
+  gap: 2px;
+}
+.pop-keys dd {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.board-pop kbd,
+.board-carry kbd {
+  display: inline-block;
+  min-width: 17px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 16px;
+  text-align: center;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+/*
+ * The carry instructions. They were a 32px strip across the bottom of the
+ * window at all times, which is a permanent tax for a transient state; now they
+ * exist only while a card is actually in the air, and the reference they were
+ * padded out with lives behind the "?" they were already sitting next to.
+ */
+.board-carry {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent-border);
+  box-shadow: var(--shadow-md);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: board-carry-in var(--dur-fast) var(--ease);
+}
+.board-carry kbd {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+@keyframes board-carry-in {
+  from { opacity: 0; transform: translate(-50%, 4px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ── the board surface ────────────────────────────────────── */
+
+/* the carry hint anchors to the pane, not to a column that may scroll away */
+.main-pane.board { position: relative; }
+
+/*
+ * The one scroll region. It moves sideways when four columns will not fit and
+ * downwards when the tallest one runs off the bottom, and every column moves
+ * with it — no column has a scrollbar of its own.
+ */
+.kanban {
+  padding: 0 var(--pane-x) var(--space-6);
+  gap: var(--space-6);
+  overflow: auto;
+  overscroll-behavior: contain;
+  align-items: flex-start;
+
+  /* A final column flush against the window edge reads as broken rather
+     than as "there is more this way". */
+  padding-inline-end: var(--space-6);
+  scroll-padding-inline-end: var(--space-6);
+}
+
+/*
+ * A column is a heading with cards under it. It had a fill, an edge, a radius
+ * and a shadow, which made four boxes out of what --space-6 of empty canvas
+ * says on its own — and put the cards on the third rung of an elevation ladder
+ * that only has three.
+ */
+.kanban .kanban-col,
+.swimlane-cols .kanban-col {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 208px;
+  max-width: 340px;
+  max-height: none;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/*
+ * Drop target. The wash lands on the cards, which is where the card is going —
+ * it used to light the whole column including its head, which at four columns
+ * wide was the loudest thing that ever happened on this screen.
+ */
+.kanban-col.drag-over .kanban-cards {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+}
+.kanban-col.drag-over .kanban-head { color: var(--accent); }
+.kanban-col.drag-over .kanban-head .count { color: var(--accent); }
+/* An empty column still has to look like somewhere a card can go. */
+.kanban-col.drag-over .kanban-cards { min-height: 44px; }
+
+/*
+ * The heading, sticky inside the board's one scroller so a long column keeps
+ * its name. Its top padding is the board's top padding, moved here — that way
+ * the sticky box covers the full band and cards pass behind it rather than
+ * peeking over it.
+ */
+.kanban-col .kanban-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-1);
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1.3;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  color: var(--text-dim);
+  transition: color var(--dur) var(--ease);
+}
+/* A number, not a badge. It was a bordered, filled, 22px-wide pill, four times
+   over, to hold at most two digits. */
+.kanban-col .kanban-head .count {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: var(--ls-body);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--dur) var(--ease);
+}
+
+/* Column head status dot — drawn only when something in the column is actually
+   running, so it is a signal and not four grey bullets. */
+.col-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+  transition: background var(--dur) var(--ease);
+}
+.col-dot.hot { background: var(--yellow); }
+/* A ring leaving the dot, drawn on a pseudo so the pulse is a transform and
+   not a repainted shadow. */
+.col-dot.hot::after,
+.run-mark.running .run-dot::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  animation: col-dot-pulse calc(var(--dur) * 9) var(--ease) infinite;
+}
+.col-dot.hot::after { color: var(--yellow); }
+@keyframes col-dot-pulse {
+  0%   { transform: scale(1); opacity: 0.7; }
+  70%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* No scroller: the board owns vertical movement. The 3px of padding is there
+   so the drag wash and the hover shadows have somewhere to land, and it is
+   cancelled by the matching negative margin so the cards stay on the column's
+   own edge. */
+.kanban-col .kanban-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: visible;
+  min-height: var(--space-3);
+  margin: calc(var(--space-1) * -1);
+  padding: var(--space-1);
+  transition: background var(--dur) var(--ease);
+}
+
+/* Says what the column is *for*, in one line. It was a centred glyph over a
+   centred sentence inside a dashed well — a box drawn inside a box to outline
+   the absence of a third box. */
+.col-empty {
+  margin: var(--space-1) var(--space-2) 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/*
+ * Where a dragged or carried card would land. The element is a *slot*: it
+ * holds ~12px of real space open between the two cards so the eye sees a gap
+ * appear, and the visible caret is drawn on pseudos that wipe in from the
+ * left. Only the caret animates, so re-aiming costs a paint, not a relayout
+ * of everything below it.
+ */
+.drop-line {
+  position: relative;
+  height: 10px;
+  margin: -3px 0;
+  flex-shrink: 0;
+}
+.drop-line::before,
+.drop-line::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  background: var(--accent);
+  /* No fill-mode on purpose: the keyframes end where the declarations already
+     are, so the caret is visible even if the animation never runs. An entrance
+     that is also the only thing making a thing visible is one frame away from
+     a bug. */
+  animation: drop-line-in var(--dur-fast) var(--ease);
+}
+.drop-line::after {
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 2px;
+  transform-origin: left center;
+}
+/* the caret head, so the line reads as an insertion point and not a divider */
+.drop-line::before {
+  left: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  z-index: 1;
+}
+@keyframes drop-line-in {
+  from { opacity: 0; transform: scaleX(0.3); }
+  to   { opacity: 1; transform: scaleX(1); }
+}
+
+/* ── cards ────────────────────────────────────────────────── */
+
+/*
+ * The one box left on the board, and the only rung above the canvas. Three
+ * children: a title, a line, a row. It used to have five, two of which existed
+ * only to hold two other things side by side.
+ */
+.kanban-col .task-card {
+  position: relative;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  cursor: grab;
+  transition:
+    transform var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.kanban-col .task-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.kanban-col .task-card:active { cursor: grabbing; }
+
+/*
+ * Picked up with the mouse. This is no longer the card — it is the hole the
+ * card left, so it recedes and goes dashed, and the drag image the browser
+ * carries is the only solid copy on screen.
+ */
+.kanban-col .task-card.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+  border-color: var(--accent-border);
+  border-style: dashed;
+  background: var(--surface-1);
+  transform: scale(0.98);
+  box-shadow: none;
+}
+.kanban-col .task-card.dragging .task-edit { opacity: 0; }
+
+/*
+ * Picked up with the keyboard: there is no drag image, so this *is* the card
+ * and it has to look held. Three neutral facts say so and none of them is
+ * light: it is up a rung (--shadow-md, the only card on the board with one),
+ * it is filled, and it is scaled. The accent border is the fourth.
+ */
+.kanban-col .task-card.carrying {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-md);
+  transform: scale(1.015);
+  cursor: grabbing;
+}
+
+/* A run is in flight for this task. The footer says what the run is doing; all
+   this adds is "and it is this card". */
+.kanban-col .task-card.live { border-color: var(--accent-border); }
+
+/* done: present, but out of the way */
+.kanban-col .task-card.settled .task-title { color: var(--text-dim); }
+.kanban-col .task-card.settled { opacity: 0.72; }
+
+/*
+ * The title carries the hierarchy on its own: --fs-md against --fs-sm, 600
+ * against 400, --text against --text-dim. It used to be --fs — one pixel and
+ * one weight away from the sentence underneath it — which is why the card
+ * needed chips and a coloured bar to look like it had a structure.
+ */
+.kanban-col .task-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+  /* clear of the edit button in the corner */
+  padding-right: var(--space-5);
+  overflow-wrap: anywhere;
+}
+/* One line. Two lines of grey under a title is a paragraph, and a card is an
+   index entry — the whole description is one click away in the inspector. */
+.kanban-col .task-desc {
+  margin-top: var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the edit affordance: quiet until you mean it, and out of the title's flow so
+   the title is not a flex row for the sake of one 20px button */
+.task-edit {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.task-card:hover .task-edit,
+.task-card:focus-within .task-edit,
+.task-edit:focus-visible { opacity: 1; }
+.task-edit:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/*
+ * One footer row, in one order, on every card: who is on it, when it is due,
+ * how far in it is, what it is tagged, how its last run ended. The eye reads
+ * down the left edge for faces and down the right edge for run state, and the
+ * row never wraps — a card's metadata is a line, not a paragraph.
+ */
+.kanban-col .task-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  margin-top: var(--space-3);
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.kanban-col .task-foot:empty { display: none; }
+
+/*
+ * The whole "who is on this" cluster is one button: click it to change it. It
+ * is the one item in the row allowed to shrink — a narrow card gives up the
+ * word "links" before it gives up the due date or the run state, and nothing in
+ * the row is ever allowed to overrun its neighbour.
+ */
+.task-faces {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  margin: -3px -5px;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+.task-foot .cxs,
+.task-foot .cxs-count {
+  min-width: 0;
+  overflow: hidden;
+}
+.task-faces:hover {
+  background: var(--bg-hover);
+}
+.task-faces-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  transition: color var(--dur-fast) var(--ease);
+}
+.task-card:hover .task-faces-empty { color: var(--text-dim); }
+
+/*
+ * Urgency ramp. This was a bordered, filled pill on a row of its own; a date is
+ * metadata, so it sits in the metadata row and says what it has to say in
+ * colour and weight. Overdue is the only one that gets both.
+ */
+.task-due {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.task-due.overdue { color: var(--red); font-weight: 650; }
+.task-due.today { color: var(--yellow); font-weight: 650; }
+.task-due.soon { color: var(--text-dim); }
+.task-due.later { color: var(--text-faint); }
+.task-due.done { color: var(--text-faint); text-decoration: line-through; }
+
+/* linked subtasks: "how far in" without leaving the card. The 34×4px track that
+   used to draw the same fraction was a box inside a row inside a card. */
+.task-sub {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.task-sub.complete { color: var(--green); }
+
+.task-tag {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--ls-body);
+  color: var(--text-faint);
+}
+
+/*
+ * How the last run ended. This was a filled, bordered, full-width bar across
+ * the bottom of the card — "✓ run finished — review" in green, outweighing the
+ * name of the task on every card that had ever been run. It is a status, so it
+ * is a dot and a word at the end of the metadata row, and still the same click
+ * through to where the run happened.
+ */
+.run-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: -3px;
+  padding: 1px 3px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  transition: var(--t-color);
+}
+.run-mark:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.run-dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.run-mark.ok .run-dot { color: var(--green); }
+.run-mark.err { color: var(--red); }
+.run-mark.err .run-dot { color: var(--red); }
+.run-mark.running { color: var(--accent); }
+.run-mark.running .run-dot { color: var(--accent); }
+
+/* The preview harness in preview.tsx still renders the old `.run-strip` markup
+   to show a card in every theme. It gets the new voice — a quiet line, not a
+   filled bar — rather than being left unstyled. */
+.run-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+}
+.run-strip .spinner { width: 10px; height: 10px; flex-shrink: 0; }
+
+/* Add a task where the column ends. A dashed box per column was four more
+   outlines drawn to say "you may type here", which the placeholder says. */
+.kanban-col .quick-add {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  transition: var(--t-color);
+}
+.kanban-col .quick-add::placeholder { color: inherit; }
+.kanban-col .quick-add:hover {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+/* Focus-visible is App.css's outline. This is the :focus half — a quiet line
+   resolving into a real field. */
+.kanban-col .quick-add:focus {
+  border-color: var(--accent);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+/* ── swimlanes ────────────────────────────────────────────── */
+
+/* Also one scroller: the lanes move together, sideways and down. */
+.swimlanes {
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-4) var(--pane-x) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.swimlane { min-width: 0; }
+/* a lane with nothing in it is still a drop target, just a fainter one */
+.swimlane.quiet {
+  opacity: 0.62;
+  transition: opacity var(--dur) var(--ease);
+}
+.swimlane.quiet:hover,
+.swimlane.quiet:focus-within { opacity: 1; }
+
+/* The lane name is the one heading above the card titles, so it is the one
+   thing on the board set heavier than they are. The hairline under it is the
+   only rule left on this surface, and it is separating two different kinds of
+   thing, which is what a rule is for. */
+.swimlane-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0 calc(var(--pane-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--pane-x) var(--space-2);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-soft);
+}
+.swimlane-head .avatar {
+  width: 19px;
+  height: 19px;
+  font-size: 9.5px;
+  border-radius: var(--radius-sm);
+  align-self: center;
+}
+.swimlane-name {
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+}
+.swimlane-sub {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.swimlane-head .count {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.swimlane-cols {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+  overflow: visible;
+}
+.swimlane-cols .kanban-col.compact {
+  min-width: 178px;
+}
+.kanban-col.compact .kanban-head {
+  position: static;
+  padding: 0 var(--space-1) var(--space-3);
+}
+
+/* announcements for screen readers only */
+.board-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── empty states ─────────────────────────────────────────── */
+
+.board-empty {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) 24px var(--space-6);
+  text-align: center;
+  color: var(--text-dim);
+}
+.board-empty-mark {
+  font-size: 38px;
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0.5;
+}
+.board-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+.board-empty-sub {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+.board-empty .btn { margin-top: var(--space-2); }
+/* the columns still show, so the first task can be typed straight in */
+.kanban.board-empty-cols {
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: var(--space-4);
+  padding: 0;
+  overflow: visible;
+  justify-content: center;
+  text-align: left;
+}
+.board-empty-cols .kanban-col .kanban-head { position: static; padding-top: 0; }
+
+.main-pane.board-blank { gap: var(--space-3); }
+.main-pane.board-blank p { margin: 0; }
+.main-pane.board-blank::before {
+  content: "◫";
+  font-size: 40px;
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0.5;
+  margin-bottom: var(--space-2);
+}
+
+/* ── the two panels ───────────────────────────────────────── */
+/*
+ * Editing a task and choosing who is on it both happen beside the board now,
+ * not over it. Nothing here restyles the panel itself: SidePanel owns the
+ * surface, the header, the scroll and the footer, and these rules only place
+ * what this file puts inside one.
+ */
+
+/* The board's own edit affordance is 420px wide, and three form controls do not
+   fit across it. The row wraps rather than crushing the date input. */
+.task-panel .fields-row {
+  flex-wrap: wrap;
+}
+.task-panel .fields-row > .field {
+  min-width: 11ch;
+}
+
+/* Select and button, wrapping instead of shrinking the channel name to nothing. */
+.task-panel .dispatch-row {
+  margin: 0;
+  flex-wrap: wrap;
+}
+.task-panel .dispatch-row select {
+  min-width: 12ch;
+}
+
+/* Destructive action to the leading edge, away from everything else — .sp-foot
+   pushes its children right, and this is the one that must not be next to a
+   control somebody is aiming at. */
+.task-panel-del {
+  margin-right: auto;
+}
+
+/* There is no Save button, so this is what tells you why. Faint: it is a
+   standing fact about the panel, not an event. */
+.task-panel-state {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.assign-lead {
+  margin: 0 0 var(--space-4);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+/* The panel body is the scroller now, so the list is as long as it is —
+   a second scrollbar inside a 420px column was the modal's problem, not this
+   one's. */
+.assign-list {
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.assign-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+.assign-row:hover {
+  background: var(--bg-hover);
+}
+.assign-row.on {
+  background: var(--accent-soft);
+}
+.assign-ident {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.assign-name { font-weight: 600; font-size: var(--fs-sm); }
+.assign-sub {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assign-on {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.assign-none,
+.assign-note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+.assign-note + .assign-note { margin-top: var(--space-1); }
+
+/* ── run history ──────────────────────────────────────────── */
+/*
+ * `.task-connections` and `.run-history` were a border-top and a --field-label
+ * apiece, drawing the section headings the task modal had no other way to draw.
+ * PanelSection is that heading, so both wrappers are gone and the rows below
+ * are all that is left.
+ */
+
+.run-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  text-align: left;
+  color: var(--text);
+  transition: background var(--dur-fast) var(--ease);
+}
+.run-row:hover {
+  background: var(--bg-hover);
+}
+/* The wrapper that used to space these is gone; the rows space themselves. */
+.run-row + .run-row {
+  margin-top: 2px;
+}
+.run-agent { font-weight: 600; }
+.run-meta {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-time {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.chip.run-status { font-weight: 600; }
+.chip.run-status.running {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.chip.run-status.done {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: var(--green-border);
+}
+.chip.run-status.error {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: var(--red-border);
+}
+.chip.run-status.cancelled {
+  color: var(--text-faint);
+  background: var(--bg-inset);
+  border-color: var(--border-soft);
+}
+
+/* ── narrow windows ───────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  /* The labels go before the controls do: "Manual order" in a select next to a
+     Filter button says what it is without a word above it. */
+  .board-pick-label { display: none; }
+}
+
+@media (max-width: 900px) {
+  .board-tools { justify-content: flex-start; }
+  .board-search { flex: 1 1 150px; min-width: 130px; }
+  .board-summary { display: none; }
+  /* The gutter narrows with the window so a column still fits whole — derived
+     from the same token, so a density change still carries. */
+  .kanban,
+  .swimlanes,
+  .swimlane-head {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+  .swimlane-head {
+    margin-left: calc(var(--space-4) * -1);
+    margin-right: calc(var(--space-4) * -1);
+  }
+}
+
+/* ── motion preferences ───────────────────────────────────── */
+
+/*
+ * App.css zeroes every duration for both switches, so what is left here is the
+ * part a duration cannot fix: transforms that only exist to *move* something,
+ * animations, and the resting frame for the two loops. Written twice because
+ * the OS setting and the in-app preference are different selectors — the same
+ * reason appearance.css does.
+ *
+ * The pick-up transforms are deliberately kept: with the transition zeroed
+ * they are a size, not a movement, and the size is what says "this one is in
+ * your hand".
+ */
+:root[data-reduce-motion] .kanban-col .task-card:hover {
+  transform: none;
+}
+:root[data-reduce-motion] .col-dot.hot::after,
+:root[data-reduce-motion] .run-mark.running .run-dot::after {
+  animation: none;
+  transform: scale(1.7);
+  opacity: 0.35;
+}
+:root[data-reduce-motion] .drop-line::before,
+:root[data-reduce-motion] .drop-line::after {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+:root[data-reduce-motion] .board-pop { animation: none; }
+:root[data-reduce-motion] .board-carry {
+  animation: none;
+  transform: translateX(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-scope,
+  .board-search-icon,
+  .board-search-key,
+  .btn.board-menu-btn,
+  .pop-row,
+  .pop-clear,
+  .kanban-col .kanban-head,
+  .kanban-col .kanban-head .count,
+  .kanban-col .kanban-cards,
+  .col-dot,
+  .kanban-col .task-card,
+  .kanban-col .quick-add,
+  .swimlane.quiet,
+  .task-edit,
+  .task-faces,
+  .task-faces-empty,
+  .run-mark,
+  .run-row,
+  .assign-row {
+    transition: none;
+  }
+  .kanban-col .task-card:hover { transform: none; }
+  .col-dot.hot::after,
+  .run-mark.running .run-dot::after {
+    animation: none;
+    transform: scale(1.7);
+    opacity: 0.35;
+  }
+  .drop-line::before,
+  .drop-line::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .board-pop { animation: none; }
+  .board-carry {
+    animation: none;
+    transform: translateX(-50%);
+  }
+}
