@@ -15,9 +15,11 @@
     "opener:default",
     "dialog:default",
     "notification:default",
+    "process:default",
     "sql:default",
     "sql:allow-execute",
     "sql:allow-select",
-    "sql:allow-load"
+    "sql:allow-load",
+    "updater:default"
   ]
 }

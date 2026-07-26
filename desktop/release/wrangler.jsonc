@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "spaces-downloads",
+  "compatibility_date": "2026-07-26",
+  "assets": {
+    "directory": "./assets"
+  }
+}

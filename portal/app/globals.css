@@ -2219,6 +2219,7 @@ kbd {
 }
 
 .calendar-layout {
+  height: calc(100dvh - 220px);
   grid-template-columns: 225px minmax(0, 1fr) 250px;
 }
 
@@ -2399,13 +2400,21 @@ kbd {
 }
 
 .agenda-day article strong {
+  display: block;
+  overflow-wrap: anywhere;
   font-size: 10.5px;
+  line-height: 1.35;
 }
 
 .agenda-day article p {
   margin: 3px 0 0;
   color: var(--ink-4);
   font-size: 8px;
+  line-height: 1.4;
+}
+
+.agenda-day article > div {
+  min-width: 0;
 }
 
 .calendar-boundary {
@@ -3902,12 +3911,26 @@ kbd {
   }
 
   .calendar-layout {
-    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-columns: 176px minmax(0, 1fr);
   }
 
   .decision-rail,
   .calendar-boundary {
     display: none;
+  }
+
+  .calendar-agenda {
+    padding: 22px;
+  }
+
+  .agenda-day {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .agenda-day article {
+    grid-template-columns: 54px 8px minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
   .source-list article {
@@ -4051,7 +4074,7 @@ kbd {
   }
 
   .calendar-layout {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 166px minmax(0, 1fr);
   }
 
   .message-stream {
@@ -4115,6 +4138,8 @@ kbd {
   .knowledge-layout,
   .calendar-layout {
     display: block;
+    height: auto;
+    min-height: 0;
     overflow: visible;
     border: 0;
     background: transparent;

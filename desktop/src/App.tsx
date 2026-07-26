@@ -42,6 +42,7 @@ import {
 } from "./portal";
 import "./App.css";
 import { config } from "./config";
+import { initAppUpdater } from "./updater";
 
 export default function App() {
   const { loaded, view, init } = useStore();
@@ -62,6 +63,8 @@ export default function App() {
     void init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => initAppUpdater(), []);
 
   useEffect(() => {
     const refresh = () => {

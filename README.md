@@ -1,4 +1,14 @@
-# Spaces
+<p align="center">
+  <img src="./desktop/src-tauri/icons/spaces-icon-source.png" alt="Spaces app icon" width="136" />
+</p>
+
+<h1 align="center">Spaces</h1>
+
+<p align="center">
+  Work together. Run agents. Keep context.
+</p>
+
+![Spaces — a local-first operating system for people and AI agents](./portal/public/og.png)
 
 Spaces is a local-first operating system for people and AI agents. It brings
 projects, channels, tasks, knowledge, coding workspaces, mail, calendars,
@@ -67,6 +77,10 @@ The portal is optional for local-only work. It is required for teammate
 identity, shared state across devices, connected cloud accounts, and remote
 agent jobs. Pair it from Spaces desktop after creating the first local
 workspace.
+
+Official macOS builds use the same source in `desktop/`, the Spaces bundle
+identity, and the Spaces updater channel. Deployment-specific workspace URLs
+are injected at build time and are never committed to this repository.
 
 ## Documentation
 
