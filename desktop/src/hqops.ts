@@ -30,8 +30,14 @@ import { LINK_KINDS } from "./links";
 import { ASSIGN_ROLES } from "./links";
 import {
   createDocument,
+  createDraft,
+  createAppleCalendarEvent,
+  createCloudCalendarEvent,
   createContentItem,
+  deleteDocument,
   deleteContentItem,
+  listDocuments,
+  listMail,
   listContentItems,
   listIntegrationAccounts,
   patchContentItem,
@@ -40,6 +46,7 @@ import {
   sendCloudMail,
   uploadContentMedia,
   type ContentItem,
+  type DocumentRecord,
   type IntegrationAccount,
 } from "./operations";
 import {
@@ -173,6 +180,33 @@ function projectOf(args: Record<string, unknown>, ctx: OpContext): string {
     (p) => p.id === named || p.name.toLowerCase() === named.toLowerCase()
   );
   return hit?.id ?? ctx.projectId;
+}
+
+async function documentOf(
+  value: string,
+  ctx: OpContext,
+): Promise<{ document?: DocumentRecord; error?: string }> {
+  const requested = value.replace(/^document:/i, "").trim();
+  if (!requested) return { error: "document is required" };
+  const rows = await listDocuments();
+  const scoped = rows.filter(
+    (document) =>
+      document.visibility === "workspace" &&
+      (!ctx.projectId || !document.project_id || document.project_id === ctx.projectId),
+  );
+  const exact = scoped.filter(
+    (document) =>
+      document.id === requested ||
+      document.title.toLowerCase() === requested.toLowerCase() ||
+      document.path.toLowerCase() === requested.toLowerCase(),
+  );
+  if (exact.length === 1) return { document: exact[0] };
+  if (!exact.length) return { error: `No shared document matches "${value}".` };
+  return {
+    error:
+      `"${value}" matches ${exact.length} shared documents. ` +
+      `Use document:${exact[0].id} or another exact id.`,
+  };
 }
 
 interface SocialAccountMetadata {
@@ -750,6 +784,96 @@ export const OPERATIONS: Operation[] = [
   },
 
   {
+    name: "spaces_list_documents",
+    describe:
+      "List workspace-visible Spaces documents with stable document:<id> references, preserved nested paths, project, tags, and update time.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "project",
+        type: "string",
+        describe: "Project name or id. Defaults to the current project; use all for the whole workspace.",
+      },
+      {
+        name: "query",
+        type: "string",
+        describe: "Optional words to match in title, path, tags, or body.",
+      },
+    ],
+    async run(args, ctx) {
+      const requestedProject = str(args, "project");
+      const projectId =
+        requestedProject.toLowerCase() === "all"
+          ? ""
+          : requestedProject
+            ? projectOf(args, ctx)
+            : ctx.projectId;
+      const query = str(args, "query").toLowerCase();
+      const rows = (await listDocuments())
+        .filter((document) => document.visibility === "workspace")
+        .filter(
+          (document) =>
+            !projectId || !document.project_id || document.project_id === projectId,
+        )
+        .filter(
+          (document) =>
+            !query ||
+            `${document.title} ${document.path} ${document.tags} ${document.body}`
+              .toLowerCase()
+              .includes(query),
+        )
+        .slice(0, 100);
+      return {
+        ok: true,
+        message: rows.length
+          ? rows
+              .map(
+                (document) =>
+                  `document:${document.id} — ${document.path || document.title} — ${document.title}` +
+                  `${document.tags ? ` [${document.tags}]` : ""}`,
+              )
+              .join("\n")
+          : "No shared documents match.",
+      };
+    },
+  },
+
+  {
+    name: "spaces_get_document",
+    describe:
+      "Read one workspace-visible Spaces document in full by document:<id>, exact title, or exact nested path.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "document",
+        type: "string",
+        required: true,
+        describe: "document:<id>, exact title, or exact path from spaces_list_documents.",
+      },
+    ],
+    async run(args, ctx) {
+      const resolved = await documentOf(str(args, "document"), ctx);
+      if (!resolved.document) {
+        return { ok: false, message: resolved.error ?? "Document not found." };
+      }
+      const document = resolved.document;
+      return {
+        ok: true,
+        message: [
+          `document:${document.id}`,
+          `# ${document.title}`,
+          `Path: ${document.path}`,
+          `Tags: ${document.tags || "—"}`,
+          "",
+          document.body,
+        ].join("\n"),
+      };
+    },
+  },
+
+  {
     name: "spaces_create_document",
     describe:
       "Create a durable Markdown document in Spaces, optionally inside a project and nested folder. Workspace visibility makes it available to paired teammates and Knowledge-aware agents.",
@@ -820,6 +944,208 @@ export const OPERATIONS: Operation[] = [
   },
 
   {
+    name: "spaces_update_document",
+    describe:
+      "Revise an existing shared Spaces document, including its title, Markdown body, tags, nested path, project, or visibility. The prior version remains in document history.",
+    effect: "propose",
+    params: [
+      {
+        name: "document",
+        type: "string",
+        required: true,
+        describe: "document:<id>, exact title, or exact path.",
+      },
+      { name: "title", type: "string", describe: "Replacement title." },
+      { name: "body", type: "string", describe: "Replacement Markdown body." },
+      { name: "folder", type: "string", describe: "Replacement nested folder or path." },
+      { name: "tags", type: "string", describe: "Replacement comma-separated tags." },
+      {
+        name: "visibility",
+        type: "enum",
+        choices: ["private", "workspace"],
+        describe: "Replacement visibility.",
+      },
+      { name: "project", type: "string", describe: "Replacement project name or id." },
+    ],
+    async run(args, ctx) {
+      const resolved = await documentOf(str(args, "document"), ctx);
+      if (!resolved.document) {
+        return { ok: false, message: resolved.error ?? "Document not found." };
+      }
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(args, key);
+      const current = resolved.document;
+      const visibility =
+        has("visibility") && str(args, "visibility") === "private"
+          ? "private"
+          : has("visibility")
+            ? "workspace"
+            : current.visibility;
+      const next = await saveDocument({
+        ...current,
+        project_id: has("project") ? projectOf(args, ctx) : current.project_id,
+        title: has("title") ? str(args, "title") || "Untitled" : current.title,
+        body: has("body") ? str(args, "body") : current.body,
+        path: has("folder") ? str(args, "folder") || "Notes" : current.path,
+        tags: has("tags") ? str(args, "tags") : current.tags,
+        visibility,
+      });
+      if (visibility !== current.visibility) {
+        const db = await getDb();
+        await db.execute(
+          "UPDATE documents SET visibility = $1, updated_at = $2 WHERE id = $3",
+          [visibility, next.updated_at, next.id],
+        );
+      }
+      window.dispatchEvent(new CustomEvent("hq:portal-local-change"));
+      return {
+        ok: true,
+        message: `Updated document:${next.id} — ${next.title} in ${next.path}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_delete_document",
+    describe:
+      "Delete a shared Spaces document and its version history. This waits for human approval because it removes workspace knowledge for everyone.",
+    effect: "propose",
+    params: [
+      {
+        name: "document",
+        type: "string",
+        required: true,
+        describe: "document:<id>, exact title, or exact path.",
+      },
+    ],
+    async run(args, ctx) {
+      const resolved = await documentOf(str(args, "document"), ctx);
+      if (!resolved.document) {
+        return { ok: false, message: resolved.error ?? "Document not found." };
+      }
+      await deleteDocument(resolved.document.id);
+      window.dispatchEvent(new CustomEvent("hq:portal-local-change"));
+      return {
+        ok: true,
+        message: `Deleted document:${resolved.document.id} — ${resolved.document.title}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_list_mail",
+    describe:
+      "List or search the current member's locally synced inbox, drafts, sent mail, or archive. Personal mail never becomes workspace-shared context.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "folder",
+        type: "enum",
+        choices: ["inbox", "drafts", "sent", "archive"],
+        describe: "Defaults to inbox.",
+      },
+      {
+        name: "query",
+        type: "string",
+        describe: "Optional words to match in sender, recipient, subject, preview, or body.",
+      },
+    ],
+    async run(args) {
+      const folder = str(args, "folder") || "inbox";
+      const query = str(args, "query").toLowerCase();
+      const rows = (await listMail(folder))
+        .filter(
+          (message) =>
+            !query ||
+            `${message.from_name} ${message.from_email} ${message.to_email} ${message.subject} ${message.preview} ${message.body}`
+              .toLowerCase()
+              .includes(query),
+        )
+        .slice(0, 50);
+      return {
+        ok: true,
+        message: rows.length
+          ? rows
+              .map(
+                (message) =>
+                  `mail:${message.id} — ${message.subject}\n` +
+                  `from=${message.from_name || message.from_email || "—"} · to=${message.to_email || "—"} · ` +
+                  `${message.unread ? "unread" : "read"}\n${message.preview}`,
+              )
+              .join("\n\n")
+          : `No ${folder} mail matches.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_create_mail_draft",
+    describe:
+      "Create a private mail draft for the current member without sending it. The draft stays personal and can be reviewed in Mail.",
+    effect: "auto",
+    params: [
+      { name: "to", type: "string", describe: "Recipient email address." },
+      { name: "subject", type: "string", describe: "Draft subject." },
+      { name: "body", type: "string", describe: "Plain-text draft body." },
+    ],
+    async run(args) {
+      const draft = await createDraft({
+        to: str(args, "to"),
+        subject: str(args, "subject"),
+        body: str(args, "body"),
+      });
+      return {
+        ok: true,
+        message: `Created private mail:${draft.id} draft — ${draft.subject}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_get_mail",
+    describe:
+      "Read one locally synced personal mail message in full by mail:<id>. The message remains private to the current member.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "mail",
+        type: "string",
+        required: true,
+        describe: "mail:<id> from spaces_list_mail.",
+      },
+    ],
+    async run(args) {
+      const id = str(args, "mail").replace(/^mail:/i, "");
+      const db = await getDb();
+      const [message] = await db.select<
+        Array<{
+          id: string;
+          subject: string;
+          from_name: string;
+          from_email: string;
+          to_email: string;
+          received_at: number;
+          body: string;
+        }>
+      >("SELECT * FROM mail_threads WHERE id = $1 LIMIT 1", [id]);
+      if (!message) return { ok: false, message: "Mail message not found." };
+      return {
+        ok: true,
+        message: [
+          `mail:${message.id}`,
+          `# ${message.subject}`,
+          `From: ${message.from_name || message.from_email}`,
+          `To: ${message.to_email || "—"}`,
+          `Received: ${new Date(message.received_at).toISOString()}`,
+          "",
+          message.body,
+        ].join("\n"),
+      };
+    },
+  },
+
+  {
     name: "spaces_send_mail",
     describe:
       "Send mail through the current member's connected Google or Microsoft account. This always waits for human approval before the external send.",
@@ -867,6 +1193,293 @@ export const OPERATIONS: Operation[] = [
         ok: true,
         message: `Sent “${sent.subject}” to ${sent.to_email} through ${provider}.`,
       };
+    },
+  },
+
+  {
+    name: "spaces_list_calendar",
+    describe:
+      "List the calendars and events visible to the current member for a date range, preserving calendar ownership and busy/read/write visibility.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "from",
+        type: "string",
+        describe: "ISO 8601 range start; defaults to 30 days ago.",
+      },
+      {
+        name: "to",
+        type: "string",
+        describe: "ISO 8601 range end; defaults to 365 days ahead.",
+      },
+      {
+        name: "calendar",
+        type: "string",
+        describe: "Optional exact calendar name or id.",
+      },
+      {
+        name: "query",
+        type: "string",
+        describe: "Optional words to match in event title, description, or location.",
+      },
+    ],
+    async run(args) {
+      const from = num(args, "from") ?? Date.now() - 30 * 86_400_000;
+      const to = num(args, "to") ?? Date.now() + 365 * 86_400_000;
+      const calendar = str(args, "calendar").toLowerCase();
+      const query = str(args, "query").toLowerCase();
+      const state = useStore.getState();
+      const calendarById = new Map(
+        state.calendars.map((candidate) => [candidate.id, candidate]),
+      );
+      const rows = state.events
+        .filter((event) => event.starts_at < to && event.ends_at > from)
+        .filter((event) => {
+          const owner = calendarById.get(event.calendar_id);
+          return (
+            !calendar ||
+            owner?.id.toLowerCase() === calendar ||
+            owner?.name.toLowerCase() === calendar
+          );
+        })
+        .filter(
+          (event) =>
+            !query ||
+            `${event.title} ${event.description} ${event.location}`
+              .toLowerCase()
+              .includes(query),
+        )
+        .slice(0, 250);
+      return {
+        ok: true,
+        message: rows.length
+          ? rows
+              .map((event) => {
+                const owner = calendarById.get(event.calendar_id);
+                return (
+                  `event:${event.id} — ${event.title}\n` +
+                  `${new Date(event.starts_at).toISOString()} → ${new Date(event.ends_at).toISOString()} · ` +
+                  `${owner?.name || "Calendar"} · source=${event.source}`
+                );
+              })
+              .join("\n\n")
+          : "No visible calendar events match.",
+      };
+    },
+  },
+
+  {
+    name: "spaces_create_calendar_event",
+    describe:
+      "Create an event on a Spaces, Google, Microsoft, or Apple calendar. External calendars always wait for human approval before Spaces writes upstream.",
+    effect: "propose",
+    params: [
+      { name: "title", type: "string", required: true, describe: "Event title." },
+      {
+        name: "starts_at",
+        type: "string",
+        required: true,
+        describe: "ISO 8601 start.",
+      },
+      { name: "ends_at", type: "string", describe: "ISO 8601 end; defaults to one hour later." },
+      {
+        name: "provider",
+        type: "enum",
+        choices: ["spaces", "google", "microsoft", "apple"],
+        describe: "Defaults to spaces.",
+      },
+      {
+        name: "calendar",
+        type: "string",
+        describe: "Provider calendar name or id; defaults to the primary writable calendar.",
+      },
+      { name: "description", type: "string", describe: "Event description or notes." },
+      { name: "location", type: "string", describe: "Event location." },
+      { name: "all_day", type: "boolean", describe: "Whether this is an all-day event." },
+    ],
+    async run(args) {
+      const title = str(args, "title");
+      const startsAt = num(args, "starts_at");
+      if (!title || startsAt === null) {
+        return { ok: false, message: "title and a parsable starts_at are required" };
+      }
+      const endsAt = Math.max(
+        num(args, "ends_at") ?? startsAt + 3_600_000,
+        startsAt + 60_000,
+      );
+      const provider = str(args, "provider") || "spaces";
+      const calendarName = str(args, "calendar");
+      const description = str(args, "description");
+      const location = str(args, "location");
+      const store = useStore.getState();
+
+      if (provider === "spaces") {
+        const calendar =
+          store.calendars.find(
+            (candidate) =>
+              candidate.writable &&
+              (candidate.id === calendarName ||
+                candidate.name.toLowerCase() === calendarName.toLowerCase()),
+          ) ??
+          store.calendars.find(
+            (candidate) => candidate.writable && !candidate.account_id,
+          );
+        if (!calendar) {
+          return {
+            ok: false,
+            message: "No writable Spaces calendar exists yet.",
+          };
+        }
+        const event = await store.addEvent({
+          calendar_id: calendar.id,
+          title,
+          description,
+          location,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          all_day: args.all_day === true ? 1 : 0,
+        });
+        return {
+          ok: true,
+          message: `Created event:${event.id} — ${event.title} on ${calendar.name}.`,
+        };
+      }
+
+      if (!["google", "microsoft", "apple"].includes(provider)) {
+        return {
+          ok: false,
+          message: "provider must be spaces, google, microsoft, or apple",
+        };
+      }
+
+      const upstream =
+        provider === "apple"
+          ? await createAppleCalendarEvent({
+              title,
+              startAt: startsAt,
+              endAt: endsAt,
+              calendarName,
+              location,
+              notes: description,
+            })
+          : await createCloudCalendarEvent(
+              provider as "google" | "microsoft",
+              {
+                title,
+                startAt: startsAt,
+                endAt: endsAt,
+                calendarName,
+                location,
+                notes: description,
+                allDay: args.all_day === true,
+              },
+            );
+      const account = (await listIntegrationAccounts()).find(
+        (candidate) =>
+          candidate.category === "calendar" &&
+          candidate.provider === provider &&
+          candidate.status === "connected",
+      );
+      let calendar =
+        store.calendars.find(
+          (candidate) =>
+            candidate.account_id === account?.id &&
+            (!calendarName ||
+              candidate.id === calendarName ||
+              candidate.external_id === calendarName ||
+              candidate.name.toLowerCase() === calendarName.toLowerCase()),
+        ) ??
+        store.calendars.find(
+          (candidate) =>
+            candidate.account_id === account?.id && candidate.writable,
+        );
+      if (!calendar) {
+        calendar = await store.addCalendar({
+          name: upstream.calendar_name || calendarName || `${provider} calendar`,
+          account_id: account?.id ?? "",
+          external_id: calendarName || upstream.calendar_name,
+          owner_type: "member",
+          owner_id: store.self().id,
+          visibility: "private",
+          writable: 1,
+          enabled: 1,
+        });
+      }
+      const event = await store.addEvent({
+        calendar_id: calendar.id,
+        external_id: upstream.external_id,
+        title,
+        description,
+        location,
+        starts_at: startsAt,
+        ends_at: endsAt,
+        all_day: args.all_day === true ? 1 : 0,
+        source:
+          provider === "google" || provider === "microsoft"
+            ? provider
+            : "hq",
+      });
+      window.dispatchEvent(new CustomEvent("hq:portal-local-change"));
+      return {
+        ok: true,
+        message:
+          `Created event:${event.id} — ${event.title} on ${provider}` +
+          `${upstream.external_id ? ` (${upstream.external_id})` : ""}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_git_status",
+    describe:
+      "Inspect the current project checkout, branch, changed files, remotes, and recent commits without changing Git or exposing credentials.",
+    effect: "auto",
+    readOnly: true,
+    params: [],
+    async run(_args, ctx) {
+      const project = useStore
+        .getState()
+        .projects.find((candidate) => candidate.id === ctx.projectId);
+      return {
+        ok: true,
+        message: project?.local_path
+          ? `Project checkout: ${project.local_path}\nRepository: ${project.repo || "not linked"}`
+          : "This project has no checkout on the current agent host.",
+      };
+    },
+  },
+
+  {
+    name: "spaces_open_browser",
+    describe:
+      "Open a URL in the current project's persistent Spaces browser pane so a person and agent can work from the same project surface.",
+    effect: "auto",
+    params: [
+      {
+        name: "url",
+        type: "string",
+        required: true,
+        describe: "HTTPS URL or search text.",
+      },
+      {
+        name: "project",
+        type: "string",
+        describe: "Defaults to the current project.",
+      },
+    ],
+    async run(args, ctx) {
+      const projectId = projectOf(args, ctx);
+      const url = str(args, "url");
+      if (!projectId || !url) {
+        return { ok: false, message: "project and url are required" };
+      }
+      window.dispatchEvent(
+        new CustomEvent("spaces:open-browser", {
+          detail: { projectId, url },
+        }),
+      );
+      return { ok: true, message: `Opened ${url} in the project browser.` };
     },
   },
 
@@ -937,6 +1550,91 @@ export const OPERATIONS: Operation[] = [
         meta: "posted from another channel",
       });
       return { ok: true, message: `Posted to ${describeEntity(ref).title}`, ref: { type: "message", id: msg.id } };
+    },
+  },
+
+  {
+    name: "spaces_list_social_accounts",
+    describe:
+      "List connected Instagram and TikTok publishing accounts, the projects each account is linked to, and which account is the project default. Use this before drafting or publishing social work.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "project",
+        type: "string",
+        describe:
+          "Optional project name or id. Defaults to the current project; use all to see every workspace social account.",
+      },
+      {
+        name: "platform",
+        type: "enum",
+        choices: ["instagram", "tiktok"],
+        describe: "Optional network filter.",
+      },
+    ],
+    async run(args, ctx) {
+      const requestedProject = str(args, "project");
+      const projectId =
+        requestedProject.toLowerCase() === "all"
+          ? ""
+          : requestedProject
+            ? projectOf(args, ctx)
+            : ctx.projectId;
+      const requestedPlatform = str(args, "platform");
+      const provider =
+        requestedPlatform === "instagram"
+          ? "meta"
+          : requestedPlatform === "tiktok"
+            ? "tiktok"
+            : "";
+      const projects = useStore.getState().projects;
+      const accounts = (await listIntegrationAccounts())
+        .filter(
+          (account) =>
+            account.category === "social" &&
+            account.status === "connected" &&
+            (!provider || account.provider === provider),
+        )
+        .filter(
+          (account) =>
+            !projectId ||
+            (socialMetadata(account).projectLinks ?? []).some(
+              (link) => link.projectId === projectId,
+            ),
+        );
+      if (!accounts.length) {
+        return {
+          ok: true,
+          message: projectId
+            ? "No connected social account is linked to this project."
+            : "No connected social accounts match.",
+        };
+      }
+      return {
+        ok: true,
+        message: accounts
+          .map((account) => {
+            const links = socialMetadata(account).projectLinks ?? [];
+            const linked = links.length
+              ? links
+                  .map((link) => {
+                    const name =
+                      projects.find((project) => project.id === link.projectId)
+                        ?.name ?? link.projectId;
+                    return `${name}${link.isDefault ? " (default)" : ""}`;
+                  })
+                  .join(", ")
+              : "workspace only";
+            const platform =
+              account.provider === "meta" ? "instagram" : account.provider;
+            return (
+              `${platform}:${account.handle || account.label || socialConnectionId(account)}` +
+              ` — connection=${socialConnectionId(account)} — projects=${linked}`
+            );
+          })
+          .join("\n"),
+      };
     },
   },
 

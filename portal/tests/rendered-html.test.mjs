@@ -127,16 +127,18 @@ test("calendar creation reaches exact cloud calendars and queues native Apple de
 });
 
 test("starter preview is removed and product metadata is present", async () => {
-  const [page, layout, packageJson] = await Promise.all([
+  const [page, layout, packageJson, app] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /<PortalApp \/>/);
   assert.match(page, /requireChatGPTUser/);
   assert.match(layout, /your company in one place/i);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(app, /Spaces-0\.1\.12-universal\.dmg/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
 
@@ -245,6 +247,46 @@ test("workspace revisions reconcile changes across active sessions", async () =>
   assert.match(route, /searchParams\.get\("since"\)/);
   assert.match(schema, /workspaceEvents/);
   assert.match(migration, /AUTOINCREMENT/);
+});
+
+test("owners can clear workspace history without deleting identity or connections", async () => {
+  const workspace = await readFile(
+    new URL("../lib/workspace.ts", import.meta.url),
+    "utf8",
+  );
+  const reset = workspace.slice(
+    workspace.indexOf('actionName === "reset_workspace_history"'),
+    workspace.indexOf('actionName === "create_issue"'),
+  );
+  assert.match(reset, /actionName === "reset_workspace_history"/);
+  assert.match(reset, /requireRole\(context, \["owner"\]\)/);
+  assert.match(reset, /RESET HISTORY \$\{context\.workspace\.id\}/);
+  for (const table of [
+    "messages",
+    "issues",
+    "knowledge_pages",
+    "shared_calendar_events",
+    "content_items",
+    "agent_jobs",
+    "device_snapshots",
+    "media_assets",
+    "activity",
+  ]) {
+    assert.match(reset, new RegExp(`DELETE FROM ${table}`));
+  }
+  for (const preserved of [
+    "workspaces",
+    "memberships",
+    "projects",
+    "channels",
+    "agents",
+    "devices",
+    "connections",
+    "project_connections",
+  ]) {
+    assert.doesNotMatch(reset, new RegExp(`DELETE FROM ${preserved}`));
+  }
+  assert.match(reset, /storage!\.delete/);
 });
 
 test("member roles and personal desktop pairing are authorized server-side", async () => {

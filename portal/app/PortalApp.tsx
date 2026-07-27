@@ -26,17 +26,16 @@ import {
   type KnowledgeTreeNode,
 } from "../lib/knowledge-tree";
 
-const UPSTREAM_REPOSITORY = "https://github.com/lbrendle/spaces";
+const OFFICIAL_DESKTOP_DOWNLOAD =
+  "https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.12-universal.dmg";
 const CONFIGURED_DESKTOP_DOWNLOAD =
   process.env.NEXT_PUBLIC_SPACES_DESKTOP_DOWNLOAD_URL?.trim() ?? "";
 const DESKTOP_DOWNLOAD_URL =
-  CONFIGURED_DESKTOP_DOWNLOAD || `${UPSTREAM_REPOSITORY}/releases`;
-const DESKTOP_DOWNLOAD_LABEL = CONFIGURED_DESKTOP_DOWNLOAD
-  ? "Download for Mac"
-  : "View desktop releases";
+  CONFIGURED_DESKTOP_DOWNLOAD || OFFICIAL_DESKTOP_DOWNLOAD;
+const DESKTOP_DOWNLOAD_LABEL = "Download for Mac";
 const DESKTOP_DOWNLOAD_NOTE = CONFIGURED_DESKTOP_DOWNLOAD
   ? "Use the signed build published by your workspace operator."
-  : "No operator build is configured; build from source or use an upstream release.";
+  : "Use the official signed universal Spaces build, or build from source.";
 
 type Surface =
   | "overview"

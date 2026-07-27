@@ -796,6 +796,16 @@ function buildFreshPrompt(
   lines.push(
     `You are "${agent.name}", an AI teammate in the #${channel.name} channel of the project "${project?.name ?? "Spaces"}" inside the user's Spaces app. Humans and other AI agents read and write in this channel.`
   );
+  if (project) {
+    lines.push(
+      "\n## Spaces context and tools",
+      "Before acting, orient from the generated `.hq/` workspace files in the project checkout: " +
+        "`CONTEXT.md`, `ROSTER.md`, `BOARD.md`, `LINKS.md`, `KNOWLEDGE.md`, `CONTENT.md`, and the current channel file.",
+      "Use the Spaces MCP tools when they are available. If this harness does not expose MCP, follow `.hq/ACTIONS.md` and append the same operation to `.hq/actions.jsonl`.",
+      "For social or marketing work, call `spaces_list_content` and `spaces_list_social_accounts` first, then update the canonical `content:<id>` card; do not leave the final brief, copy, media, account, or schedule only in chat.",
+      "Connected-account credentials are never in the repo. Use the Spaces mail, calendar, social, document, browser, and Git tools instead of asking for raw tokens.",
+    );
+  }
 
   // Layered standing context, widest scope first: project → team → channel → you.
   if (project?.instructions.trim()) {
@@ -896,6 +906,12 @@ function buildResumePrompt(
   ).slice(-20);
 
   const lines: string[] = [];
+  if (project) {
+    lines.push(
+      "Spaces refresh: the current shared state is in `.hq/CONTEXT.md`, `ROSTER.md`, `BOARD.md`, `LINKS.md`, `KNOWLEDGE.md`, and `CONTENT.md`. Read the relevant file before relying on session memory; use `spaces_list_content` and `spaces_list_social_accounts` before social work.",
+      "",
+    );
+  }
 
   // A resumed session carries the memory as it looked when the session started;
   // re-state anything the user has edited since this agent's last turn.

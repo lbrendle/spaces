@@ -864,6 +864,103 @@ export async function mutateWorkspace(
   const actionName = text(input.action, 80);
   const createdAt = now();
 
+  if (actionName === "reset_workspace_history") {
+    await requireRole(context, ["owner"]);
+    const requiredConfirmation = `RESET HISTORY ${context.workspace.id}`;
+    if (text(input.confirmation, 300) !== requiredConfirmation) {
+      throw new Error(
+        `Type "${requiredConfirmation}" to clear workspace history.`,
+      );
+    }
+
+    const media = await db()
+      .prepare(
+        `SELECT object_key AS objectKey
+           FROM media_assets
+          WHERE workspace_id = ?`,
+      )
+      .bind(context.workspace.id)
+      .all<{ objectKey: string }>();
+    const storage = (env as unknown as { MEDIA?: R2Bucket }).MEDIA;
+    const objectKeys = (media.results ?? [])
+      .map((row) => row.objectKey)
+      .filter(Boolean);
+    if (objectKeys.length && !storage) {
+      throw new Error(
+        "Workspace media storage is unavailable, so Spaces refused to leave orphaned history behind.",
+      );
+    }
+    for (let index = 0; index < objectKeys.length; index += 500) {
+      await storage!.delete(objectKeys.slice(index, index + 500));
+    }
+
+    await db().batch([
+      db()
+        .prepare("DELETE FROM message_sources WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare(
+          `DELETE FROM messages
+            WHERE channel_id IN (
+              SELECT id FROM channels WHERE workspace_id = ?
+            )`,
+        )
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM issue_sources WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM issues WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM decisions WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM knowledge_access WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM page_links WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM knowledge_pages WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM shared_calendar_events WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM calendar_commands WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM content_tombstones WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM content_items WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM inbox_items WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM cycles WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM agent_jobs WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM device_snapshots WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM media_assets WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM activity WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+      db()
+        .prepare("DELETE FROM workspace_events WHERE workspace_id = ?")
+        .bind(context.workspace.id),
+    ]);
+    return { ok: true };
+  }
+
   if (actionName === "create_issue") {
     const title = text(input.title, 180);
     if (!title) throw new Error("Issue title is required.");

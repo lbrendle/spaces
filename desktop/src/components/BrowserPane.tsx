@@ -169,6 +169,33 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
     return () => window.clearInterval(poll);
   }, [active, label, native, projectId, ready]);
 
+  useEffect(() => {
+    const navigateFromAgent = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ projectId?: string; url?: string }>
+      ).detail;
+      if (detail?.projectId !== projectId || !detail.url?.trim()) return;
+      setAddress(detail.url.trim());
+      setFallbackUrl(normalizeBrowserInput(detail.url));
+      window.localStorage.setItem(
+        `spaces-browser:${projectId}`,
+        normalizeBrowserInput(detail.url),
+      );
+      if (native && ready) {
+        void browserNavigate(label, detail.url)
+          .then((url) => {
+            setAddress(url);
+            setFallbackUrl(url);
+            window.localStorage.setItem(`spaces-browser:${projectId}`, url);
+          })
+          .catch((reason) => setError(String(reason)));
+      }
+    };
+    window.addEventListener("spaces:open-browser", navigateFromAgent);
+    return () =>
+      window.removeEventListener("spaces:open-browser", navigateFromAgent);
+  }, [label, native, projectId, ready]);
+
   async function go(value = address) {
     setError("");
     try {

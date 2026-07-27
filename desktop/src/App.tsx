@@ -64,6 +64,20 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const openProjectBrowser = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; url?: string }>).detail;
+      const projectId = detail?.projectId?.trim() ?? "";
+      const url = detail?.url?.trim() ?? "";
+      if (!projectId || !url) return;
+      window.localStorage.setItem(`spaces-browser:${projectId}`, url);
+      setView({ type: "workspace", projectId, surface: "browser" });
+    };
+    window.addEventListener("spaces:open-browser", openProjectBrowser);
+    return () =>
+      window.removeEventListener("spaces:open-browser", openProjectBrowser);
+  }, [setView]);
+
   useEffect(() => initAppUpdater(), []);
 
   useEffect(() => {
@@ -88,7 +102,10 @@ export default function App() {
     void syncAllProjects();
     const stopPortal = initPortalSync();
     const stopRemoteJobs = initRemoteAgentJobs();
+    const refreshAgentMirrors = () => void syncAllProjects(100);
+    window.addEventListener("hq:content-change", refreshAgentMirrors);
     return () => {
+      window.removeEventListener("hq:content-change", refreshAgentMirrors);
       stopRemoteJobs();
       stopPortal();
     };

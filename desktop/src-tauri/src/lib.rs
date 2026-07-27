@@ -952,6 +952,9 @@ async fn start_agent_run(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Ok(app_data) = app.path().app_data_dir() {
+        cmd.env("SPACES_DB_PATH", app_data.join("spaces.db"));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

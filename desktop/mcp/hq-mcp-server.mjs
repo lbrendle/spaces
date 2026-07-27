@@ -4,8 +4,9 @@
  *
  * This process is spawned by the harness (`claude`, or anything else that
  * speaks MCP) inside the user's checkout, in a different process from the Spaces
- * app, with no access to Spaces's SQLite database and no way to import a line of
- * Spaces's TypeScript. So it is deliberately the dumbest component in the system:
+ * app, with no way to import a line of Spaces's TypeScript. It is deliberately
+ * small: private read-only tools may query the paired host's SQLite database,
+ * while shared state retains a generated-markdown fallback:
  *
  *   tools/list   is read from .hq/mcp-tools.json, which Spaces generates from its
  *                own operation registry (src/hqops.ts). Nothing here describes
@@ -34,6 +35,16 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
+
+let DatabaseSync = null;
+try {
+  ({ DatabaseSync } = await import("node:sqlite"));
+} catch {
+  // Node before 22.5 has no built-in SQLite. Shared snapshot tools still work;
+  // private live reads say why they are unavailable instead of taking down MCP.
+}
 
 const SERVER_NAME = "hq";
 const SERVER_VERSION = "0.1.0";
@@ -55,7 +66,8 @@ const ACTIONS_REL = `${SPACES_DIR}/actions.jsonl`;
  * (see src/blackboard.ts), and guessing at others would only produce noise.
  */
 const KNOWLEDGE_REL = `${SPACES_DIR}/KNOWLEDGE.md`;
-const SNAPSHOT_RELS = ["CONTEXT.md", "ROSTER.md", "BOARD.md", "LINKS.md", "KNOWLEDGE.md"].map(
+const CONTENT_REL = `${SPACES_DIR}/CONTENT.md`;
+const SNAPSHOT_RELS = ["CONTEXT.md", "ROSTER.md", "BOARD.md", "LINKS.md", "KNOWLEDGE.md", "CONTENT.md"].map(
   (n) => `${SPACES_DIR}/${n}`,
 );
 
@@ -438,6 +450,33 @@ function snapshotAnswer(tool, args) {
   if (tool.name === "spaces_read_knowledge") {
     return knowledgeReadAnswer(args);
   }
+  if (tool.name === "spaces_list_content") {
+    return contentListAnswer(args);
+  }
+  if (tool.name === "spaces_get_content") {
+    return contentGetAnswer(args);
+  }
+  if (tool.name === "spaces_list_documents") {
+    return documentListAnswer(args);
+  }
+  if (tool.name === "spaces_get_document") {
+    return documentGetAnswer(args);
+  }
+  if (tool.name === "spaces_list_mail") {
+    return mailListAnswer(args);
+  }
+  if (tool.name === "spaces_get_mail") {
+    return mailGetAnswer(args);
+  }
+  if (tool.name === "spaces_list_calendar") {
+    return calendarListAnswer(args);
+  }
+  if (tool.name === "spaces_list_social_accounts") {
+    return socialAccountsAnswer(args);
+  }
+  if (tool.name === "spaces_git_status") {
+    return gitStatusAnswer();
+  }
   const parts = [];
   for (const rel of SNAPSHOT_RELS) {
     const path = join(ROOT, rel);
@@ -494,6 +533,543 @@ function snapshotAnswer(tool, args) {
     out.push("", `## ${part.rel}`, "", body.trimEnd());
   }
   return text(out.join("\n"));
+}
+
+function liveDb() {
+  if (!DatabaseSync) return { ok: false, problem: "Live Spaces reads need Node 22.5 or newer." };
+  const explicit = (process.env.SPACES_DB_PATH ?? "").trim();
+  const candidates = explicit
+    ? [explicit]
+    : [
+        join(homedir(), "Library", "Application Support", "app.spaces.desktop", "spaces.db"),
+        join(homedir(), ".local", "share", "app.spaces.desktop", "spaces.db"),
+      ];
+  const path = candidates.find((candidate) => {
+    try {
+      return statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
+  if (!path) {
+    return {
+      ok: false,
+      problem:
+        "Spaces's local database is unavailable on this agent host. Pair and open the desktop app first.",
+    };
+  }
+  try {
+    return { ok: true, db: new DatabaseSync(path, { readOnly: true }) };
+  } catch (e) {
+    return { ok: false, problem: `Spaces's local database could not be opened (${describe(e)}).` };
+  }
+}
+
+function rows(sql, params = []) {
+  const opened = liveDb();
+  if (!opened.ok) return opened;
+  try {
+    const values = opened.db.prepare(sql).all(...params);
+    return { ok: true, rows: values };
+  } catch (e) {
+    return { ok: false, problem: `Spaces could not read its local state (${describe(e)}).` };
+  } finally {
+    try {
+      opened.db.close();
+    } catch {
+      // read-only connection; process exit is still a safe final fallback
+    }
+  }
+}
+
+function documentListAnswer(args) {
+  const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+  const requestedProject =
+    typeof args.project === "string" ? args.project.trim() : "";
+  const projectFilter =
+    requestedProject.toLowerCase() === "all"
+      ? ""
+      : requestedProject || CALLER.project_id;
+  const loaded = rows(
+    `SELECT d.id, d.project_id AS projectId, d.title, d.path, d.tags,
+            d.body, d.updated_at AS updatedAt, COALESCE(p.name, '') AS project
+       FROM documents d
+       LEFT JOIN projects p ON p.id = d.project_id
+      WHERE d.visibility = 'workspace'
+      ORDER BY d.pinned DESC, d.path, d.updated_at DESC`,
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  const matches = loaded.rows
+    .filter(
+      (document) =>
+        !projectFilter ||
+        !document.projectId ||
+        document.projectId === projectFilter ||
+        String(document.project).toLowerCase() === projectFilter.toLowerCase(),
+    )
+    .filter(
+      (document) =>
+        !query ||
+        `${document.title} ${document.path} ${document.tags} ${document.body}`
+          .toLowerCase()
+          .includes(query),
+    )
+    .slice(0, 100);
+  if (!matches.length) return text("No shared documents match.");
+  return text(
+    matches
+      .map(
+        (document) =>
+          `document:${document.id} — ${document.path || document.title} — ${document.title}` +
+          `${document.tags ? ` [${document.tags}]` : ""}`,
+      )
+      .join("\n"),
+  );
+}
+
+function documentGetAnswer(args) {
+  const requested =
+    typeof args.document === "string" ? args.document.replace(/^document:/i, "").trim() : "";
+  if (!requested) return text("spaces_get_document needs document.", true);
+  const loaded = rows(
+    `SELECT id, project_id AS projectId, title, path, tags, body
+       FROM documents
+      WHERE visibility = 'workspace'
+        AND (id = ? OR lower(title) = lower(?) OR lower(path) = lower(?))
+      ORDER BY updated_at DESC`,
+    [requested, requested, requested],
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  if (loaded.rows.length !== 1) {
+    return text(
+      loaded.rows.length
+        ? `"${requested}" matches ${loaded.rows.length} shared documents. Use document:<id>.`
+        : `No shared document matches "${requested}".`,
+      true,
+    );
+  }
+  const document = loaded.rows[0];
+  return text(
+    [
+      `document:${document.id}`,
+      `# ${document.title}`,
+      `Path: ${document.path}`,
+      `Tags: ${document.tags || "—"}`,
+      "",
+      document.body,
+    ].join("\n"),
+  );
+}
+
+function mailListAnswer(args) {
+  const folder = typeof args.folder === "string" && args.folder.trim() ? args.folder.trim() : "inbox";
+  const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+  const loaded = rows(
+    `SELECT id, subject, from_name AS fromName, from_email AS fromEmail,
+            to_email AS toEmail, preview, body, unread, received_at AS receivedAt
+       FROM mail_threads
+      WHERE folder = ?
+      ORDER BY received_at DESC, updated_at DESC
+      LIMIT 250`,
+    [folder],
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  const matches = loaded.rows
+    .filter(
+      (message) =>
+        !query ||
+        `${message.fromName} ${message.fromEmail} ${message.toEmail} ${message.subject} ${message.preview} ${message.body}`
+          .toLowerCase()
+          .includes(query),
+    )
+    .slice(0, 50);
+  if (!matches.length) return text(`No ${folder} mail matches.`);
+  return text(
+    matches
+      .map(
+        (message) =>
+          `mail:${message.id} — ${message.subject}\n` +
+          `from=${message.fromName || message.fromEmail || "—"} · to=${message.toEmail || "—"} · ` +
+          `${message.unread ? "unread" : "read"}\n${message.preview || ""}`,
+      )
+      .join("\n\n"),
+  );
+}
+
+function mailGetAnswer(args) {
+  const requested =
+    typeof args.mail === "string" ? args.mail.replace(/^mail:/i, "").trim() : "";
+  if (!requested) return text("spaces_get_mail needs mail.", true);
+  const loaded = rows(
+    `SELECT id, subject, from_name AS fromName, from_email AS fromEmail,
+            to_email AS toEmail, body, received_at AS receivedAt
+       FROM mail_threads WHERE id = ? LIMIT 1`,
+    [requested],
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  const message = loaded.rows[0];
+  if (!message) return text("Mail message not found.", true);
+  return text(
+    [
+      `mail:${message.id}`,
+      `# ${message.subject}`,
+      `From: ${message.fromName || message.fromEmail || "—"}`,
+      `To: ${message.toEmail || "—"}`,
+      `Received: ${new Date(Number(message.receivedAt) || 0).toISOString()}`,
+      "",
+      message.body || "",
+    ].join("\n"),
+  );
+}
+
+function calendarListAnswer(args) {
+  const from = Date.parse(typeof args.from === "string" ? args.from : "") ||
+    Date.now() - 30 * 86_400_000;
+  const to = Date.parse(typeof args.to === "string" ? args.to : "") ||
+    Date.now() + 365 * 86_400_000;
+  const calendar = typeof args.calendar === "string" ? args.calendar.trim().toLowerCase() : "";
+  const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+  const loaded = rows(
+    `SELECT e.id, e.title, e.description, e.location, e.starts_at AS startsAt,
+            e.ends_at AS endsAt, e.source, c.id AS calendarId, c.name AS calendar
+       FROM events e
+       JOIN calendars c ON c.id = e.calendar_id
+      WHERE e.starts_at < ? AND e.ends_at > ? AND e.status != 'cancelled'
+      ORDER BY e.starts_at
+      LIMIT 1000`,
+    [to, from],
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  const matches = loaded.rows
+    .filter(
+      (event) =>
+        !calendar ||
+        String(event.calendarId).toLowerCase() === calendar ||
+        String(event.calendar).toLowerCase() === calendar,
+    )
+    .filter(
+      (event) =>
+        !query ||
+        `${event.title} ${event.description} ${event.location}`
+          .toLowerCase()
+          .includes(query),
+    )
+    .slice(0, 250);
+  if (!matches.length) return text("No visible calendar events match.");
+  return text(
+    matches
+      .map(
+        (event) =>
+          `event:${event.id} — ${event.title}\n` +
+          `${new Date(Number(event.startsAt)).toISOString()} → ${new Date(Number(event.endsAt)).toISOString()} · ` +
+          `${event.calendar} · source=${event.source}`,
+      )
+      .join("\n\n"),
+  );
+}
+
+function gitStatusAnswer() {
+  const run = (args) =>
+    spawnSync("git", args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: 5_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+  const inside = run(["rev-parse", "--is-inside-work-tree"]);
+  if (inside.status !== 0 || inside.stdout.trim() !== "true") {
+    return text("This project checkout is not a Git worktree.", true);
+  }
+  const branch = run(["branch", "--show-current"]).stdout.trim() || "(detached)";
+  const status = run(["status", "--short", "--branch"]).stdout.trim();
+  const remotes = run(["remote", "-v"]).stdout
+    .split("\n")
+    .filter((line) => line && !/https?:\/\/[^\s@]+@/i.test(line))
+    .join("\n");
+  const commits = run(["log", "-5", "--oneline", "--decorate"]).stdout.trim();
+  return text(
+    [
+      `# Git status — ${branch}`,
+      "",
+      status || "Working tree clean.",
+      "",
+      "## Remotes",
+      remotes || "No remotes.",
+      "",
+      "## Recent commits",
+      commits || "No commits yet.",
+    ].join("\n"),
+  );
+}
+
+function socialAccountsAnswer(args) {
+  const requestedProject =
+    typeof args.project === "string" ? args.project.trim() : "";
+  const projectFilter =
+    requestedProject.toLowerCase() === "all"
+      ? ""
+      : requestedProject || CALLER.project_id;
+  const platform =
+    typeof args.platform === "string" ? args.platform.trim().toLowerCase() : "";
+  const provider = platform === "instagram" ? "meta" : platform === "tiktok" ? "tiktok" : "";
+  const loaded = rows(
+    `SELECT a.id, a.provider, a.label, a.handle, a.metadata
+       FROM integration_accounts a
+      WHERE a.category = 'social' AND a.status = 'connected'
+      ORDER BY a.provider, a.handle, a.label`,
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  const projects = rows(`SELECT id, name FROM projects ORDER BY name`);
+  if (!projects.ok) return text(projects.problem, true);
+  const projectNames = new Map(projects.rows.map((project) => [project.id, project.name]));
+  const matches = loaded.rows
+    .map((account) => {
+      let metadata = {};
+      try {
+        metadata = JSON.parse(account.metadata || "{}");
+      } catch {
+        metadata = {};
+      }
+      const links = Array.isArray(metadata.projectLinks) ? metadata.projectLinks : [];
+      return { ...account, metadata, links };
+    })
+    .filter((account) => !provider || account.provider === provider)
+    .filter(
+      (account) =>
+        !projectFilter ||
+        account.links.some(
+          (link) =>
+            link.projectId === projectFilter ||
+            String(projectNames.get(link.projectId) || "").toLowerCase() ===
+              projectFilter.toLowerCase(),
+        ),
+    );
+  if (!matches.length) {
+    return text(
+      projectFilter
+        ? "No connected social account is linked to this project."
+        : "No connected social accounts match.",
+    );
+  }
+  return text(
+    matches
+      .map((account) => {
+        const linked = account.links.length
+          ? account.links
+              .map((link) => {
+                const name = projectNames.get(link.projectId) || link.projectId;
+                return `${name}${link.isDefault ? " (default)" : ""}`;
+              })
+              .join(", ")
+          : "workspace only";
+        const network = account.provider === "meta" ? "instagram" : account.provider;
+        const connection = account.metadata.connectionId || account.id.replace(/^portal-/, "");
+        return (
+          `${network}:${account.handle || account.label || connection}` +
+          ` — connection=${connection} — projects=${linked}`
+        );
+      })
+      .join("\n"),
+  );
+}
+
+function contentSections() {
+  const path = join(ROOT, CONTENT_REL);
+  let raw;
+  let age;
+  try {
+    raw = readFileSync(path, "utf8");
+    age = Date.now() - statSync(path).mtimeMs;
+  } catch (e) {
+    return {
+      ok: false,
+      age: 0,
+      sections: [],
+      problem:
+        `Spaces has not written ${CONTENT_REL} for this project (${describe(e)}). ` +
+        "Open or sync the project in Spaces first.",
+    };
+  }
+  const markers = [...raw.matchAll(/^<!-- spaces-content-ref: (content:[^\n]+) -->$/gm)];
+  const sections = markers.map((marker, index) => {
+    const start = marker.index ?? 0;
+    const end = markers[index + 1]?.index ?? raw.length;
+    const block = raw.slice(start, end).trim();
+    const title = /^###\s+(.+)$/m.exec(block)?.[1]?.trim() ?? "Untitled";
+    const field = (name) =>
+      new RegExp(`^- ${name}:\\s*(.*)$`, "m").exec(block)?.[1]?.trim() ?? "";
+    return {
+      ref: marker[1].trim(),
+      title,
+      project: field("Project"),
+      projectId: field("Project ID").replace(/^`|`$/g, ""),
+      status: field("Status"),
+      platform: field("Platform"),
+      block,
+    };
+  });
+  return { ok: true, age, sections, problem: "" };
+}
+
+function liveContentRows() {
+  return rows(
+    `SELECT c.id, c.project_id AS projectId, c.campaign, c.title, c.brief,
+            c.copy, c.platform, c.connection_id AS connectionId, c.status,
+            c.scheduled_at AS scheduledAt, c.published_url AS publishedUrl,
+            c.media_url AS mediaUrl, c.publish_error AS publishError,
+            c.updated_at AS updatedAt, COALESCE(p.name, '') AS project,
+            COALESCE(a.name, '') AS owner
+       FROM content_items c
+       LEFT JOIN projects p ON p.id = c.project_id
+       LEFT JOIN agents a ON a.id = c.agent_id
+      ORDER BY c.updated_at DESC, c.created_at DESC, c.id`,
+  );
+}
+
+function liveContentBlock(item) {
+  return [
+    `content:${item.id} — ${item.title}`,
+    `stage=${item.status} · project=${item.project || "No project"} · platform=${item.platform}` +
+      `${item.campaign ? ` · campaign=${item.campaign}` : ""}`,
+    `owner=${item.owner || "Unassigned"} · connection=${item.connectionId || "not selected"}`,
+    item.brief ? `brief:\n${item.brief}` : "brief: No brief yet.",
+    item.copy ? `copy:\n${item.copy}` : "copy: No copy yet.",
+    item.mediaUrl ? `media: ${item.mediaUrl}` : "media: None",
+    item.scheduledAt
+      ? `scheduled: ${new Date(Number(item.scheduledAt)).toISOString()}`
+      : "scheduled: Not scheduled",
+    item.publishedUrl ? `published: ${item.publishedUrl}` : "published: Not published",
+    item.publishError ? `publish error: ${item.publishError}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function contentListAnswer(args) {
+  const requestedProject =
+    typeof args.project === "string" ? args.project.trim() : "";
+  const projectFilter =
+    requestedProject.toLowerCase() === "all"
+      ? ""
+      : requestedProject || CALLER.project_id;
+  const status =
+    typeof args.status === "string" ? args.status.trim().toLowerCase() : "";
+  const query =
+    typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+  const live = liveContentRows();
+  if (live.ok) {
+    const matches = live.rows
+      .filter(
+        (item) =>
+          !projectFilter ||
+          item.projectId === projectFilter ||
+          String(item.project).toLowerCase() === projectFilter.toLowerCase(),
+      )
+      .filter((item) => !status || String(item.status).toLowerCase() === status)
+      .filter(
+        (item) =>
+          !query ||
+          `${item.title} ${item.project} ${item.platform} ${item.campaign} ${item.brief} ${item.copy}`
+            .toLowerCase()
+            .includes(query),
+      )
+      .slice(0, 100);
+    return text(
+      matches.length
+        ? [
+            "Live Content Studio state from the paired Spaces desktop. Use an exact content:<id> for reads, updates, deletion, scheduling, or publishing.",
+            "",
+            ...matches.map(liveContentBlock),
+          ].join("\n\n")
+        : "No Content Studio cards match.",
+    );
+  }
+
+  const loaded = contentSections();
+  if (!loaded.ok) return text(`${live.problem}\n${loaded.problem}`, true);
+  const matches = loaded.sections
+    .filter(
+      (section) =>
+        !projectFilter ||
+        section.projectId === projectFilter ||
+        section.project.toLowerCase() === projectFilter.toLowerCase(),
+    )
+    .filter((section) => !status || section.status.toLowerCase() === status)
+    .filter(
+      (section) =>
+        !query ||
+        `${section.title}\n${section.project}\n${section.platform}\n${section.block}`
+          .toLowerCase()
+          .includes(query),
+    )
+    .slice(0, 100);
+  if (!matches.length) {
+    return text(
+      `No Content Studio cards match in ${CONTENT_REL}. Snapshot written ${ago(loaded.age)}.`,
+    );
+  }
+  return text(
+    [
+      `Content Studio snapshot written ${ago(loaded.age)}. Use an exact content:<id> with spaces_get_content or any update/publish tool.`,
+      "",
+      ...matches.map((section) => section.block),
+    ].join("\n\n"),
+  );
+}
+
+function contentGetAnswer(args) {
+  const requested =
+    typeof args.content === "string" ? args.content.trim() : firstStringArg(args);
+  if (!requested) return text("spaces_get_content needs content.", true);
+  const lowered = requested.toLowerCase();
+  const live = liveContentRows();
+  if (live.ok) {
+    const matches = live.rows.filter(
+      (item) =>
+        `content:${item.id}`.toLowerCase() === lowered ||
+        String(item.title).toLowerCase() === lowered,
+    );
+    if (matches.length !== 1) {
+      return text(
+        matches.length
+          ? `"${requested}" matches ${matches.length} Content Studio cards. Use the exact content:<id>.`
+          : `No Content Studio card matches "${requested}".`,
+        true,
+      );
+    }
+    return text(
+      [
+        "Live Content Studio state from the paired Spaces desktop.",
+        `Use \`content:${matches[0].id}\` for updates, scheduling, deletion, or publishing.`,
+        "",
+        liveContentBlock(matches[0]),
+      ].join("\n"),
+    );
+  }
+
+  const loaded = contentSections();
+  if (!loaded.ok) return text(`${live.problem}\n${loaded.problem}`, true);
+  const exact = loaded.sections.filter(
+    (section) =>
+      section.ref.toLowerCase() === lowered ||
+      section.title.toLowerCase() === lowered,
+  );
+  if (exact.length !== 1) {
+    return text(
+      exact.length
+        ? `"${requested}" matches ${exact.length} Content Studio cards. Use the exact content:<id>.`
+        : `No Content Studio card matches "${requested}" in ${CONTENT_REL}. Snapshot written ${ago(loaded.age)}.`,
+      true,
+    );
+  }
+  return text(
+    [
+      `Content Studio snapshot written ${ago(loaded.age)}.`,
+      `Use \`${exact[0].ref}\` for updates, scheduling, deletion, or publishing.`,
+      "",
+      exact[0].block,
+    ].join("\n"),
+  );
 }
 
 function knowledgeSections() {

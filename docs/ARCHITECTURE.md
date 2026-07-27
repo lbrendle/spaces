@@ -67,11 +67,13 @@ selection, and publish results remain attached to one card across members.
 Agent tools read and mutate those same mirrored rows, and a publishing proposal
 prefers an existing `content:<id>` instead of inventing a second audit row.
 
-Every spawned harness receives explicit run, agent, channel, and project IDs.
-The blackboard also emits permission-filtered workspace Knowledge with preserved
-folder paths. Dedicated read-only tools search and return stable
-`knowledge:source:path` references without pretending the out-of-process MCP
-server can query SQLite live.
+Every spawned harness receives explicit run, agent, channel, project, and local
+database identity. On a paired agent host, read-only tools query the same local
+SQLite mirrors used by the UI for documents, private mail, calendars, Content
+Studio, social-account routing, and Git context. The blackboard also emits
+permission-filtered workspace Knowledge, `CONTENT.md`, and preserved folder
+paths as bounded fallbacks. Knowledge reads return stable
+`knowledge:source:path` references.
 
 Projects without a local checkout receive a private control directory in the
 application data folder. This lets general/non-code channels expose Spaces
