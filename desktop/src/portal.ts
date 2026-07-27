@@ -19,6 +19,7 @@ import {
   type RemoteTombstone,
   type SharedSyncAck,
 } from "./portalContent";
+import { slug, type Message } from "./types";
 
 export interface PortalConnection {
   id: number;
@@ -416,6 +417,119 @@ async function resolveLocal(
     [entity, remoteId, localId]
   );
   return { localId, exists: adopted !== null };
+}
+
+interface PortalMessageDispatch {
+  message_id: string;
+  channel_id: string;
+  agent_id: string;
+  author_name: string;
+  content: string;
+  parent_id: string;
+  created_at: number;
+}
+
+let portalMessageDispatchInFlight: Promise<void> | null = null;
+
+/**
+ * Run messages authored on Spaces web through the same local orchestrator as
+ * desktop chat. The durable receipt is claimed before execution, so the next
+ * sync cannot double-start an agent while a long turn is still running.
+ */
+async function drainPortalMessageDispatches(): Promise<void> {
+  const db = await getDb();
+  const stamp = now();
+  await db.execute(
+    `UPDATE portal_message_dispatches
+        SET status = 'pending', error = ''
+      WHERE status = 'dispatching' AND dispatched_at < $1`,
+    [stamp - 5 * 60_000],
+  );
+  const pending = await db.select<PortalMessageDispatch[]>(
+    `SELECT d.message_id, d.channel_id, d.agent_id,
+            m.author_name, m.content, m.parent_id, m.created_at
+       FROM portal_message_dispatches d
+       JOIN messages m ON m.id = d.message_id
+      WHERE d.status = 'pending'
+      ORDER BY d.created_at
+      LIMIT 25`,
+  );
+  if (!pending.length) return;
+
+  const { resolveTargets, triggerAgents, userTrigger } = await import("./agents");
+  for (const receipt of pending) {
+    await db.execute(
+      `UPDATE portal_message_dispatches
+          SET status = 'dispatching', dispatched_at = $1, error = ''
+        WHERE message_id = $2 AND status = 'pending'`,
+      [now(), receipt.message_id],
+    );
+    try {
+      const state = useStore.getState();
+      const preferred = state.agents.find(
+        (agent) => agent.id === receipt.agent_id,
+      );
+      const hasMention = /(?<![\w@./-])@[a-z0-9-]+/i.test(receipt.content);
+      const routed: Message = {
+        id: receipt.message_id,
+        channel_id: receipt.channel_id,
+        author_type: "user",
+        author_id: "user",
+        author_name: receipt.author_name,
+        content:
+          !hasMention && preferred
+            ? `@${slug(preferred.name)} ${receipt.content}`
+            : receipt.content,
+        status: "done",
+        meta: "",
+        parent_id: receipt.parent_id,
+        run_id: "",
+        created_at: receipt.created_at,
+      };
+      const targets = resolveTargets(receipt.channel_id, routed.content);
+      if (!targets.length) {
+        await state.insertMessage({
+          id: crypto.randomUUID(),
+          channel_id: receipt.channel_id,
+          author_type: "system",
+          author_id: "spaces",
+          author_name: config().brand,
+          content: hasMention
+            ? "Message delivered. No agent was addressed by that mention."
+            : "No agent is available in this channel yet.",
+          status: "done",
+          meta: "",
+          parent_id: receipt.parent_id || receipt.message_id,
+        });
+      } else {
+        await triggerAgents(receipt.channel_id, userTrigger(routed));
+      }
+      await db.execute(
+        `UPDATE portal_message_dispatches
+            SET status = 'dispatched', dispatched_at = $1, error = ''
+          WHERE message_id = $2`,
+        [now(), receipt.message_id],
+      );
+    } catch (error) {
+      await db.execute(
+        `UPDATE portal_message_dispatches
+            SET status = 'failed', dispatched_at = $1, error = $2
+          WHERE message_id = $3`,
+        [
+          now(),
+          error instanceof Error ? error.message : String(error),
+          receipt.message_id,
+        ],
+      );
+    }
+  }
+}
+
+function schedulePortalMessageDispatch(): void {
+  if (portalMessageDispatchInFlight) return;
+  portalMessageDispatchInFlight = drainPortalMessageDispatches().finally(() => {
+    portalMessageDispatchInFlight = null;
+  });
 }
 
 export async function syncPortal(): Promise<PortalConnection | null> {
@@ -964,6 +1078,27 @@ export async function syncPortal(): Promise<PortalConnection | null> {
         ]
       );
     }
+    // Channels arrive before agents in this reconciliation pass. Resolve their
+    // lead a second time after all agent identities exist so a real shared lead
+    // never degrades into an empty desktop channel.
+    for (const remote of body.channels ?? []) {
+      if (!remote.leadAgentId) continue;
+      const [channelLink, leadLink] = await Promise.all([
+        db.select<{ local_id: string }[]>(
+          "SELECT local_id FROM portal_links WHERE entity = 'channel' AND remote_id = $1 LIMIT 1",
+          [remote.id],
+        ),
+        db.select<{ local_id: string }[]>(
+          "SELECT local_id FROM portal_links WHERE entity = 'agent' AND remote_id = $1 LIMIT 1",
+          [remote.leadAgentId],
+        ),
+      ]);
+      if (!channelLink[0]?.local_id || !leadLink[0]?.local_id) continue;
+      await db.execute(
+        "UPDATE channels SET lead_agent_id = $1 WHERE id = $2",
+        [leadLink[0].local_id, channelLink[0].local_id],
+      );
+    }
     const resolvedMessages = new Map<string, ResolvedLocal>();
     for (const remote of body.messages ?? []) {
       const message = await resolveLocal("message", remote.id, async () => {
@@ -1035,6 +1170,48 @@ export async function syncPortal(): Promise<PortalConnection | null> {
           Number.isFinite(createdAt) ? createdAt : now(),
         ],
       );
+      if (
+        remote.authorType === "user" &&
+        !remote.sourceMessageId &&
+        !message.exists &&
+        connection.last_sync_at > 0 &&
+        Number.isFinite(createdAt) &&
+        createdAt > connection.last_sync_at
+      ) {
+        const parentId = parentLink[0]?.local_id ?? "";
+        const preferred = await db.select<{ id: string }[]>(
+          `SELECT a.id
+             FROM messages prior
+             JOIN agents a ON a.id = prior.author_id
+             JOIN channel_members cm
+               ON cm.channel_id = prior.channel_id
+              AND cm.member_type = 'agent'
+              AND cm.member_id = a.id
+            WHERE prior.channel_id = $1
+              AND prior.author_type = 'agent'
+              AND prior.created_at < $2
+            ORDER BY
+              CASE
+                WHEN $3 != '' AND (prior.id = $3 OR prior.parent_id = $3)
+                  THEN 0
+                ELSE 1
+              END,
+              prior.created_at DESC
+            LIMIT 1`,
+          [channelId, createdAt, parentId],
+        );
+        await db.execute(
+          `INSERT OR IGNORE INTO portal_message_dispatches
+            (message_id, channel_id, agent_id, status, error, created_at, dispatched_at)
+           VALUES ($1,$2,$3,'pending','',$4,0)`,
+          [
+            message.localId,
+            channelId,
+            preferred[0]?.id ?? "",
+            createdAt,
+          ],
+        );
+      }
     }
     for (const remote of body.issues ?? []) {
       const projectLink = await db.select<{ local_id: string }[]>(
@@ -1240,6 +1417,7 @@ export async function syncPortal(): Promise<PortalConnection | null> {
     if (activeChannelId) {
       await useStore.getState().loadMessages(activeChannelId);
     }
+    schedulePortalMessageDispatch();
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : String(reason);
     const db = await getDb();

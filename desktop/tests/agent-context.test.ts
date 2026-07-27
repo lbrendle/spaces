@@ -84,6 +84,26 @@ test("agent harnesses receive a stable platform contract and event identity", as
   assert.match(contract, /media_paths/);
 });
 
+test("web-authored channel messages durably dispatch to local agents", async () => {
+  const [database, portal] = await Promise.all([
+    readFile(new URL("../src/db.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/portal.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(database, /CREATE TABLE IF NOT EXISTS portal_message_dispatches/);
+  assert.match(database, /PRAGMA user_version = 22/);
+  assert.match(portal, /async function drainPortalMessageDispatches/);
+  assert.match(portal, /remote\.authorType === "user"/);
+  assert.match(portal, /!remote\.sourceMessageId/);
+  assert.match(portal, /!message\.exists/);
+  assert.match(portal, /preferred\[0\]\?\.id/);
+  assert.match(portal, /Channels arrive before agents/);
+  assert.match(portal, /UPDATE channels SET lead_agent_id = \$1 WHERE id = \$2/);
+  assert.match(portal, /await import\("\.\/agents"\)/);
+  assert.match(portal, /await triggerAgents\(receipt\.channel_id, userTrigger\(routed\)\)/);
+  assert.match(portal, /schedulePortalMessageDispatch\(\)/);
+});
+
 test("Knowledge references use shared sync identities and exclude private collections", async () => {
   const [blackboard, operations, refs] = await Promise.all([
     readFile(new URL("../src/blackboard.ts", import.meta.url), "utf8"),

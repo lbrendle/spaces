@@ -26,7 +26,7 @@ const notes =
 
 if (!version || !bundle || !signaturePath || !installer) {
   throw new Error(
-    "Usage: npm run release:manifest -- --version 0.1.16 --bundle <app.tar.gz> --signature <app.tar.gz.sig> --installer <universal.dmg>",
+    "Usage: npm run release:manifest -- --version 0.1.17 --bundle <app.tar.gz> --signature <app.tar.gz.sig> --installer <universal.dmg>",
   );
 }
 

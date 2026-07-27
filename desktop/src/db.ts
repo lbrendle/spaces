@@ -635,6 +635,28 @@ const MIGRATION_V21 = `
 ALTER TABLE content_items ADD COLUMN media_items TEXT NOT NULL DEFAULT '[]';
 `;
 
+/**
+ * v22 — durable dispatch for messages written on the shared web workspace.
+ *
+ * The portal is the shared message store; agent runtimes still execute on a
+ * paired desktop. A durable receipt prevents a fifteen-second sync from
+ * starting the same agent twice while also making web-authored messages real
+ * work instead of passive transcript rows.
+ */
+const MIGRATION_V22 = `
+CREATE TABLE IF NOT EXISTS portal_message_dispatches (
+  message_id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  dispatched_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_portal_message_dispatch_status
+  ON portal_message_dispatches (status, created_at);
+`;
+
 async function importLegacyHqData(db: Database): Promise<void> {
   const legacyPath = await invoke<string | null>("legacy_hq_database_path");
   if (!legacyPath) return;
@@ -1059,6 +1081,10 @@ export async function getDb(): Promise<Database> {
       if (at < 21) {
         await applyStatements(db, MIGRATION_V21, true);
         await db.execute("PRAGMA user_version = 21");
+      }
+      if (at < 22) {
+        await applyStatements(db, MIGRATION_V22, true);
+        await db.execute("PRAGMA user_version = 22");
       }
       return db;
     })().catch((e) => {
