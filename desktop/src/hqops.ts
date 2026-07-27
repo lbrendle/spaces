@@ -48,6 +48,7 @@ import {
   stableKnowledgeIdentities,
   stableKnowledgeIdentity,
 } from "./knowledgeRefs";
+import { worktreePath } from "./workspaces";
 import type { EntityRef, EntityType, LinkKind, AssignRole, TaskStatus, MemoryKind } from "./types";
 
 /**
@@ -914,7 +915,8 @@ export const OPERATIONS: Operation[] = [
       }
       const projectId = projectOf(args, ctx);
       if (mediaPath && !mediaUrl) {
-        const project = useStore.getState().projects.find((row) => row.id === projectId);
+        const state = useStore.getState();
+        const project = state.projects.find((row) => row.id === projectId);
         if (!project?.local_path) {
           return {
             ok: false,
@@ -922,19 +924,38 @@ export const OPERATIONS: Operation[] = [
               "media_path needs a project with a local folder. Link the project folder in Spaces or provide media_url.",
           };
         }
-        const absolute =
+        const agent = state.agents.find((row) => row.id === ctx.agentId);
+        const allowedRoots = [
+          ...(project.isolate && agent ? [worktreePath(project, agent)] : []),
+          project.local_path,
+        ];
+        const isAbsolute =
           mediaPath.startsWith("/") ||
           /^[a-zA-Z]:[\\/]/.test(mediaPath) ||
-          mediaPath.startsWith("\\\\")
+          mediaPath.startsWith("\\\\");
+        const normalizePath = (value: string) =>
+          value.replace(/\\/g, "/").replace(/\/+$/, "");
+        const normalizedMedia = normalizePath(mediaPath);
+        const allowedRoot = isAbsolute
+          ? allowedRoots.find((root) => {
+              const normalizedRoot = normalizePath(root);
+              return (
+                normalizedMedia === normalizedRoot ||
+                normalizedMedia.startsWith(`${normalizedRoot}/`)
+              );
+            }) ?? project.local_path
+          : allowedRoots[0];
+        const absolute =
+          isAbsolute
             ? mediaPath
-            : `${project.local_path.replace(/[\\/]$/, "")}${
-                project.local_path.includes("\\") ? "\\" : "/"
+            : `${allowedRoot.replace(/[\\/]$/, "")}${
+                allowedRoot.includes("\\") ? "\\" : "/"
               }${mediaPath}`;
         try {
           mediaUrl = await uploadContentMedia(
             absolute,
             projectId,
-            project.local_path,
+            allowedRoot,
           );
         } catch (error) {
           return {
