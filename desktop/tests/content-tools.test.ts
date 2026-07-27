@@ -23,5 +23,14 @@ test("agents receive the complete shared Content Studio lifecycle", async () => 
   assert.match(operations, /resolvedContentMedia/);
   assert.match(sync, /contentItemRecords/);
   assert.match(sync, /entity = 'content_item'/);
+  assert.match(
+    sync,
+    /ON CONFLICT\(entity, remote_id\) DO UPDATE SET\s+local_id=excluded\.local_id/,
+  );
+  assert.match(sync, /DELETE FROM content_items WHERE id = \$1/);
+  assert.match(
+    sync,
+    /item\.sourceDeviceId === connection\.device_id && item\.sourceContentId/,
+  );
   assert.match(sync, /new CustomEvent\("hq:content-change"\)/);
 });

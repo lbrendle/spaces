@@ -929,6 +929,40 @@ export async function applySharedPortalResponse(
 ): Promise<void> {
   const db = await getDb();
   for (const ack of acks) {
+    if (ack.entity === "content_item") {
+      const prior = await db.select<Array<{ local_id: string }>>(
+        `SELECT local_id
+           FROM portal_links
+          WHERE entity = 'content_item' AND remote_id = $1
+          LIMIT 1`,
+        [ack.remoteId],
+      );
+      const priorLocalId = prior[0]?.local_id ?? "";
+      if (priorLocalId && priorLocalId !== ack.sourceId) {
+        const mirrored = await db.select<Array<{ remote_id: string }>>(
+          `SELECT remote_id
+             FROM portal_sync_state
+            WHERE entity = 'content_item' AND local_id = $1
+            LIMIT 1`,
+          [priorLocalId],
+        );
+        if (mirrored[0]?.remote_id === ack.remoteId) {
+          await db.execute("DELETE FROM content_items WHERE id = $1", [priorLocalId]);
+          await db.execute(
+            `DELETE FROM portal_sync_state
+              WHERE entity = 'content_item' AND local_id = $1`,
+            [priorLocalId],
+          );
+        }
+      }
+      await db.execute(
+        `INSERT INTO portal_links (entity, remote_id, local_id)
+         VALUES ('content_item',$1,$2)
+         ON CONFLICT(entity, remote_id) DO UPDATE SET
+           local_id=excluded.local_id`,
+        [ack.remoteId, ack.sourceId],
+      );
+    }
     await db.execute(
       `INSERT INTO portal_sync_state
         (entity, local_id, remote_id, fingerprint, synced_at)
@@ -1152,7 +1186,51 @@ export async function applySharedPortalResponse(
   }
 
   for (const item of contentItems) {
-    const contentId = await resolveMirror("content_item", item.id);
+    let contentId = "";
+    if (item.sourceDeviceId === connection.device_id && item.sourceContentId) {
+      const source = await db.select<Array<{ id: string }>>(
+        "SELECT id FROM content_items WHERE id = $1 LIMIT 1",
+        [item.sourceContentId],
+      );
+      if (source[0]) {
+        contentId = source[0].id;
+        const prior = await db.select<Array<{ local_id: string }>>(
+          `SELECT local_id
+             FROM portal_links
+            WHERE entity = 'content_item' AND remote_id = $1
+            LIMIT 1`,
+          [item.id],
+        );
+        const priorLocalId = prior[0]?.local_id ?? "";
+        if (priorLocalId && priorLocalId !== contentId) {
+          const mirrored = await db.select<Array<{ remote_id: string }>>(
+            `SELECT remote_id
+               FROM portal_sync_state
+              WHERE entity = 'content_item' AND local_id = $1
+              LIMIT 1`,
+            [priorLocalId],
+          );
+          if (mirrored[0]?.remote_id === item.id) {
+            await db.execute("DELETE FROM content_items WHERE id = $1", [priorLocalId]);
+            await db.execute(
+              `DELETE FROM portal_sync_state
+                WHERE entity = 'content_item' AND local_id = $1`,
+              [priorLocalId],
+            );
+          }
+        }
+        await db.execute(
+          `INSERT INTO portal_links (entity, remote_id, local_id)
+           VALUES ('content_item',$1,$2)
+           ON CONFLICT(entity, remote_id) DO UPDATE SET
+             local_id=excluded.local_id`,
+          [item.id, contentId],
+        );
+      }
+    }
+    if (!contentId) {
+      contentId = (await resolveMirror("content_item", item.id)) ?? "";
+    }
     if (!contentId) continue;
     const project = item.projectId
       ? await db.select<Array<{ local_id: string }>>(
