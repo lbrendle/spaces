@@ -109,6 +109,28 @@ fn current_platform() -> String {
     platform_label(std::env::consts::OS, std::env::consts::ARCH)
 }
 
+/// Locate the pre-Spaces HQ database, if this computer has one.
+///
+/// Spaces intentionally has its own bundle identifier, but that also moved its
+/// app-data directory. Existing users must not look as though their projects,
+/// paths and vault disappeared after installing the public build. The database
+/// layer attaches this file and merges rows by identity; it never replaces
+/// either database.
+#[tauri::command]
+fn legacy_hq_database_path(app: AppHandle) -> Result<Option<String>, String> {
+    let current = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("could not resolve app data directory: {error}"))?;
+    let Some(parent) = current.parent() else {
+        return Ok(None);
+    };
+    let legacy = parent.join("com.lauren.hq").join("hq.db");
+    Ok(legacy
+        .is_file()
+        .then(|| legacy.to_string_lossy().to_string()))
+}
+
 #[tauri::command]
 fn agent_control_root(app: AppHandle, project_id: String) -> Result<String, String> {
     if project_id.is_empty()
@@ -1594,6 +1616,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             current_platform,
+            legacy_hq_database_path,
             agent_control_root,
             run_gh,
             run_gh_in,

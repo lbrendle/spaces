@@ -39,6 +39,8 @@ import { RunDiff } from "./RunDiff";
 import "./chat.css";
 import { currentDeviceId } from "../deviceIdentity";
 import { config } from "../config";
+import { open } from "@tauri-apps/plugin-dialog";
+import { GitHubRepoPicker } from "./GitHubRepoPicker";
 
 /**
  * The four dispatch strategies orchestrator.ts implements, in the order they
@@ -1744,11 +1746,27 @@ function ProjectSettingsModal({ projectId, onClose }: { projectId: string; onClo
       </label>
       <label className="field">
         <span className="field-label">GitHub repo (owner/name)</span>
-        <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" />
+        <GitHubRepoPicker value={repo} onChange={setRepo} />
       </label>
       <label className="field">
         <span className="field-label">Local checkout (agents work here)</span>
-        <input value={localPath} onChange={(e) => setLocalPath(e.target.value)} placeholder={config().samplePath} />
+        <div className="row">
+          <input
+            value={localPath}
+            onChange={(e) => setLocalPath(e.target.value)}
+            placeholder={config().samplePath}
+          />
+          <button
+            className="btn"
+            type="button"
+            onClick={async () => {
+              const picked = await open({ directory: true });
+              if (typeof picked === "string") setLocalPath(picked);
+            }}
+          >
+            Browse…
+          </button>
+        </div>
       </label>
       <div className="modal-actions space-between">
         <button

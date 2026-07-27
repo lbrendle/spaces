@@ -249,11 +249,19 @@ async function deliverCalendarCommands(connection: PortalConnection): Promise<vo
   }
 }
 
-type MirroredEntity = "project" | "channel" | "agent" | "team";
+type MirroredEntity =
+  | "project"
+  | "channel"
+  | "message"
+  | "task"
+  | "agent"
+  | "team";
 
 const MIRROR_TABLE: Record<MirroredEntity, string> = {
   project: "projects",
   channel: "channels",
+  message: "messages",
+  task: "tasks",
   agent: "agents",
   team: "teams",
 };
@@ -339,21 +347,132 @@ export async function syncPortal(): Promise<PortalConnection | null> {
   const thisDevice = currentDeviceId() || connection.device_id;
   const self = state.self();
   const localDb = await getDb();
-  const projectProfiles = await Promise.all(
-    state.projects.map(async (project) => {
-      const links = await localDb.select<{ remote_id: string }[]>(
-        "SELECT remote_id FROM portal_links WHERE entity = 'project' AND local_id = $1 LIMIT 1",
-        [project.id]
-      );
-      return {
-        id: project.id,
-        portalId: links[0]?.remote_id ?? "",
-        name: project.name,
-        summary: project.description,
-        status: "active",
-      };
-    })
+  const mirrorRows = await localDb.select<
+    Array<{ entity: string; remote_id: string; local_id: string }>
+  >(
+    `SELECT entity, remote_id, local_id
+       FROM portal_links
+      WHERE entity IN ('project','channel','message','task','agent')`,
   );
+  const remoteByLocal = new Map(
+    mirrorRows.map((row) => [`${row.entity}:${row.local_id}`, row.remote_id]),
+  );
+  const remoteId = (entity: string, localId: string) =>
+    remoteByLocal.get(`${entity}:${localId}`) ?? "";
+  const portalUserByMember = new Map(
+    state.members.map((member) => [member.id, member.portal_user_id]),
+  );
+  const projectProfiles = state.projects.map((project) => ({
+    id: project.id,
+    portalId: remoteId("project", project.id),
+    name: project.name,
+    summary: project.description,
+    repo: project.repo,
+    status: "active",
+  }));
+  const projectIds = new Set(state.projects.map((project) => project.id));
+  const channelProfiles = state.channels
+    .filter((channel) => projectIds.has(channel.project_id))
+    .map((channel) => ({
+      id: channel.id,
+      portalId: remoteId("channel", channel.id),
+      projectId: channel.project_id,
+      projectPortalId: remoteId("project", channel.project_id),
+      name: channel.name,
+      topic: channel.topic,
+      mode: channel.mode,
+      leadAgentId: channel.lead_agent_id,
+      createdAt: channel.created_at,
+    }));
+  const localMessages = await localDb.select<
+    Array<{
+      id: string;
+      channel_id: string;
+      author_type: "user" | "agent" | "system";
+      author_id: string;
+      author_name: string;
+      content: string;
+      status: "running" | "done" | "error";
+      meta: string;
+      parent_id: string;
+      run_id: string;
+      created_at: number;
+    }>
+  >(
+    `SELECT * FROM (
+       SELECT id, channel_id, author_type, author_id, author_name, content,
+              status, meta, parent_id, run_id, created_at
+         FROM messages
+        ORDER BY created_at DESC, id DESC
+        LIMIT 2000
+     ) ORDER BY created_at, id`,
+  );
+  let messageBudget = 460_000;
+  const messageProfiles: Array<Record<string, unknown>> = [];
+  for (const message of localMessages) {
+    const channel = state.channels.find(
+      (candidate) => candidate.id === message.channel_id,
+    );
+    if (!channel || !projectIds.has(channel.project_id)) continue;
+    const profile = {
+      id: message.id,
+      portalId: remoteId("message", message.id),
+      channelId: message.channel_id,
+      channelPortalId: remoteId("channel", message.channel_id),
+      authorType: message.author_type,
+      authorId: message.author_id,
+      authorPortalId:
+        message.author_type === "agent"
+          ? remoteId("agent", message.author_id)
+          : message.author_type === "user"
+            ? portalUserByMember.get(message.author_id) ?? self.portal_user_id
+            : "",
+      authorName: message.author_name,
+      content: message.content,
+      status: message.status,
+      meta: message.meta,
+      parentId: message.parent_id,
+      parentPortalId: remoteId("message", message.parent_id),
+      runId: message.run_id,
+      createdAt: message.created_at,
+    };
+    const size = JSON.stringify(profile).length;
+    if (size > messageBudget) continue;
+    messageBudget -= size;
+    messageProfiles.push(profile);
+  }
+  const taskProfiles = state.tasks
+    .filter((task) => projectIds.has(task.project_id))
+    .map((task) => ({
+      id: task.id,
+      portalId: remoteId("task", task.id),
+      projectId: task.project_id,
+      projectPortalId: remoteId("project", task.project_id),
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      assigneeAgentId: task.assignee_agent_id,
+      assigneePortalId: remoteId("agent", task.assignee_agent_id),
+      dueDate: task.due_date,
+      sortOrder: task.sort_order,
+      createdAt: task.created_at,
+    }));
+  const liveIds = new Map<string, Set<string>>([
+    ["project", new Set(state.projects.map((project) => project.id))],
+    ["channel", new Set(state.channels.map((channel) => channel.id))],
+    ["task", new Set(state.tasks.map((task) => task.id))],
+  ]);
+  const deleteRequests = mirrorRows
+    .filter(
+      (row) =>
+        liveIds.has(row.entity) &&
+        !liveIds.get(row.entity)!.has(row.local_id),
+    )
+    .map((row) => ({
+      entity: row.entity,
+      remoteId: row.remote_id,
+      localId: row.local_id,
+    }));
   const sharedPayload = await buildSharedPortalPayload(connection);
   const memberProfiles = await localDb.select<
     Array<{
@@ -370,6 +489,10 @@ export async function syncPortal(): Promise<PortalConnection | null> {
   const payload = {
     projects: state.projects.length,
     projectProfiles,
+    channelProfiles,
+    messageProfiles,
+    taskProfiles,
+    deleteRequests,
     openTasks: state.tasks.filter((task) => task.status !== "done").length,
     activeRuns,
     platform: await currentPlatform(),
@@ -452,8 +575,44 @@ export async function syncPortal(): Promise<PortalConnection | null> {
         id: string;
         name: string;
         summary: string;
+        repo: string;
         status: string;
         sourceProjectId: string;
+      }>;
+      channels?: Array<{
+        id: string;
+        projectId: string;
+        name: string;
+        topic: string;
+        mode: "broadcast" | "sequential" | "lead" | "panel";
+        leadAgentId: string | null;
+        sourceChannelId: string;
+        createdAt: string;
+      }>;
+      messages?: Array<{
+        id: string;
+        channelId: string;
+        authorType: "user" | "agent" | "system";
+        authorId: string;
+        authorName: string;
+        body: string;
+        parentId: string;
+        status: "running" | "done" | "error";
+        meta: string;
+        runId: string;
+        sourceMessageId: string;
+        createdAt: string;
+      }>;
+      issues?: Array<{
+        id: string;
+        projectId: string;
+        title: string;
+        description: string;
+        status: "backlog" | "ready" | "in_progress" | "review" | "done";
+        assigneeId: string | null;
+        dueDate: string | null;
+        sourceTaskId: string;
+        createdAt: string;
       }>;
       agents?: Array<{
         id: string;
@@ -488,6 +647,11 @@ export async function syncPortal(): Promise<PortalConnection | null> {
         portalUserId: string;
         changedAt: number;
       }>;
+      deleteAcks?: Array<{
+        entity: "project" | "channel" | "task";
+        remoteId: string;
+        localId: string;
+      }>;
       error?: string;
     };
     if (!response.ok || !body.ok) {
@@ -500,6 +664,13 @@ export async function syncPortal(): Promise<PortalConnection | null> {
         `DELETE FROM portal_member_outbox
           WHERE portal_user_id = $1 AND changed_at <= $2`,
         [ack.portalUserId, ack.changedAt]
+      );
+    }
+    for (const ack of body.deleteAcks ?? []) {
+      await db.execute(
+        `DELETE FROM portal_links
+          WHERE entity = $1 AND remote_id = $2 AND local_id = $3`,
+        [ack.entity, ack.remoteId, ack.localId],
       );
     }
     const memberIds = await syncPortalPeople(
@@ -533,13 +704,18 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       await db.execute(
         `INSERT INTO projects
          (id, name, description, repo, local_path, isolate, instructions, created_at)
-         VALUES ($1,$2,$3,'','',0,'',$4)
+         VALUES ($1,$2,$3,$4,'',0,'',$5)
          ON CONFLICT(id) DO UPDATE SET
            name=excluded.name,
-           description=excluded.description`,
-        [project.localId, remote.name, remote.summary, now()]
+           description=excluded.description,
+           repo=CASE
+             WHEN trim(projects.repo) = '' THEN excluded.repo
+             ELSE projects.repo
+           END`,
+        [project.localId, remote.name, remote.summary, remote.repo ?? "", now()]
       );
 
+      if (body.channels !== undefined) continue;
       const channel = await resolveLocal("channel", `${remote.id}-general`, async () => {
         const rows = await db.select<{ id: string }[]>(
           `SELECT id FROM channels WHERE project_id = $1 AND name = 'general'
@@ -557,6 +733,69 @@ export async function syncPortal(): Promise<PortalConnection | null> {
          VALUES ($1,$2,'general',$3,1,'','lead','',$4)
          ON CONFLICT(id) DO NOTHING`,
         [channel.localId, project.localId, `Shared channel for ${remote.name}`, now()]
+      );
+    }
+    for (const remote of body.channels ?? []) {
+      const projectLink = await db.select<{ local_id: string }[]>(
+        "SELECT local_id FROM portal_links WHERE entity = 'project' AND remote_id = $1 LIMIT 1",
+        [remote.projectId],
+      );
+      const projectId = projectLink[0]?.local_id;
+      if (!projectId) continue;
+      const channel = await resolveLocal("channel", remote.id, async () => {
+        if (remote.sourceChannelId) {
+          const source = await db.select<{ id: string }[]>(
+            "SELECT id FROM channels WHERE id = $1 AND project_id = $2 LIMIT 1",
+            [remote.sourceChannelId, projectId],
+          );
+          if (source[0]) return source[0].id;
+        }
+        const rows = await db.select<{ id: string }[]>(
+          `SELECT id FROM channels
+            WHERE project_id = $1 AND lower(trim(name)) = lower(trim($2))
+            ORDER BY (id LIKE 'portal-%') ASC, created_at ASC LIMIT 1`,
+          [projectId, remote.name],
+        );
+        return rows[0]?.id ?? null;
+      });
+      if (!channel) continue;
+      const leadLink = remote.leadAgentId
+        ? await db.select<{ local_id: string }[]>(
+            "SELECT local_id FROM portal_links WHERE entity = 'agent' AND remote_id = $1 LIMIT 1",
+            [remote.leadAgentId],
+          )
+        : [];
+      const createdAt = Date.parse(remote.createdAt);
+      await db.execute(
+        `INSERT INTO channels
+          (id, project_id, name, topic, chaining, charter, mode,
+           lead_agent_id, created_at)
+         VALUES ($1,$2,$3,$4,1,'',$5,$6,$7)
+         ON CONFLICT(id) DO UPDATE SET
+           project_id=excluded.project_id,
+           name=excluded.name,
+           topic=excluded.topic,
+           mode=excluded.mode,
+           lead_agent_id=CASE
+             WHEN excluded.lead_agent_id = '' THEN channels.lead_agent_id
+             ELSE excluded.lead_agent_id
+           END`,
+        [
+          channel.localId,
+          projectId,
+          remote.name,
+          remote.topic,
+          remote.mode,
+          leadLink[0]?.local_id ?? "",
+          Number.isFinite(createdAt) ? createdAt : now(),
+        ],
+      );
+      // Retire the synthetic `<project>-general` mapping created by older
+      // builds once the real shared channel has an authoritative portal id.
+      await db.execute(
+        `DELETE FROM portal_links
+          WHERE entity = 'channel' AND local_id = $1 AND remote_id != $2`,
+        [channel.localId, remote.id],
       );
     }
     for (const remote of body.agents ?? []) {
@@ -629,6 +868,133 @@ export async function syncPortal(): Promise<PortalConnection | null> {
           remote.visibility,
           now(),
         ]
+      );
+    }
+    const resolvedMessages = new Map<string, ResolvedLocal>();
+    for (const remote of body.messages ?? []) {
+      const message = await resolveLocal("message", remote.id, async () => {
+        if (remote.sourceMessageId) {
+          const source = await db.select<{ id: string }[]>(
+            "SELECT id FROM messages WHERE id = $1 LIMIT 1",
+            [remote.sourceMessageId],
+          );
+          if (source[0]) return source[0].id;
+        }
+        return null;
+      });
+      if (message) resolvedMessages.set(remote.id, message);
+    }
+    for (const remote of body.messages ?? []) {
+      const message = resolvedMessages.get(remote.id);
+      if (!message) continue;
+      const channelLink = await db.select<{ local_id: string }[]>(
+        "SELECT local_id FROM portal_links WHERE entity = 'channel' AND remote_id = $1 LIMIT 1",
+        [remote.channelId],
+      );
+      const channelId = channelLink[0]?.local_id;
+      if (!channelId) continue;
+      let authorId = "";
+      if (remote.authorType === "user") {
+        authorId = memberIds.get(remote.authorId) ?? self.id;
+      } else if (remote.authorType === "agent") {
+        const authorLink = await db.select<{ local_id: string }[]>(
+          "SELECT local_id FROM portal_links WHERE entity = 'agent' AND remote_id = $1 LIMIT 1",
+          [remote.authorId],
+        );
+        authorId = authorLink[0]?.local_id ?? remote.authorId;
+      } else {
+        authorId = remote.authorId;
+      }
+      const parentLink = remote.parentId
+        ? await db.select<{ local_id: string }[]>(
+            "SELECT local_id FROM portal_links WHERE entity = 'message' AND remote_id = $1 LIMIT 1",
+            [remote.parentId],
+          )
+        : [];
+      const createdAt = Date.parse(remote.createdAt);
+      await db.execute(
+        `INSERT INTO messages
+          (id, channel_id, author_type, author_id, author_name, content,
+           status, meta, parent_id, run_id, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT(id) DO UPDATE SET
+           channel_id=excluded.channel_id,
+           author_type=excluded.author_type,
+           author_id=excluded.author_id,
+           author_name=excluded.author_name,
+           content=excluded.content,
+           status=excluded.status,
+           meta=excluded.meta,
+           parent_id=excluded.parent_id,
+           run_id=excluded.run_id`,
+        [
+          message.localId,
+          channelId,
+          remote.authorType,
+          authorId,
+          remote.authorName,
+          remote.body,
+          remote.status,
+          remote.meta,
+          parentLink[0]?.local_id ?? "",
+          remote.runId,
+          Number.isFinite(createdAt) ? createdAt : now(),
+        ],
+      );
+    }
+    for (const remote of body.issues ?? []) {
+      const projectLink = await db.select<{ local_id: string }[]>(
+        "SELECT local_id FROM portal_links WHERE entity = 'project' AND remote_id = $1 LIMIT 1",
+        [remote.projectId],
+      );
+      const projectId = projectLink[0]?.local_id;
+      if (!projectId) continue;
+      const task = await resolveLocal("task", remote.id, async () => {
+        if (remote.sourceTaskId) {
+          const source = await db.select<{ id: string }[]>(
+            "SELECT id FROM tasks WHERE id = $1 AND project_id = $2 LIMIT 1",
+            [remote.sourceTaskId, projectId],
+          );
+          if (source[0]) return source[0].id;
+        }
+        return null;
+      });
+      if (!task) continue;
+      const assigneeLink = remote.assigneeId
+        ? await db.select<{ local_id: string }[]>(
+            "SELECT local_id FROM portal_links WHERE entity = 'agent' AND remote_id = $1 LIMIT 1",
+            [remote.assigneeId],
+          )
+        : [];
+      const status =
+        remote.status === "ready"
+          ? "todo"
+          : remote.status === "in_progress" || remote.status === "review"
+            ? "doing"
+            : remote.status;
+      const createdAt = Date.parse(remote.createdAt);
+      await db.execute(
+        `INSERT INTO tasks
+          (id, project_id, title, description, status, assignee_agent_id,
+           due_date, sort_order, branch, last_run_id, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,0,'','',$8)
+         ON CONFLICT(id) DO UPDATE SET
+           project_id=excluded.project_id,
+           title=excluded.title,
+           description=excluded.description,
+           status=excluded.status,
+           assignee_agent_id=excluded.assignee_agent_id,
+           due_date=excluded.due_date`,
+        [
+          task.localId,
+          projectId,
+          remote.title,
+          remote.description,
+          status,
+          assigneeLink[0]?.local_id ?? "",
+          remote.dueDate ?? "",
+          Number.isFinite(createdAt) ? createdAt : now(),
+        ],
       );
     }
     for (const remote of body.teams ?? []) {
@@ -771,6 +1137,14 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       [Number.isFinite(syncedAt) ? syncedAt : now()]
     );
     await useStore.getState().refreshAll();
+    const activeView = useStore.getState().view;
+    const activeChannelId =
+      activeView.type === "workspace" || activeView.type === "channel"
+        ? activeView.channelId
+        : undefined;
+    if (activeChannelId) {
+      await useStore.getState().loadMessages(activeChannelId);
+    }
   } catch (reason) {
     const message = reason instanceof Error ? reason.message : String(reason);
     const db = await getDb();

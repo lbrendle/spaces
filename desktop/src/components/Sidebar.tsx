@@ -15,11 +15,11 @@ import {
 import { Modal, Field, Spinner } from "./ui";
 import { AccountMenu } from "./AccountMenu";
 import { open } from "@tauri-apps/plugin-dialog";
-import { repoNames } from "../github";
 import { git, ghIn, isGitRepo } from "../workspaces";
 import { slug } from "../types";
 import "./newproject.css";
 import { config } from "../config";
+import { GitHubRepoPicker } from "./GitHubRepoPicker";
 
 export function Sidebar() {
   const store = useStore();
@@ -457,7 +457,6 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [repo, setRepo] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [isolate, setIsolate] = useState(false);
-  const [repos, setRepos] = useState<string[]>([]);
   const [probe, setProbe] = useState<GitProbe>({ kind: "idle" });
   const [initGit, setInitGit] = useState(true);
   const [createGh, setCreateGh] = useState(false);
@@ -465,10 +464,6 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [ghUrl, setGhUrl] = useState("");
-
-  useEffect(() => {
-    repoNames().then(setRepos).catch(() => {});
-  }, []);
 
   const dir = localPath.trim();
 
@@ -637,15 +632,7 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
         <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this project?" />
       </Field>
       <Field label="GitHub repo (optional)">
-        <input
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="owner/name"
-          list="repo-list"
-        />
-        <datalist id="repo-list">
-          {repos.map((r) => <option key={r} value={r} />)}
-        </datalist>
+        <GitHubRepoPicker value={repo} onChange={setRepo} />
       </Field>
       <Field label="Local checkout (agents work here)">
         <div className="row">

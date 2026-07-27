@@ -54,6 +54,29 @@
   word-break: break-all;
 }
 
+.np-repo-select {
+  margin-top: var(--space-2);
+}
+
+.np-repo-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.np-repo-state.bad {
+  color: var(--red);
+}
+
+.np-repo-state .spinner {
+  width: 11px;
+  height: 11px;
+}
+
 /* "this folder isn't a git repository" */
 .banner.warn.np-setup {
   padding: var(--space-3) var(--space-4);

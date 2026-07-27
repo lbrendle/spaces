@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 
 let dbPromise: Promise<Database> | null = null;
 
@@ -613,6 +614,336 @@ CREATE INDEX idx_integration_accounts_provider
   ON integration_accounts (category, provider, status);
 `;
 
+/**
+ * v20 — record the first public Spaces build's legacy-data merge.
+ *
+ * The old desktop used bundle id `com.lauren.hq`; Spaces uses
+ * `app.spaces.desktop`, so macOS correctly gave it a different app-data
+ * directory. That must not read as data loss. The data merge below uses
+ * temporary identity maps so a project deliberately deleted from the shared
+ * portal is not resurrected.
+ */
+const MIGRATION_V20 = `
+CREATE TABLE IF NOT EXISTS legacy_imports (
+  source TEXT PRIMARY KEY,
+  imported_at INTEGER NOT NULL
+);
+`;
+
+async function importLegacyHqData(db: Database): Promise<void> {
+  const legacyPath = await invoke<string | null>("legacy_hq_database_path");
+  if (!legacyPath) return;
+
+  await db.execute("ATTACH DATABASE $1 AS legacy", [legacyPath]);
+  try {
+    const imported = await db.select<Array<{ source: string }>>(
+      "SELECT source FROM legacy_imports WHERE source = 'com.lauren.hq/hq.db' LIMIT 1",
+    );
+    if (imported.length) return;
+
+    await db.execute("BEGIN IMMEDIATE");
+    try {
+      await db.execute("DROP TABLE IF EXISTS temp.legacy_project_map");
+      await db.execute(
+        `CREATE TEMP TABLE legacy_project_map (
+           old_id TEXT PRIMARY KEY,
+           new_id TEXT NOT NULL
+         )`,
+      );
+      await db.execute(
+        `INSERT INTO legacy_project_map (old_id, new_id)
+         SELECT legacy_project.id,
+                (
+                  SELECT current_project.id
+                    FROM projects current_project
+                   WHERE lower(trim(current_project.name)) =
+                         lower(trim(legacy_project.name))
+                   ORDER BY current_project.created_at
+                   LIMIT 1
+                )
+           FROM legacy.projects legacy_project
+          WHERE EXISTS (
+                SELECT 1
+                  FROM projects current_project
+                 WHERE lower(trim(current_project.name)) =
+                       lower(trim(legacy_project.name))
+              )`,
+      );
+
+      // Restore device-local project facts onto the shared project identities.
+      // A missing shared project gets no map and therefore stays deleted.
+      await db.execute(
+        `UPDATE projects
+            SET repo = CASE
+                  WHEN trim(repo) != '' THEN repo
+                  ELSE COALESCE((
+                    SELECT legacy_project.repo
+                      FROM legacy.projects legacy_project
+                      JOIN legacy_project_map map
+                        ON map.old_id = legacy_project.id
+                     WHERE map.new_id = projects.id
+                       AND trim(legacy_project.repo) != ''
+                     ORDER BY legacy_project.created_at DESC
+                     LIMIT 1
+                  ), '')
+                END,
+                local_path = CASE
+                  WHEN trim(local_path) != '' THEN local_path
+                  ELSE COALESCE((
+                    SELECT legacy_project.local_path
+                      FROM legacy.projects legacy_project
+                      JOIN legacy_project_map map
+                        ON map.old_id = legacy_project.id
+                     WHERE map.new_id = projects.id
+                       AND trim(legacy_project.local_path) != ''
+                     ORDER BY legacy_project.created_at DESC
+                     LIMIT 1
+                  ), '')
+                END,
+                isolate = CASE
+                  WHEN isolate != 0 THEN isolate
+                  ELSE COALESCE((
+                    SELECT legacy_project.isolate
+                      FROM legacy.projects legacy_project
+                      JOIN legacy_project_map map
+                        ON map.old_id = legacy_project.id
+                     WHERE map.new_id = projects.id
+                     ORDER BY (trim(legacy_project.local_path) != '') DESC,
+                              legacy_project.created_at DESC
+                     LIMIT 1
+                  ), 0)
+                END,
+                instructions = CASE
+                  WHEN trim(instructions) != '' THEN instructions
+                  ELSE COALESCE((
+                    SELECT legacy_project.instructions
+                      FROM legacy.projects legacy_project
+                      JOIN legacy_project_map map
+                        ON map.old_id = legacy_project.id
+                     WHERE map.new_id = projects.id
+                       AND trim(legacy_project.instructions) != ''
+                     ORDER BY legacy_project.created_at DESC
+                     LIMIT 1
+                  ), '')
+                END
+          WHERE id IN (SELECT new_id FROM legacy_project_map)`,
+      );
+
+      await db.execute("DROP TABLE IF EXISTS temp.legacy_channel_map");
+      await db.execute(
+        `CREATE TEMP TABLE legacy_channel_map (
+           old_id TEXT PRIMARY KEY,
+           new_id TEXT NOT NULL
+         )`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO channels
+          (id, project_id, name, topic, chaining, charter, mode,
+           lead_agent_id, created_at)
+         SELECT legacy_channel.id, project_map.new_id, legacy_channel.name,
+                legacy_channel.topic, legacy_channel.chaining,
+                legacy_channel.charter, legacy_channel.mode,
+                legacy_channel.lead_agent_id, legacy_channel.created_at
+           FROM legacy.channels legacy_channel
+           JOIN legacy_project_map project_map
+             ON project_map.old_id = legacy_channel.project_id
+          WHERE NOT EXISTS (
+                SELECT 1
+                  FROM channels current_channel
+                 WHERE current_channel.project_id = project_map.new_id
+                   AND lower(trim(current_channel.name)) =
+                       lower(trim(legacy_channel.name))
+              )`,
+      );
+      await db.execute(
+        `INSERT INTO legacy_channel_map (old_id, new_id)
+         SELECT legacy_channel.id,
+                (
+                  SELECT current_channel.id
+                    FROM channels current_channel
+                   WHERE current_channel.project_id = project_map.new_id
+                     AND lower(trim(current_channel.name)) =
+                         lower(trim(legacy_channel.name))
+                   ORDER BY current_channel.created_at
+                   LIMIT 1
+                )
+           FROM legacy.channels legacy_channel
+           JOIN legacy_project_map project_map
+             ON project_map.old_id = legacy_channel.project_id
+          WHERE EXISTS (
+                SELECT 1
+                  FROM channels current_channel
+                 WHERE current_channel.project_id = project_map.new_id
+                   AND lower(trim(current_channel.name)) =
+                       lower(trim(legacy_channel.name))
+              )`,
+      );
+      await db.execute(
+        `UPDATE channels
+            SET topic = CASE
+                  WHEN trim(topic) != '' AND topic NOT LIKE 'Shared channel for %'
+                    THEN topic
+                  ELSE COALESCE((
+                    SELECT legacy_channel.topic
+                      FROM legacy.channels legacy_channel
+                      JOIN legacy_channel_map map ON map.old_id = legacy_channel.id
+                     WHERE map.new_id = channels.id
+                       AND trim(legacy_channel.topic) != ''
+                     ORDER BY legacy_channel.created_at DESC
+                     LIMIT 1
+                  ), topic)
+                END,
+                charter = CASE
+                  WHEN trim(charter) != '' THEN charter
+                  ELSE COALESCE((
+                    SELECT legacy_channel.charter
+                      FROM legacy.channels legacy_channel
+                      JOIN legacy_channel_map map ON map.old_id = legacy_channel.id
+                     WHERE map.new_id = channels.id
+                       AND trim(legacy_channel.charter) != ''
+                     ORDER BY legacy_channel.created_at DESC
+                     LIMIT 1
+                  ), '')
+                END,
+                mode = COALESCE((
+                  SELECT legacy_channel.mode
+                    FROM legacy.channels legacy_channel
+                    JOIN legacy_channel_map map ON map.old_id = legacy_channel.id
+                   WHERE map.new_id = channels.id
+                   ORDER BY legacy_channel.created_at DESC
+                   LIMIT 1
+                ), mode)
+          WHERE id IN (SELECT new_id FROM legacy_channel_map)`,
+      );
+
+      await db.execute(
+        `INSERT OR IGNORE INTO messages
+          (id, channel_id, author_type, author_id, author_name, content,
+           status, meta, parent_id, run_id, created_at)
+         SELECT legacy_message.id, channel_map.new_id,
+                legacy_message.author_type, legacy_message.author_id,
+                legacy_message.author_name, legacy_message.content,
+                legacy_message.status, legacy_message.meta,
+                legacy_message.parent_id, legacy_message.run_id,
+                legacy_message.created_at
+           FROM legacy.messages legacy_message
+           JOIN legacy_channel_map channel_map
+             ON channel_map.old_id = legacy_message.channel_id`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO message_reactions
+          (id, message_id, emoji, actor_id, actor_name, created_at)
+         SELECT reaction.id, reaction.message_id, reaction.emoji,
+                reaction.actor_id, reaction.actor_name, reaction.created_at
+           FROM legacy.message_reactions reaction
+          WHERE EXISTS (
+                SELECT 1 FROM messages WHERE messages.id = reaction.message_id
+              )`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO tasks
+          (id, project_id, title, description, status, assignee_agent_id,
+           due_date, sort_order, last_run_id, branch, created_at)
+         SELECT legacy_task.id, project_map.new_id, legacy_task.title,
+                legacy_task.description, legacy_task.status,
+                legacy_task.assignee_agent_id, legacy_task.due_date,
+                legacy_task.sort_order, legacy_task.last_run_id,
+                legacy_task.branch, legacy_task.created_at
+           FROM legacy.tasks legacy_task
+           JOIN legacy_project_map project_map
+             ON project_map.old_id = legacy_task.project_id`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO memory
+          (id, project_id, kind, title, content, pinned, created_at, updated_at)
+         SELECT legacy_memory.id, project_map.new_id, legacy_memory.kind,
+                legacy_memory.title, legacy_memory.content,
+                legacy_memory.pinned, legacy_memory.created_at,
+                legacy_memory.updated_at
+           FROM legacy.memory legacy_memory
+           JOIN legacy_project_map project_map
+             ON project_map.old_id = legacy_memory.project_id`,
+      );
+
+      // Knowledge and operations rows that belonged to a removed project remain
+      // available, unassigned, instead of resurrecting the deleted project.
+      await db.execute(
+        `INSERT OR IGNORE INTO documents
+          (id, project_id, title, body, source, tags, path, pinned,
+           owner_member_id, visibility, created_at, updated_at)
+         SELECT document.id, COALESCE(project_map.new_id, ''), document.title,
+                document.body, document.source, document.tags, document.path,
+                document.pinned, document.owner_member_id,
+                document.visibility, document.created_at, document.updated_at
+           FROM legacy.documents document
+           LEFT JOIN legacy_project_map project_map
+             ON project_map.old_id = document.project_id`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO document_versions
+          (id, document_id, title, body, tags, path, created_at)
+         SELECT version.id, version.document_id, version.title, version.body,
+                version.tags, version.path, version.created_at
+           FROM legacy.document_versions version
+          WHERE EXISTS (
+                SELECT 1 FROM documents WHERE documents.id = version.document_id
+              )`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO document_shares
+          (document_id, subject_type, subject_id, access)
+         SELECT share.document_id, share.subject_type, share.subject_id,
+                share.access
+           FROM legacy.document_shares share
+          WHERE EXISTS (
+                SELECT 1 FROM documents WHERE documents.id = share.document_id
+              )`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO vaults
+          (id, name, path, owner_member_id, visibility, exclude, file_count,
+           last_indexed_at, created_at)
+         SELECT id, name, path, owner_member_id, visibility, exclude,
+                file_count, last_indexed_at, created_at
+           FROM legacy.vaults`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO vault_files
+          (id, vault_id, rel_path, title, body, size, modified_at, indexed_at)
+         SELECT file.id, file.vault_id, file.rel_path, file.title, file.body,
+                file.size, file.modified_at, file.indexed_at
+           FROM legacy.vault_files file
+          WHERE EXISTS (SELECT 1 FROM vaults WHERE vaults.id = file.vault_id)`,
+      );
+      await db.execute(
+        `INSERT OR IGNORE INTO content_items
+          (id, project_id, campaign, title, brief, copy, platform, status,
+           scheduled_at, published_url, agent_id, media_url, publish_error,
+           connection_id, created_at, updated_at)
+         SELECT item.id, COALESCE(project_map.new_id, ''), item.campaign,
+                item.title, item.brief, item.copy, item.platform, item.status,
+                item.scheduled_at, item.published_url, item.agent_id,
+                item.media_url, item.publish_error, item.connection_id,
+                item.created_at, item.updated_at
+           FROM legacy.content_items item
+           LEFT JOIN legacy_project_map project_map
+             ON project_map.old_id = item.project_id`,
+      );
+
+      await db.execute(
+        "INSERT INTO legacy_imports (source, imported_at) VALUES ('com.lauren.hq/hq.db', $1)",
+        [Date.now()],
+      );
+      await db.execute("COMMIT");
+    } catch (error) {
+      await db.execute("ROLLBACK").catch(() => {});
+      throw error;
+    }
+  } finally {
+    await db.execute("DETACH DATABASE legacy").catch(() => {});
+  }
+}
+
 async function applyStatements(db: Database, sql: string, tolerateReruns: boolean) {
   for (const stmt of sql.split(";")) {
     const s = stmt.trim();
@@ -714,6 +1045,11 @@ export async function getDb(): Promise<Database> {
           await db.execute("ROLLBACK").catch(() => {});
           throw error;
         }
+      }
+      if (at < 20) {
+        await applyStatements(db, MIGRATION_V20, true);
+        await importLegacyHqData(db);
+        await db.execute("PRAGMA user_version = 20");
       }
       return db;
     })().catch((e) => {

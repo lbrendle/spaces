@@ -357,6 +357,7 @@ export const useStore = create<SpacesState>((set, get) => ({
       [chan.id, chan.project_id, chan.name, chan.topic, chan.chaining, chan.charter, chan.mode, chan.lead_agent_id, chan.created_at]
     );
     await get().refreshAll();
+    requestPortalSync();
     return proj;
   },
 
@@ -407,6 +408,7 @@ export const useStore = create<SpacesState>((set, get) => ({
     await db.execute("DELETE FROM projects WHERE id = $1", [id]);
     set({ view: { type: "dashboard" } });
     await get().refreshAll();
+    requestPortalSync();
   },
 
   async addChannel(projectId, name, topic = "") {
@@ -420,6 +422,7 @@ export const useStore = create<SpacesState>((set, get) => ({
       [chan.id, chan.project_id, chan.name, chan.topic, chan.chaining, chan.charter, chan.mode, chan.lead_agent_id, chan.created_at]
     );
     await get().refreshAll();
+    requestPortalSync();
     return chan;
   },
 
@@ -452,6 +455,7 @@ export const useStore = create<SpacesState>((set, get) => ({
     await db.execute("DELETE FROM channels WHERE id = $1", [id]);
     set({ view: { type: "dashboard" } });
     await get().refreshAll();
+    requestPortalSync();
   },
 
   async addAgent(a) {
@@ -597,6 +601,7 @@ export const useStore = create<SpacesState>((set, get) => ({
     } else if (msg.author_type !== "user") {
       set((s) => ({ unread: { ...s.unread, [msg.channel_id]: (s.unread[msg.channel_id] ?? 0) + 1 } }));
     }
+    requestPortalSync();
     return msg;
   },
 
@@ -744,6 +749,7 @@ export const useStore = create<SpacesState>((set, get) => ({
       [task.id, task.project_id, task.title, task.description, task.status, task.assignee_agent_id, task.due_date, task.sort_order, task.branch, task.created_at]
     );
     await get().refreshAll();
+    requestPortalSync();
     return task;
   },
 
@@ -756,6 +762,7 @@ export const useStore = create<SpacesState>((set, get) => ({
     const db = await getDb();
     await db.execute("DELETE FROM tasks WHERE id = $1", [id]);
     await get().refreshAll();
+    requestPortalSync();
   },
 
   async addMemory(m) {

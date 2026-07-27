@@ -71,18 +71,43 @@ export const channels = sqliteTable(
   {
     id: text("id").primaryKey(),
     workspaceId: text("workspace_id").notNull(),
+    projectId: text("project_id"),
     name: text("name").notNull(),
     topic: text("topic").notNull(),
     mode: text("mode").notNull().default("lead"),
     leadAgentId: text("lead_agent_id"),
     createdBy: text("created_by").notNull(),
     createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull().default(""),
   },
   (table) => [
-    uniqueIndex("channels_workspace_name_idx").on(
+    index("channels_workspace_project_idx").on(
       table.workspaceId,
-      table.name,
+      table.projectId,
+      table.createdAt,
     ),
+    uniqueIndex("channels_workspace_project_name_idx")
+      .on(table.workspaceId, table.projectId, table.name)
+      .where(sql`${table.projectId} IS NOT NULL`),
+    uniqueIndex("channels_workspace_global_name_idx")
+      .on(table.workspaceId, table.name)
+      .where(sql`${table.projectId} IS NULL`),
+  ],
+);
+
+export const channelSources = sqliteTable(
+  "channel_sources",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    sourceChannelId: text("source_channel_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.deviceId, table.sourceChannelId] }),
+    index("channel_sources_channel_idx").on(table.workspaceId, table.channelId),
   ],
 );
 
@@ -93,11 +118,32 @@ export const messages = sqliteTable(
     channelId: text("channel_id").notNull(),
     authorType: text("author_type").notNull().default("user"),
     authorId: text("author_id").notNull(),
+    authorName: text("author_name").notNull().default(""),
     body: text("body").notNull(),
     parentId: text("parent_id").notNull().default(""),
+    status: text("status").notNull().default("done"),
+    meta: text("meta").notNull().default(""),
+    runId: text("run_id").notNull().default(""),
     createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull().default(""),
   },
   (table) => [index("messages_channel_idx").on(table.channelId, table.createdAt)],
+);
+
+export const messageSources = sqliteTable(
+  "message_sources",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    messageId: text("message_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    sourceMessageId: text("source_message_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.deviceId, table.sourceMessageId] }),
+    index("message_sources_message_idx").on(table.workspaceId, table.messageId),
+  ],
 );
 
 export const issues = sqliteTable(
@@ -126,6 +172,22 @@ export const issues = sqliteTable(
       table.source,
       table.sourceId,
     ),
+  ],
+);
+
+export const issueSources = sqliteTable(
+  "issue_sources",
+  {
+    workspaceId: text("workspace_id").notNull(),
+    issueId: text("issue_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    sourceTaskId: text("source_task_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.deviceId, table.sourceTaskId] }),
+    index("issue_sources_issue_idx").on(table.workspaceId, table.issueId),
   ],
 );
 
@@ -403,6 +465,7 @@ export const projects = sqliteTable(
     workspaceId: text("workspace_id").notNull(),
     name: text("name").notNull(),
     summary: text("summary").notNull(),
+    repo: text("repo").notNull().default(""),
     status: text("status").notNull(),
     leadId: text("lead_id"),
     targetDate: text("target_date"),

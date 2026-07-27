@@ -30,6 +30,7 @@ export interface Member {
 
 export interface Channel {
   id: string;
+  projectId: string | null;
   name: string;
   topic: string;
   mode: "broadcast" | "sequential" | "lead" | "panel";
@@ -44,6 +45,9 @@ export interface Message {
   authorName: string;
   body: string;
   parentId: string;
+  status: "running" | "done" | "error";
+  meta: string;
+  runId: string;
   createdAt: string;
 }
 
@@ -158,6 +162,7 @@ export interface Project {
   id: string;
   name: string;
   summary: string;
+  repo: string;
   status: string;
   leadId: string | null;
   targetDate: string | null;

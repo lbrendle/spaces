@@ -101,7 +101,9 @@ export interface RemoteTombstone {
     | "calendar"
     | "event"
     | "project"
-    | "project_source";
+    | "project_source"
+    | "channel"
+    | "task";
   entityId: string;
   revision: number;
 }
@@ -672,6 +674,10 @@ async function removeRemoteMirror(tombstone: RemoteTombstone): Promise<void> {
         "DELETE FROM message_reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = $1)",
         [channel.id],
       );
+      await db.execute(
+        "DELETE FROM portal_links WHERE entity = 'message' AND local_id IN (SELECT id FROM messages WHERE channel_id = $1)",
+        [channel.id],
+      );
       await db.execute("DELETE FROM queue WHERE channel_id = $1", [channel.id]);
       await db.execute("DELETE FROM messages WHERE channel_id = $1", [channel.id]);
       await db.execute("DELETE FROM channel_members WHERE channel_id = $1", [channel.id]);
@@ -720,11 +726,70 @@ async function removeRemoteMirror(tombstone: RemoteTombstone): Promise<void> {
       [localId],
     );
     await db.execute("DELETE FROM channels WHERE project_id = $1", [localId]);
+    await db.execute(
+      "DELETE FROM portal_links WHERE entity = 'task' AND local_id IN (SELECT id FROM tasks WHERE project_id = $1)",
+      [localId],
+    );
     await db.execute("DELETE FROM tasks WHERE project_id = $1", [localId]);
     await db.execute("DELETE FROM memory WHERE project_id = $1", [localId]);
     await db.execute("UPDATE documents SET project_id = '' WHERE project_id = $1", [localId]);
     await db.execute("UPDATE content_items SET project_id = '' WHERE project_id = $1", [localId]);
     await db.execute("DELETE FROM projects WHERE id = $1", [localId]);
+  } else if (tombstone.entity === "channel") {
+    cancelRunsWhere((handle) => handle.channelId === localId);
+    await db.execute(
+      `DELETE FROM links
+        WHERE (from_type = 'channel' AND from_id = $1)
+           OR (to_type = 'channel' AND to_id = $1)
+           OR (from_type = 'message' AND from_id IN (
+                SELECT id FROM messages WHERE channel_id = $1
+              ))
+           OR (to_type = 'message' AND to_id IN (
+                SELECT id FROM messages WHERE channel_id = $1
+              ))`,
+      [localId],
+    );
+    await db.execute(
+      `DELETE FROM assignments
+        WHERE (target_type = 'channel' AND target_id = $1)
+           OR (subject_type = 'channel' AND subject_id = $1)
+           OR (target_type = 'message' AND target_id IN (
+                SELECT id FROM messages WHERE channel_id = $1
+              ))
+           OR (subject_type = 'message' AND subject_id IN (
+                SELECT id FROM messages WHERE channel_id = $1
+              ))`,
+      [localId],
+    );
+    await db.execute(
+      "DELETE FROM portal_links WHERE entity = 'message' AND local_id IN (SELECT id FROM messages WHERE channel_id = $1)",
+      [localId],
+    );
+    await db.execute(
+      "DELETE FROM message_reactions WHERE message_id IN (SELECT id FROM messages WHERE channel_id = $1)",
+      [localId],
+    );
+    await db.execute("DELETE FROM queue WHERE channel_id = $1", [localId]);
+    await db.execute("DELETE FROM messages WHERE channel_id = $1", [localId]);
+    await db.execute("DELETE FROM channel_members WHERE channel_id = $1", [localId]);
+    await db.execute("DELETE FROM runs WHERE channel_id = $1", [localId]);
+    await db.execute("DELETE FROM agent_sessions WHERE channel_id = $1", [localId]);
+    await db.execute("DELETE FROM channel_reads WHERE channel_id = $1", [localId]);
+    await db.execute("DELETE FROM channels WHERE id = $1", [localId]);
+  } else if (tombstone.entity === "task") {
+    await db.execute(
+      `DELETE FROM links
+        WHERE (from_type = 'task' AND from_id = $1)
+           OR (to_type = 'task' AND to_id = $1)`,
+      [localId],
+    );
+    await db.execute(
+      `DELETE FROM assignments
+        WHERE (target_type = 'task' AND target_id = $1)
+           OR (subject_type = 'task' AND subject_id = $1)`,
+      [localId],
+    );
+    await db.execute("DELETE FROM tasks WHERE id = $1", [localId]);
   }
 
   // A tombstone is authoritative server state, not a user deleting a mirror

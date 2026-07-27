@@ -45,7 +45,7 @@ import { config } from "./config";
 import { initAppUpdater } from "./updater";
 
 export default function App() {
-  const { loaded, view, init } = useStore();
+  const { loaded, view, init, projects, channels, setView } = useStore();
   const [mountedWorkspaceIds, setMountedWorkspaceIds] = useState<string[]>([]);
   const [portalChecked, setPortalChecked] = useState(false);
   const [portal, setPortal] = useState<PortalConnection | null>(null);
@@ -101,6 +101,31 @@ export default function App() {
       current.includes(activeWorkspaceId) ? current : [...current, activeWorkspaceId]
     );
   }, [activeWorkspaceId]);
+
+  // Workspaces stay mounted while the user switches between chat, terminal and
+  // browser so those sessions persist. A deleted project is the exception: its
+  // mounted component used to survive forever and render "Project not found"
+  // over whichever channel the user opened next.
+  useEffect(() => {
+    const available = new Set(projects.map((project) => project.id));
+    setMountedWorkspaceIds((current) => {
+      const next = current.filter((projectId) => available.has(projectId));
+      return next.length === current.length ? current : next;
+    });
+  }, [projects]);
+
+  // Deletion can arrive from this Mac or from another workspace member through
+  // portal sync. Never leave navigation pointing at an entity that no longer
+  // exists on the shared workspace.
+  useEffect(() => {
+    const missingWorkspace =
+      view.type === "workspace" &&
+      !projects.some((project) => project.id === view.projectId);
+    const missingChannel =
+      view.type === "channel" &&
+      !channels.some((channel) => channel.id === view.channelId);
+    if (missingWorkspace || missingChannel) setView({ type: "dashboard" });
+  }, [channels, projects, setView, view]);
 
   if (!loaded || !portalChecked) {
     return (

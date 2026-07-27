@@ -85,6 +85,13 @@
       "when": 1785101400000,
       "tag": "0011_workspace_knowledge_paths",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1785115200000,
+      "tag": "0012_shared_desktop_workspace",
+      "breakpoints": true
     }
   ]
 }

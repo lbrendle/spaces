@@ -275,3 +275,36 @@ test("owners and admins can remove duplicate channels and projects across device
   assert.match(app, /action: "delete_channel"/);
   assert.match(app, /action: "delete_project"/);
 });
+
+test("paired desktops replicate the complete shared project graph", async () => {
+  const [workspace, migration, desktopSync, store] = await Promise.all([
+    readFile(new URL("../lib/workspace.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../drizzle/0012_shared_desktop_workspace.sql", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../../desktop/src/portal.ts", import.meta.url), "utf8"),
+    readFile(new URL("../../desktop/src/store.ts", import.meta.url), "utf8"),
+  ]);
+
+  for (const table of ["channel_sources", "message_sources", "issue_sources"]) {
+    assert.ok(migration.includes(`CREATE TABLE \`${table}\``));
+  }
+  assert.match(migration, /ALTER TABLE `projects` ADD `repo`/);
+  for (const profile of [
+    "projectProfiles",
+    "channelProfiles",
+    "messageProfiles",
+    "taskProfiles",
+    "deleteRequests",
+  ]) {
+    assert.match(desktopSync, new RegExp(profile));
+    assert.match(workspace, new RegExp(profile));
+  }
+  assert.match(workspace, /entity = 'project_source'/);
+  assert.match(workspace, /deviceActor\.role === "owner"/);
+  assert.match(desktopSync, /body\.channels/);
+  assert.match(desktopSync, /body\.messages/);
+  assert.match(desktopSync, /body\.issues/);
+  assert.match(store, /requestPortalSync\(\);/);
+});

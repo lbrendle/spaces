@@ -481,7 +481,8 @@ async function loadWorkspaceSnapshotForContext(
       workspaceId,
     ),
     all<Channel>(
-      `SELECT id, name, topic, mode, lead_agent_id AS leadAgentId
+      `SELECT id, project_id AS projectId, name, topic, mode,
+              lead_agent_id AS leadAgentId
          FROM channels
         WHERE workspace_id = ?
         ORDER BY created_at`,
@@ -490,8 +491,9 @@ async function loadWorkspaceSnapshotForContext(
     all<Message>(
       `SELECT m.id, m.channel_id AS channelId, m.author_type AS authorType,
               m.author_id AS authorId,
-              COALESCE(u.name, a.name, 'Spaces') AS authorName,
-              m.body, m.parent_id AS parentId, m.created_at AS createdAt
+              COALESCE(NULLIF(m.author_name, ''), u.name, a.name, 'Spaces') AS authorName,
+              m.body, m.parent_id AS parentId, m.status, m.meta,
+              m.run_id AS runId, m.created_at AS createdAt
          FROM messages m
          JOIN channels c ON c.id = m.channel_id
          LEFT JOIN users u ON m.author_type = 'user' AND u.id = m.author_id
@@ -544,7 +546,7 @@ async function loadWorkspaceSnapshotForContext(
       })),
     ),
     all<Project>(
-      `SELECT p.id, p.name, p.summary, p.status, p.lead_id AS leadId,
+      `SELECT p.id, p.name, p.summary, p.repo, p.status, p.lead_id AS leadId,
               p.target_date AS targetDate,
               SUM(CASE WHEN i.status != 'done' THEN 1 ELSE 0 END) AS openIssues,
               SUM(CASE WHEN i.status = 'done' THEN 1 ELSE 0 END) AS completedIssues
@@ -1004,7 +1006,17 @@ export async function mutateWorkspace(
     );
     if (!channel) throw new Error("Channel not found.");
     await db().batch([
+      db()
+        .prepare(
+          "DELETE FROM message_sources WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)",
+        )
+        .bind(channelId),
       db().prepare("DELETE FROM messages WHERE channel_id = ?").bind(channelId),
+      db()
+        .prepare(
+          "DELETE FROM channel_sources WHERE workspace_id = ? AND channel_id = ?",
+        )
+        .bind(context.workspace.id, channelId),
       db()
         .prepare("DELETE FROM channels WHERE id = ? AND workspace_id = ?")
         .bind(channelId, context.workspace.id),
@@ -1029,6 +1041,25 @@ export async function mutateWorkspace(
            VALUES (?, ?, 'channel.deleted', ?, ?)`,
         )
         .bind(context.workspace.id, context.user.id, channelId, createdAt),
+      db()
+        .prepare(
+          `INSERT INTO content_tombstones
+            (id, workspace_id, entity, entity_id, created_by, revision, created_at)
+           VALUES (?, ?, 'channel', ?, ?,
+             (SELECT COALESCE(MAX(sequence), 0) FROM workspace_events WHERE workspace_id = ?), ?)
+           ON CONFLICT(workspace_id, entity, entity_id) DO UPDATE SET
+             created_by = excluded.created_by,
+             revision = excluded.revision,
+             created_at = excluded.created_at`,
+        )
+        .bind(
+          id("tomb"),
+          context.workspace.id,
+          channelId,
+          context.user.id,
+          context.workspace.id,
+          createdAt,
+        ),
     ]);
     return { ok: true };
   }
@@ -1144,9 +1175,35 @@ export async function mutateWorkspace(
       ),
       db()
         .prepare(
-          "UPDATE issues SET project_id = NULL, updated_at = ? WHERE workspace_id = ? AND project_id = ?",
+          `DELETE FROM message_sources
+            WHERE message_id IN (
+              SELECT m.id FROM messages m
+              JOIN channels c ON c.id = m.channel_id
+              WHERE c.workspace_id = ? AND c.project_id = ?
+            )`,
         )
-        .bind(createdAt, context.workspace.id, projectId),
+        .bind(context.workspace.id, projectId),
+      db()
+        .prepare(
+          "DELETE FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE workspace_id = ? AND project_id = ?)",
+        )
+        .bind(context.workspace.id, projectId),
+      db()
+        .prepare(
+          "DELETE FROM channel_sources WHERE workspace_id = ? AND channel_id IN (SELECT id FROM channels WHERE workspace_id = ? AND project_id = ?)",
+        )
+        .bind(context.workspace.id, context.workspace.id, projectId),
+      db()
+        .prepare("DELETE FROM channels WHERE workspace_id = ? AND project_id = ?")
+        .bind(context.workspace.id, projectId),
+      db()
+        .prepare(
+          "DELETE FROM issue_sources WHERE workspace_id = ? AND issue_id IN (SELECT id FROM issues WHERE workspace_id = ? AND project_id = ?)",
+        )
+        .bind(context.workspace.id, context.workspace.id, projectId),
+      db()
+        .prepare("DELETE FROM issues WHERE workspace_id = ? AND project_id = ?")
+        .bind(context.workspace.id, projectId),
       db()
         .prepare("DELETE FROM project_connections WHERE workspace_id = ? AND project_id = ?")
         .bind(context.workspace.id, projectId),
@@ -2384,6 +2441,228 @@ export async function syncDevice(token: string, payload: unknown) {
   if (!deviceActor) {
     throw new Error("The paired desktop owner is no longer a workspace member.");
   }
+  const deleteAcks: Array<{
+    entity: "project" | "channel" | "task";
+    remoteId: string;
+    localId: string;
+  }> = [];
+  const incomingDeletes = Array.isArray(body.deleteRequests)
+    ? body.deleteRequests.slice(0, 500)
+    : [];
+  if (deviceActor.role === "owner" || deviceActor.role === "admin") {
+    for (const value of incomingDeletes) {
+      if (!value || typeof value !== "object") continue;
+      const request = value as Record<string, unknown>;
+      const requestedEntity = text(request.entity, 20);
+      if (!["project", "channel", "task"].includes(requestedEntity)) continue;
+      const entity = requestedEntity as "project" | "channel" | "task";
+      const remoteId = text(request.remoteId, 180);
+      const localId = text(request.localId, 180);
+      if (!remoteId || !localId) continue;
+
+      if (entity === "project") {
+        const project = await first<{ id: string }>(
+          "SELECT id FROM projects WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          remoteId,
+        );
+        if (project) {
+          const sources = await all<{
+            deviceId: string;
+            sourceProjectId: string;
+          }>(
+            `SELECT device_id AS deviceId, source_project_id AS sourceProjectId
+               FROM project_sources
+              WHERE workspace_id = ? AND project_id = ?`,
+            device.workspaceId,
+            remoteId,
+          );
+          await workspaceEvent(
+            device.workspaceId,
+            device.id,
+            "project.deleted",
+            remoteId,
+          );
+          const revision = await workspaceRevision(device.workspaceId);
+          await run(
+            `INSERT INTO content_tombstones
+              (id, workspace_id, entity, entity_id, created_by, revision, created_at)
+             VALUES (?, ?, 'project', ?, ?, ?, ?)
+             ON CONFLICT(workspace_id, entity, entity_id) DO UPDATE SET
+               created_by = excluded.created_by,
+               revision = excluded.revision,
+               created_at = excluded.created_at`,
+            id("tomb"),
+            device.workspaceId,
+            remoteId,
+            device.ownerUserId,
+            revision,
+            updatedAt,
+          );
+          for (const source of sources) {
+            await run(
+              `INSERT INTO content_tombstones
+                (id, workspace_id, entity, entity_id, created_by, revision, created_at)
+               VALUES (?, ?, 'project_source', ?, ?, ?, ?)
+               ON CONFLICT(workspace_id, entity, entity_id) DO UPDATE SET
+                 created_by = excluded.created_by,
+                 revision = excluded.revision,
+                 created_at = excluded.created_at`,
+              id("tomb"),
+              device.workspaceId,
+              JSON.stringify([source.deviceId, source.sourceProjectId]),
+              device.ownerUserId,
+              revision,
+              updatedAt,
+            );
+          }
+          await db().batch([
+            db()
+              .prepare(
+                `DELETE FROM message_sources
+                  WHERE message_id IN (
+                    SELECT m.id FROM messages m
+                    JOIN channels c ON c.id = m.channel_id
+                    WHERE c.workspace_id = ? AND c.project_id = ?
+                  )`,
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare(
+                `DELETE FROM messages
+                  WHERE channel_id IN (
+                    SELECT id FROM channels
+                    WHERE workspace_id = ? AND project_id = ?
+                  )`,
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM channel_sources WHERE workspace_id = ? AND channel_id IN (SELECT id FROM channels WHERE workspace_id = ? AND project_id = ?)",
+              )
+              .bind(device.workspaceId, device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM channels WHERE workspace_id = ? AND project_id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM issue_sources WHERE workspace_id = ? AND issue_id IN (SELECT id FROM issues WHERE workspace_id = ? AND project_id = ?)",
+              )
+              .bind(device.workspaceId, device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM issues WHERE workspace_id = ? AND project_id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM project_connections WHERE workspace_id = ? AND project_id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM project_sources WHERE workspace_id = ? AND project_id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare(
+                "DELETE FROM projects WHERE workspace_id = ? AND id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+          ]);
+        }
+      } else if (entity === "channel") {
+        const channel = await first<{ id: string }>(
+          "SELECT id FROM channels WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          remoteId,
+        );
+        if (channel) {
+          await workspaceEvent(
+            device.workspaceId,
+            device.id,
+            "channel.deleted",
+            remoteId,
+          );
+          const revision = await workspaceRevision(device.workspaceId);
+          await run(
+            `INSERT INTO content_tombstones
+              (id, workspace_id, entity, entity_id, created_by, revision, created_at)
+             VALUES (?, ?, 'channel', ?, ?, ?, ?)
+             ON CONFLICT(workspace_id, entity, entity_id) DO UPDATE SET
+               created_by = excluded.created_by,
+               revision = excluded.revision,
+               created_at = excluded.created_at`,
+            id("tomb"),
+            device.workspaceId,
+            remoteId,
+            device.ownerUserId,
+            revision,
+            updatedAt,
+          );
+          await db().batch([
+            db()
+              .prepare(
+                "DELETE FROM message_sources WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)",
+              )
+              .bind(remoteId),
+            db().prepare("DELETE FROM messages WHERE channel_id = ?").bind(remoteId),
+            db()
+              .prepare(
+                "DELETE FROM channel_sources WHERE workspace_id = ? AND channel_id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare("DELETE FROM channels WHERE workspace_id = ? AND id = ?")
+              .bind(device.workspaceId, remoteId),
+          ]);
+        }
+      } else {
+        const issue = await first<{ id: string }>(
+          "SELECT id FROM issues WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          remoteId,
+        );
+        if (issue) {
+          await workspaceEvent(
+            device.workspaceId,
+            device.id,
+            "task.deleted",
+            remoteId,
+          );
+          const revision = await workspaceRevision(device.workspaceId);
+          await run(
+            `INSERT INTO content_tombstones
+              (id, workspace_id, entity, entity_id, created_by, revision, created_at)
+             VALUES (?, ?, 'task', ?, ?, ?, ?)
+             ON CONFLICT(workspace_id, entity, entity_id) DO UPDATE SET
+               created_by = excluded.created_by,
+               revision = excluded.revision,
+               created_at = excluded.created_at`,
+            id("tomb"),
+            device.workspaceId,
+            remoteId,
+            device.ownerUserId,
+            revision,
+            updatedAt,
+          );
+          await db().batch([
+            db()
+              .prepare(
+                "DELETE FROM issue_sources WHERE workspace_id = ? AND issue_id = ?",
+              )
+              .bind(device.workspaceId, remoteId),
+            db()
+              .prepare("DELETE FROM issues WHERE workspace_id = ? AND id = ?")
+              .bind(device.workspaceId, remoteId),
+          ]);
+        }
+      }
+      deleteAcks.push({ entity, remoteId, localId });
+    }
+  }
   const memberAcks: Array<{ portalUserId: string; changedAt: number }> = [];
   const incomingMemberProfiles = Array.isArray(body.memberProfiles)
     ? body.memberProfiles.slice(0, 100)
@@ -2418,6 +2697,7 @@ export async function syncDevice(token: string, payload: unknown) {
     const project = value as Record<string, unknown>;
     const sourceProjectId = text(project.id, 180);
     const name = text(project.name, 120);
+    const repo = text(project.repo, 240);
     if (!sourceProjectId || !name) continue;
     const deletedSource = await first<{ id: string }>(
       `SELECT id FROM content_tombstones
@@ -2462,10 +2742,14 @@ export async function syncDevice(token: string, payload: unknown) {
     if (existing || requested || nameMatches.length === 1) {
       await run(
         `UPDATE projects
-            SET name = ?, summary = ?, status = ?, updated_at = ?
+            SET name = ?, summary = ?,
+                repo = CASE WHEN ? = '' THEN repo ELSE ? END,
+                status = ?, updated_at = ?
           WHERE id = ? AND workspace_id = ?`,
         name,
         text(project.summary, 1_200),
+        repo,
+        repo,
         oneOf(project.status, ["active", "paused", "done"] as const, "active"),
         updatedAt,
         projectId,
@@ -2474,13 +2758,14 @@ export async function syncDevice(token: string, payload: unknown) {
     } else {
       await run(
         `INSERT INTO projects
-          (id, workspace_id, name, summary, status, lead_id, target_date,
+          (id, workspace_id, name, summary, repo, status, lead_id, target_date,
            source_device_id, source_project_id, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
         projectId,
         device.workspaceId,
         name,
         text(project.summary, 1_200),
+        repo,
         oneOf(project.status, ["active", "paused", "done"] as const, "active"),
         device.id,
         sourceProjectId,
@@ -2598,6 +2883,392 @@ export async function syncDevice(token: string, payload: unknown) {
       updatedAt,
     );
   }
+
+  const incomingChannels = Array.isArray(body.channelProfiles)
+    ? body.channelProfiles.slice(0, 500)
+    : [];
+  for (const value of incomingChannels) {
+    if (!value || typeof value !== "object") continue;
+    const channel = value as Record<string, unknown>;
+    const sourceChannelId = text(channel.id, 180);
+    const sourceProjectId = text(channel.projectId, 180);
+    const name = slug(text(channel.name, 64));
+    if (!sourceChannelId || !sourceProjectId || !name) continue;
+    const linkedProject = await first<{ id: string }>(
+      `SELECT project_id AS id
+         FROM project_sources
+        WHERE workspace_id = ? AND device_id = ? AND source_project_id = ?`,
+      device.workspaceId,
+      device.id,
+      sourceProjectId,
+    );
+    const requestedProjectId = text(channel.projectPortalId, 180);
+    const requestedProject = !linkedProject && requestedProjectId
+      ? await first<{ id: string }>(
+          "SELECT id FROM projects WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          requestedProjectId,
+        )
+      : null;
+    const projectId = linkedProject?.id ?? requestedProject?.id;
+    if (!projectId) continue;
+
+    const existing = await first<{ id: string }>(
+      `SELECT channel_id AS id
+         FROM channel_sources
+        WHERE workspace_id = ? AND device_id = ? AND source_channel_id = ?`,
+      device.workspaceId,
+      device.id,
+      sourceChannelId,
+    );
+    const requestedPortalId = text(channel.portalId, 180);
+    const requested = !existing && requestedPortalId
+      ? await first<{ id: string }>(
+          "SELECT id FROM channels WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          requestedPortalId,
+        )
+      : null;
+    const named = !existing && !requested
+      ? await first<{ id: string }>(
+          `SELECT id FROM channels
+            WHERE workspace_id = ? AND project_id = ?
+              AND lower(trim(name)) = lower(trim(?))
+            ORDER BY created_at LIMIT 1`,
+          device.workspaceId,
+          projectId,
+          name,
+        )
+      : null;
+    const channelId = existing?.id ?? requested?.id ?? named?.id ?? id("ch");
+    const sourceLeadId = text(channel.leadAgentId, 180);
+    const lead = sourceLeadId
+      ? await first<{ id: string }>(
+          `SELECT id FROM agent_profiles
+            WHERE workspace_id = ? AND host_device_id = ? AND source_agent_id = ?`,
+          device.workspaceId,
+          device.id,
+          sourceLeadId,
+        )
+      : null;
+    const createdAtMs = Number(channel.createdAt);
+    const createdAt = Number.isFinite(createdAtMs) && createdAtMs > 0
+      ? new Date(createdAtMs).toISOString()
+      : updatedAt;
+    await run(
+      `INSERT INTO channels
+        (id, workspace_id, project_id, name, topic, mode, lead_agent_id,
+         created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         project_id = excluded.project_id,
+         name = excluded.name,
+         topic = excluded.topic,
+         mode = excluded.mode,
+         lead_agent_id = excluded.lead_agent_id,
+         updated_at = excluded.updated_at
+       WHERE channels.workspace_id = excluded.workspace_id`,
+      channelId,
+      device.workspaceId,
+      projectId,
+      name,
+      text(channel.topic, 500),
+      oneOf(
+        channel.mode,
+        ["broadcast", "sequential", "lead", "panel"] as const,
+        "lead",
+      ),
+      lead?.id ?? null,
+      device.ownerUserId,
+      createdAt,
+      updatedAt,
+    );
+    await run(
+      `INSERT INTO channel_sources
+        (workspace_id, channel_id, device_id, source_channel_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, source_channel_id) DO UPDATE SET
+         channel_id = excluded.channel_id,
+         updated_at = excluded.updated_at`,
+      device.workspaceId,
+      channelId,
+      device.id,
+      sourceChannelId,
+      updatedAt,
+      updatedAt,
+    );
+  }
+
+  const incomingMessages = Array.isArray(body.messageProfiles)
+    ? body.messageProfiles.slice(0, 2_000)
+    : [];
+  for (const value of incomingMessages) {
+    if (!value || typeof value !== "object") continue;
+    const message = value as Record<string, unknown>;
+    const sourceMessageId = text(message.id, 180);
+    const sourceChannelId = text(message.channelId, 180);
+    const content =
+      typeof message.content === "string"
+        ? message.content.slice(0, 12_000)
+        : "";
+    if (!sourceMessageId || !sourceChannelId || !content) continue;
+    const linkedChannel = await first<{ id: string }>(
+      `SELECT channel_id AS id
+         FROM channel_sources
+        WHERE workspace_id = ? AND device_id = ? AND source_channel_id = ?`,
+      device.workspaceId,
+      device.id,
+      sourceChannelId,
+    );
+    const requestedChannelId = text(message.channelPortalId, 180);
+    const requestedChannel = !linkedChannel && requestedChannelId
+      ? await first<{ id: string }>(
+          "SELECT id FROM channels WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          requestedChannelId,
+        )
+      : null;
+    const channelId = linkedChannel?.id ?? requestedChannel?.id;
+    if (!channelId) continue;
+
+    const existing = await first<{ id: string }>(
+      `SELECT message_id AS id
+         FROM message_sources
+        WHERE workspace_id = ? AND device_id = ? AND source_message_id = ?`,
+      device.workspaceId,
+      device.id,
+      sourceMessageId,
+    );
+    const requestedPortalId = text(message.portalId, 180);
+    const requested = !existing && requestedPortalId
+      ? await first<{ id: string }>(
+          `SELECT m.id
+             FROM messages m
+             JOIN channels c ON c.id = m.channel_id
+            WHERE c.workspace_id = ? AND m.id = ?`,
+          device.workspaceId,
+          requestedPortalId,
+        )
+      : null;
+    const messageId = existing?.id ?? requested?.id ?? id("msg");
+    const authorType = oneOf(
+      message.authorType,
+      ["user", "agent", "system"] as const,
+      "user",
+    );
+    const sourceAuthorId = text(message.authorId, 180);
+    const requestedAuthorId = text(message.authorPortalId, 180);
+    let authorId = device.ownerUserId;
+    if (authorType === "user" && requestedAuthorId) {
+      const member = await first<{ id: string }>(
+        `SELECT user_id AS id FROM memberships
+          WHERE workspace_id = ? AND user_id = ?`,
+        device.workspaceId,
+        requestedAuthorId,
+      );
+      authorId = member?.id ?? device.ownerUserId;
+    } else if (authorType === "agent") {
+      const agent = sourceAuthorId
+        ? await first<{ id: string }>(
+            `SELECT id FROM agent_profiles
+              WHERE workspace_id = ? AND host_device_id = ? AND source_agent_id = ?`,
+            device.workspaceId,
+            device.id,
+            sourceAuthorId,
+          )
+        : null;
+      const requestedAgent = !agent && requestedAuthorId
+        ? await first<{ id: string }>(
+            "SELECT id FROM agent_profiles WHERE workspace_id = ? AND id = ?",
+            device.workspaceId,
+            requestedAuthorId,
+          )
+        : null;
+      authorId = agent?.id ?? requestedAgent?.id ?? (sourceAuthorId || device.id);
+    } else if (authorType === "system") {
+      authorId = device.id;
+    }
+    const sourceParentId = text(message.parentId, 180);
+    const requestedParentId = text(message.parentPortalId, 180);
+    const linkedParent = sourceParentId
+      ? await first<{ id: string }>(
+          `SELECT message_id AS id
+             FROM message_sources
+            WHERE workspace_id = ? AND device_id = ? AND source_message_id = ?`,
+          device.workspaceId,
+          device.id,
+          sourceParentId,
+        )
+      : null;
+    const parentId = linkedParent?.id ?? requestedParentId;
+    const createdAtMs = Number(message.createdAt);
+    const createdAt = Number.isFinite(createdAtMs) && createdAtMs > 0
+      ? new Date(createdAtMs).toISOString()
+      : updatedAt;
+    await run(
+      `INSERT INTO messages
+        (id, channel_id, author_type, author_id, author_name, body, parent_id,
+         status, meta, run_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         channel_id = excluded.channel_id,
+         author_type = excluded.author_type,
+         author_id = excluded.author_id,
+         author_name = excluded.author_name,
+         body = excluded.body,
+         parent_id = excluded.parent_id,
+         status = excluded.status,
+         meta = excluded.meta,
+         run_id = excluded.run_id,
+         updated_at = excluded.updated_at`,
+      messageId,
+      channelId,
+      authorType,
+      authorId,
+      text(message.authorName, 160) || "Spaces",
+      content,
+      parentId,
+      oneOf(message.status, ["running", "done", "error"] as const, "done"),
+      typeof message.meta === "string" ? message.meta.slice(0, 20_000) : "",
+      text(message.runId, 180),
+      createdAt,
+      updatedAt,
+    );
+    await run(
+      `INSERT INTO message_sources
+        (workspace_id, message_id, device_id, source_message_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, source_message_id) DO UPDATE SET
+         message_id = excluded.message_id,
+         updated_at = excluded.updated_at`,
+      device.workspaceId,
+      messageId,
+      device.id,
+      sourceMessageId,
+      updatedAt,
+      updatedAt,
+    );
+  }
+
+  const incomingTasks = Array.isArray(body.taskProfiles)
+    ? body.taskProfiles.slice(0, 1_000)
+    : [];
+  for (const value of incomingTasks) {
+    if (!value || typeof value !== "object") continue;
+    const task = value as Record<string, unknown>;
+    const sourceTaskId = text(task.id, 180);
+    const sourceProjectId = text(task.projectId, 180);
+    const title = text(task.title, 240);
+    if (!sourceTaskId || !sourceProjectId || !title) continue;
+    const linkedProject = await first<{ id: string }>(
+      `SELECT project_id AS id FROM project_sources
+        WHERE workspace_id = ? AND device_id = ? AND source_project_id = ?`,
+      device.workspaceId,
+      device.id,
+      sourceProjectId,
+    );
+    const requestedProjectId = text(task.projectPortalId, 180);
+    const requestedProject = !linkedProject && requestedProjectId
+      ? await first<{ id: string }>(
+          "SELECT id FROM projects WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          requestedProjectId,
+        )
+      : null;
+    const projectId = linkedProject?.id ?? requestedProject?.id;
+    if (!projectId) continue;
+    const existing = await first<{ id: string }>(
+      `SELECT issue_id AS id FROM issue_sources
+        WHERE workspace_id = ? AND device_id = ? AND source_task_id = ?`,
+      device.workspaceId,
+      device.id,
+      sourceTaskId,
+    );
+    const requestedPortalId = text(task.portalId, 180);
+    const requested = !existing && requestedPortalId
+      ? await first<{ id: string }>(
+          "SELECT id FROM issues WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          requestedPortalId,
+        )
+      : null;
+    const issueId = existing?.id ?? requested?.id ?? id("issue");
+    const sourceAssigneeId = text(task.assigneeAgentId, 180);
+    const requestedAssigneeId = text(task.assigneePortalId, 180);
+    const localAssignee = sourceAssigneeId
+      ? await first<{ id: string }>(
+          `SELECT id FROM agent_profiles
+            WHERE workspace_id = ? AND host_device_id = ? AND source_agent_id = ?`,
+          device.workspaceId,
+          device.id,
+          sourceAssigneeId,
+        )
+      : null;
+    const requestedAssignee = !localAssignee && requestedAssigneeId
+      ? await first<{ id: string }>(
+          "SELECT id FROM agent_profiles WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          requestedAssigneeId,
+        )
+      : null;
+    const taskStatus = oneOf(
+      task.status,
+      ["backlog", "todo", "doing", "done"] as const,
+      "todo",
+    );
+    const issueStatus =
+      taskStatus === "todo"
+        ? "ready"
+        : taskStatus === "doing"
+          ? "in_progress"
+          : taskStatus;
+    const createdAtMs = Number(task.createdAt);
+    const createdAt = Number.isFinite(createdAtMs) && createdAtMs > 0
+      ? new Date(createdAtMs).toISOString()
+      : updatedAt;
+    await run(
+      `INSERT INTO issues
+        (id, workspace_id, project_id, cycle_id, title, description, status,
+         priority, assignee_id, created_by, due_date, source, source_id,
+         created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, 'normal', ?, ?, ?, 'spaces', NULL, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         project_id = excluded.project_id,
+         title = excluded.title,
+         description = excluded.description,
+         status = excluded.status,
+         assignee_id = excluded.assignee_id,
+         due_date = excluded.due_date,
+         updated_at = excluded.updated_at
+       WHERE issues.workspace_id = excluded.workspace_id`,
+      issueId,
+      device.workspaceId,
+      projectId,
+      title,
+      text(task.description, 8_000),
+      issueStatus,
+      localAssignee?.id ?? requestedAssignee?.id ?? null,
+      device.ownerUserId,
+      text(task.dueDate, 40) || null,
+      createdAt,
+      updatedAt,
+    );
+    await run(
+      `INSERT INTO issue_sources
+        (workspace_id, issue_id, device_id, source_task_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(device_id, source_task_id) DO UPDATE SET
+         issue_id = excluded.issue_id,
+         updated_at = excluded.updated_at`,
+      device.workspaceId,
+      issueId,
+      device.id,
+      sourceTaskId,
+      updatedAt,
+      updatedAt,
+    );
+  }
+
   const incomingTeams = Array.isArray(body.teamProfiles)
     ? body.teamProfiles.slice(0, 100)
     : [];
@@ -2752,10 +3423,11 @@ export async function syncDevice(token: string, payload: unknown) {
     id: string;
     name: string;
     summary: string;
+    repo: string;
     status: string;
     sourceProjectId: string;
   }>(
-    `SELECT p.id, p.name, p.summary, p.status,
+    `SELECT p.id, p.name, p.summary, p.repo, p.status,
             COALESCE(s.source_project_id, '') AS sourceProjectId
        FROM projects p
        LEFT JOIN project_sources s
@@ -2763,6 +3435,91 @@ export async function syncDevice(token: string, payload: unknown) {
         AND s.device_id = ?
       WHERE p.workspace_id = ?
       ORDER BY p.created_at`,
+    device.id,
+    device.workspaceId,
+  );
+  const channels = await all<{
+    id: string;
+    projectId: string;
+    name: string;
+    topic: string;
+    mode: string;
+    leadAgentId: string | null;
+    sourceChannelId: string;
+    createdAt: string;
+  }>(
+    `SELECT c.id, c.project_id AS projectId, c.name, c.topic, c.mode,
+            c.lead_agent_id AS leadAgentId,
+            COALESCE(s.source_channel_id, '') AS sourceChannelId,
+            c.created_at AS createdAt
+       FROM channels c
+       LEFT JOIN channel_sources s
+         ON s.channel_id = c.id AND s.workspace_id = c.workspace_id
+        AND s.device_id = ?
+      WHERE c.workspace_id = ? AND c.project_id IS NOT NULL
+      ORDER BY c.created_at`,
+    device.id,
+    device.workspaceId,
+  );
+  const messages = await all<{
+    id: string;
+    channelId: string;
+    authorType: string;
+    authorId: string;
+    authorName: string;
+    body: string;
+    parentId: string;
+    status: string;
+    meta: string;
+    runId: string;
+    sourceMessageId: string;
+    createdAt: string;
+  }>(
+    `SELECT * FROM (
+       SELECT m.id, m.channel_id AS channelId, m.author_type AS authorType,
+              m.author_id AS authorId,
+              COALESCE(NULLIF(m.author_name, ''), u.name, a.name, 'Spaces') AS authorName,
+              m.body, m.parent_id AS parentId, m.status, m.meta,
+              m.run_id AS runId,
+              COALESCE(s.source_message_id, '') AS sourceMessageId,
+              m.created_at AS createdAt
+         FROM messages m
+         JOIN channels c ON c.id = m.channel_id
+         LEFT JOIN users u
+           ON m.author_type = 'user' AND u.id = m.author_id
+         LEFT JOIN agent_profiles a
+           ON m.author_type = 'agent' AND a.id = m.author_id
+         LEFT JOIN message_sources s
+           ON s.message_id = m.id AND s.workspace_id = c.workspace_id
+          AND s.device_id = ?
+        WHERE c.workspace_id = ? AND c.project_id IS NOT NULL
+        ORDER BY m.created_at DESC
+        LIMIT 2000
+     ) ORDER BY createdAt`,
+    device.id,
+    device.workspaceId,
+  );
+  const issues = await all<{
+    id: string;
+    projectId: string;
+    title: string;
+    description: string;
+    status: string;
+    assigneeId: string | null;
+    dueDate: string | null;
+    sourceTaskId: string;
+    createdAt: string;
+  }>(
+    `SELECT i.id, i.project_id AS projectId, i.title, i.description,
+            i.status, i.assignee_id AS assigneeId, i.due_date AS dueDate,
+            COALESCE(s.source_task_id, '') AS sourceTaskId,
+            i.created_at AS createdAt
+       FROM issues i
+       LEFT JOIN issue_sources s
+         ON s.issue_id = i.id AND s.workspace_id = i.workspace_id
+        AND s.device_id = ?
+      WHERE i.workspace_id = ? AND i.project_id IS NOT NULL
+      ORDER BY i.created_at`,
     device.id,
     device.workspaceId,
   );
@@ -2853,12 +3610,16 @@ export async function syncDevice(token: string, payload: unknown) {
     currentUserId: device.ownerUserId,
     currentDeviceId: device.id,
     memberAcks,
+    deleteAcks,
     members,
     devices: devices.map(({ toolsJson, ...row }) => ({
       ...row,
       tools: jsonArray(toolsJson),
     })),
     projects,
+    channels,
+    messages,
+    issues,
     agents: agents.map(({ cliArgsJson, ...agent }) => ({
       ...agent,
       cliArgs: jsonArray(cliArgsJson),

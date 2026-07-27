@@ -112,7 +112,11 @@ export function ProjectWorkspaceView({
   }, [channelId, loadMessages, markChannelRead]);
 
   if (!project) {
-    return <div className="main-pane center-note">Project not found.</div>;
+    // An inactive workspace can remain mounted to preserve its terminal and
+    // browser state. If that project was deleted, it must render nothing while
+    // App prunes the stale mount; otherwise this hidden workspace covers the
+    // newly selected channel with a misleading error.
+    return active ? <div className="main-pane center-note">Project not found.</div> : null;
   }
   const currentProject = project;
 
