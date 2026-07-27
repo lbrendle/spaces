@@ -254,6 +254,10 @@ test("owners can clear workspace history without deleting identity or connection
     new URL("../lib/workspace.ts", import.meta.url),
     "utf8",
   );
+  const app = await readFile(
+    new URL("../app/PortalApp.tsx", import.meta.url),
+    "utf8",
+  );
   const reset = workspace.slice(
     workspace.indexOf('actionName === "reset_workspace_history"'),
     workspace.indexOf('actionName === "create_issue"'),
@@ -287,6 +291,7 @@ test("owners can clear workspace history without deleting identity or connection
     assert.doesNotMatch(reset, new RegExp(`DELETE FROM ${preserved}`));
   }
   assert.match(reset, /storage!\.delete/);
+  assert.match(app, /Clear workspace history/);
 });
 
 test("member roles and personal desktop pairing are authorized server-side", async () => {

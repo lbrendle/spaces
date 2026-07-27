@@ -872,7 +872,13 @@ export function PortalApp() {
               }
             />
           )}
-          {surface === "security" && <SecurityAdminSurface snapshot={snapshot} />}
+          {surface === "security" && (
+            <SecurityAdminSurface
+              snapshot={snapshot}
+              working={working}
+              mutate={mutate}
+            />
+          )}
           {surface === "today" && (
             <TodaySurface snapshot={snapshot} setSurface={setSurface} />
           )}
@@ -1423,7 +1429,20 @@ function AgentAdminSurface({
   );
 }
 
-function SecurityAdminSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+function SecurityAdminSurface({
+  snapshot,
+  working,
+  mutate,
+}: {
+  snapshot: WorkspaceSnapshot;
+  working: boolean;
+  mutate: (
+    input: Record<string, unknown>,
+    success: string,
+  ) => Promise<Record<string, unknown>>;
+}) {
+  const requiredConfirmation = `RESET HISTORY ${snapshot.workspace.id}`;
+  const [confirmation, setConfirmation] = useState("");
   const controls = [
     {
       index: "01",
@@ -1481,6 +1500,46 @@ function SecurityAdminSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
           {snapshot.devices.length === 1 ? "" : "s"} are currently recorded.
         </p>
       </article>
+      {snapshot.workspace.role === "owner" && (
+        <article className="security-summary">
+          <header>
+            <span className="section-index">CLEAN START</span>
+            <span className="state-chip">Owner only</span>
+          </header>
+          <h2>Clear workspace history</h2>
+          <p>
+            Removes shared messages, work history, documents, Knowledge pages,
+            calendar events, Content Studio cards and media, agent jobs, and
+            activity. People, projects, channels, paired-device enrollment, and
+            connected accounts stay configured.
+          </p>
+          <label>
+            Type <code>{requiredConfirmation}</code>
+            <input
+              aria-label="Confirm history reset"
+              autoComplete="off"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+            />
+          </label>
+          <button
+            className="quiet-button danger-button"
+            type="button"
+            disabled={working || confirmation !== requiredConfirmation}
+            onClick={() => {
+              void mutate(
+                {
+                  action: "reset_workspace_history",
+                  confirmation,
+                },
+                "Workspace history cleared.",
+              ).then(() => setConfirmation(""));
+            }}
+          >
+            {working ? "Clearing…" : "Clear workspace history"}
+          </button>
+        </article>
+      )}
     </div>
   );
 }
