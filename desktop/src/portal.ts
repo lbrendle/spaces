@@ -52,6 +52,14 @@ export type PortalProviderAction =
   | "mail.send"
   | "social.publish";
 
+export type PortalMemberAction = "create_invite";
+
+export interface PortalMemberActionResult {
+  ok: true;
+  invitePath?: string;
+  expiresAt?: string;
+}
+
 interface ClaimResponse {
   ok?: boolean;
   deviceId?: string;
@@ -180,6 +188,39 @@ export async function portalProviderAction<T>(
     throw new Error(body.error || "The connected account action failed.");
   }
   return body.result as T;
+}
+
+/**
+ * Mutate real workspace access from a paired desktop.
+ *
+ * A local roster row is not an identity. Invitations and removals therefore
+ * go through the paired portal, where the device token resolves back to the
+ * signed-in member and the same owner/admin rules used by the web panel are
+ * enforced server-side.
+ */
+export async function portalMemberAction(
+  action: PortalMemberAction,
+  input: Record<string, unknown> = {},
+): Promise<PortalMemberActionResult> {
+  const connection = await loadPortalConnection();
+  if (!connection) {
+    throw new Error(`Pair this ${config().brand} desktop before managing workspace access.`);
+  }
+  const response = await fetch(`${connection.base_url}/api/device/members`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${connection.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ action, ...input }),
+  });
+  const body = (await response.json()) as Partial<PortalMemberActionResult> & {
+    error?: string;
+  };
+  if (!response.ok || !body.ok) {
+    throw new Error(body.error || "Spaces could not update workspace access.");
+  }
+  return body as PortalMemberActionResult;
 }
 
 export async function uploadPortalMedia(

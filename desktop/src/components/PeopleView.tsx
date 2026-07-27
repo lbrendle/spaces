@@ -7,11 +7,10 @@
  *
  * Two facts shape every string in this file, and neither may be softened:
  *
- *   A person here is a local record. Adding one writes a row to this machine's
- *   database. It sends no invite, creates no account, and grants nobody access
- *   to anything. Real identities arrive with the paired web workspace. Until
- *   then a member is a name you can attribute and share things to — which is
- *   genuinely useful, and is not the same as a colleague being here.
+ *   A person in a paired workspace is a real, authenticated member. The invite
+ *   flow writes the email-bound invitation to the portal and does not pretend a
+ *   local placeholder is an identity. Historical local-only rows remain
+ *   removable so old attribution never becomes an unmanageable ghost.
  *
  *   An agent runs on a machine. Somebody's `claude` or `codex` CLI, signed in
  *   with their own subscription, on hardware that is sometimes asleep. So
@@ -32,7 +31,7 @@ import { confirmAction, toast } from "../toast";
 import { timeAgo } from "../github";
 import { HARNESSES, defaultsFor, harnessFor, serializeArgs } from "../capabilities";
 import type { HarnessKind } from "../capabilities";
-import { loadPortalConnection } from "../portal";
+import { loadPortalConnection, portalMemberAction } from "../portal";
 import { EntityChip } from "./EntityChip";
 import { Field } from "./ui";
 import { SidePanel, usePanel } from "./SidePanel";
@@ -190,6 +189,7 @@ export function PeopleView() {
   const removeMember = useStore((s) => s.removeMember);
 
   const self = members.find((m) => m.is_self === 1) ?? useStore.getState().self();
+  const canInvite = self.role === "owner" || self.role === "admin";
   /*
    * Four panels, all holding an id rather than a row, and all sharing one
    * trailing edge — SidePanel guarantees only one is ever on screen, so these
@@ -312,9 +312,11 @@ export function PeopleView() {
           </div>
         </div>
         <div className="row">
-          <button className="btn" onClick={() => adding.show()}>
-            <IconPlus size={13} /> Person
-          </button>
+          {canInvite && (
+            <button className="btn" onClick={() => adding.show()}>
+              <IconPlus size={13} /> Invite person
+            </button>
+          )}
           <button className="btn primary" onClick={() => bringing.show({ ownerId: self.id })}>
             <IconPlus size={13} /> Bring an agent
           </button>
@@ -343,15 +345,19 @@ export function PeopleView() {
                 onSelect={() => detail.toggle(row.member.id)}
                 onEdit={() => editing.show(row.member.id)}
                 onBringAgent={() => bringing.show({ ownerId: row.member.id })}
+                onRemove={
+                  !row.isSelf && !row.member.portal_user_id
+                    ? () => void removePerson(row.member)
+                    : undefined
+                }
               />
             ))}
           </div>
 
           {members.length === 1 && (
             <p className="pe-note">
-              Adding people here does not invite them. It gives you names to hang ownership
-              on — whose calendar this is, whose agent that is — and those names keep working
-              after the person stops using Spaces.
+              Invite a teammate with their email. They appear here as a real member after signing
+              in with that ChatGPT account and accepting the private link.
             </p>
           )}
         </section>
@@ -431,13 +437,7 @@ export function PeopleView() {
       )}
       {editingMember && <MemberEditorPanel member={editingMember} onClose={editing.hide} />}
       {adding.open && (
-        <AddPersonPanel
-          onClose={adding.hide}
-          onAdded={(m) => {
-            adding.hide();
-            detail.show(m.id);
-          }}
-        />
+        <AddPersonPanel onClose={adding.hide} />
       )}
       {bringing.data && (
         <BringAgentPanel
@@ -489,7 +489,7 @@ function AboutPeople() {
         <span className="pe-about-icon" aria-hidden="true">
           <IconInfo size={15} />
         </span>
-        About people in a local workspace
+        About people in this workspace
         <span className="pe-about-chev" aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
@@ -498,12 +498,11 @@ function AboutPeople() {
         <div className="pe-about-body" id={bodyId}>
           <dl>
             <div>
-              <dt>A person here is a record, not an invitation.</dt>
+              <dt>People join through an email-bound invitation.</dt>
               <dd>
-                Adding somebody writes a row to this machine's database. No email goes out, no
-                account is created, and nobody gains access to anything. Real identities arrive
-                when this Spaces is paired with a web workspace that has them; until then a member is
-                a name you can attribute and share things to.
+                Spaces creates the invitation in the paired web workspace. The recipient signs in
+                with the invited ChatGPT account and appears on every paired desktop only after
+                accepting. A typed name is never treated as an authenticated identity.
               </dd>
             </div>
             <div>
@@ -526,8 +525,8 @@ function AboutPeople() {
               <dt>Paired roles enforce access.</dt>
               <dd>
                 People linked to the web workspace use enforced owner, admin, member and guest
-                permissions. A local-only person has no account or access, so their role remains
-                descriptive until they accept an invitation.
+                permissions. Historical local-only placeholders have no access and can be removed
+                directly from their roster card.
               </dd>
             </div>
           </dl>
@@ -565,6 +564,7 @@ function PersonCard({
   onSelect,
   onEdit,
   onBringAgent,
+  onRemove,
 }: {
   row: PersonRow;
   localDeviceId: string;
@@ -572,6 +572,7 @@ function PersonCard({
   onSelect: () => void;
   onEdit: () => void;
   onBringAgent: () => void;
+  onRemove?: () => void;
 }) {
   const { member, isSelf } = row;
   const viewerId = useStore((s) => s.members.find((m) => m.is_self === 1)?.id ?? "me");
@@ -665,6 +666,11 @@ function PersonCard({
         <button type="button" className="btn tiny" onClick={onBringAgent}>
           Bring an agent
         </button>
+        {onRemove && (
+          <button type="button" className="btn tiny danger" onClick={onRemove}>
+            Remove local record
+          </button>
+        )}
       </div>
     </article>
   );
@@ -1092,9 +1098,9 @@ function PersonPanel({
       className="pe-panel"
       footer={
         <>
-          {!isSelf && (
+          {!isSelf && !member.portal_user_id && (
             <button type="button" className="btn danger pe-panel-remove" onClick={onRemove}>
-              Remove
+              Remove local record
             </button>
           )}
           <button type="button" className="btn" onClick={() => bring.show()}>
@@ -1241,44 +1247,62 @@ function PersonPanel({
   );
 }
 
-/* ── add a person ────────────────────────────────────────────── */
+/* ── invite a person ─────────────────────────────────────────── */
 
-function AddPersonPanel({
-  onClose,
-  onAdded,
-}: {
-  onClose: () => void;
-  onAdded: (m: Member) => void;
-}) {
-  const addMember = useStore((s) => s.addMember);
+function AddPersonPanel({ onClose }: { onClose: () => void }) {
   const members = useStore((s) => s.members);
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<MemberRole>("member");
-  const [color, setColor] = useState("");
   const [busy, setBusy] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState("");
   // The submit button lives in the panel's pinned footer, outside the form, so
   // it is associated by id rather than by nesting — and Enter in a field still
   // submits, which is the behaviour a form in a dialog got for free.
   const formId = useId();
 
-  const clean = name.trim();
-  const clash = clean
-    ? members.find((m) => m.name.trim().toLowerCase() === clean.toLowerCase())
+  const cleanEmail = email.trim().toLowerCase();
+  const clash = cleanEmail
+    ? members.find((m) => m.email.trim().toLowerCase() === cleanEmail)
     : undefined;
 
-  async function save() {
-    if (!clean) return;
+  async function copyInvite() {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      toast.success("Invitation link copied");
+    } catch (error) {
+      toast.error("Could not copy the invitation link", error);
+    }
+  }
+
+  async function invite() {
+    if (!cleanEmail) return;
     setBusy(true);
     try {
-      const member = await addMember({ name: clean, email: email.trim(), role, color });
+      const connection = await loadPortalConnection();
+      if (!connection) throw new Error("Pair this desktop before inviting a teammate.");
+      const result = await portalMemberAction("create_invite", {
+        email: cleanEmail,
+        role,
+      });
+      if (!result.invitePath) throw new Error("The workspace did not return an invitation link.");
+      const url = new URL(result.invitePath, connection.base_url).toString();
+      setInviteUrl(url);
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        // The read-only field below remains available for manual copying.
+      }
       toast.success(
-        `${member.name} added to the roster`,
-        "A local record — nothing was sent to them."
+        `Invitation created for ${cleanEmail}`,
+        copied
+          ? "The private link is on your clipboard."
+          : "Copy the private link and send it to them."
       );
-      onAdded(member);
     } catch (e) {
-      toast.error(`Could not add ${clean}`, e);
+      toast.error(`Could not invite ${cleanEmail || "that person"}`, e);
     } finally {
       setBusy(false);
     }
@@ -1286,73 +1310,94 @@ function AddPersonPanel({
 
   return (
     <SidePanel
-      title="Add a person"
+      title={inviteUrl ? "Invitation ready" : "Invite a person"}
       onClose={onClose}
       storageKey="person"
       className="pe-panel"
-      /* Creating a record is the one step that genuinely cannot autosave: there
-         is no row yet, and half a name is not a person. So the button stays. */
       footer={
-        <>
-          <button type="button" className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" form={formId} className="btn primary" disabled={busy || !clean}>
-            Add person
-          </button>
-        </>
+        inviteUrl ? (
+          <>
+            <button type="button" className="btn" onClick={onClose}>
+              Done
+            </button>
+            <button type="button" className="btn primary" onClick={() => void copyInvite()}>
+              Copy invitation link
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form={formId}
+              className="btn primary"
+              disabled={busy || !cleanEmail || Boolean(clash)}
+            >
+              {busy ? "Creating invitation…" : "Create invitation"}
+            </button>
+          </>
+        )
       }
     >
-      <p className="pe-panel-lead">
-        This writes a row to this machine's database. It sends no invite, creates no account and
-        gives nobody access to anything here. What it does give you is somebody to attribute work
-        to — an owner for a calendar, an agent or a document — and a name that keeps rendering
-        after they have gone. Real identities arrive with the paired web workspace.
-      </p>
-      <form
-        id={formId}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        <Field label="Name">
-          <input
-            data-autofocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Jamie Chen"
-          />
-        </Field>
-        {clash && (
-          <p className="pe-warn">
-            {clash.name} is already on the roster. Two people with one name is allowed — it is
-            just hard to tell them apart later.
+      {inviteUrl ? (
+        <>
+          <p className="pe-panel-lead">
+            Send this private link to {cleanEmail}. It expires after seven days and only the
+            invited ChatGPT account can accept it.
           </p>
-        )}
-        <Field label="Email">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="jamie@example.com"
-          />
-        </Field>
-        <p className="pe-hint">
-          Stored so calendar and document owners can be matched up later. Nothing is sent to it.
-        </p>
-        <Field label="Role">
-          <select value={role} onChange={(e) => setRole(e.target.value as MemberRole)}>
-            {ROLES.map((r) => (
-              <option key={r.role} value={r.role}>
-                {r.label} — {r.help}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <p className="pe-hint">Descriptive only. Nothing in Spaces checks a role yet.</p>
-        <ColorField id={clean || "new"} value={color} onChange={setColor} />
-      </form>
+          <Field label="Private invitation link">
+            <input readOnly value={inviteUrl} onFocus={(event) => event.currentTarget.select()} />
+          </Field>
+          <p className="pe-hint">
+            They appear on every paired Spaces desktop after accepting. No identity-less local
+            person is created while the invitation is pending.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="pe-panel-lead">
+            This creates a real, email-bound invitation in the paired web workspace. The person
+            joins after signing in with that ChatGPT account and accepting your private link.
+          </p>
+          <form
+            id={formId}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void invite();
+            }}
+          >
+            <Field label="Email">
+              <input
+                data-autofocus
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="jamie@example.com"
+              />
+            </Field>
+            {clash && (
+              <p className="pe-warn">
+                {clash.name} is already a member with this email.
+              </p>
+            )}
+            <Field label="Workspace role">
+              <select value={role} onChange={(e) => setRole(e.target.value as MemberRole)}>
+                {ROLES.filter((item) => item.role !== "owner").map((item) => (
+                  <option key={item.role} value={item.role}>
+                    {item.label} — {item.help}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <p className="pe-hint">
+              The role is enforced by the shared workspace as soon as the invitation is accepted.
+            </p>
+          </form>
+        </>
+      )}
     </SidePanel>
   );
 }

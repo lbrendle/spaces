@@ -328,6 +328,35 @@ test("member roles and personal desktop pairing are authorized server-side", asy
   assert.match(schema, /displayName/);
 });
 
+test("desktop invitations create real portal identities instead of local ghosts", async () => {
+  const [workspace, route, desktopPortal, people] = await Promise.all([
+    readFile(new URL("../lib/workspace.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/api/device/members/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../../desktop/src/portal.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../../desktop/src/components/PeopleView.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  const invitePanel = people.slice(
+    people.indexOf("function AddPersonPanel"),
+    people.indexOf("const VISIBILITY_HELP"),
+  );
+
+  assert.match(workspace, /async function createWorkspaceInvite/);
+  assert.match(workspace, /That email already has an active workspace invitation/);
+  assert.match(workspace, /export async function mutateDeviceMember/);
+  assert.match(route, /mutateDeviceMember\(token, input\)/);
+  assert.match(desktopPortal, /\/api\/device\/members/);
+  assert.match(invitePanel, /portalMemberAction\("create_invite"/);
+  assert.match(invitePanel, /Invitation ready/);
+  assert.doesNotMatch(invitePanel, /addMember\(/);
+  assert.match(people, /Remove local record/);
+});
+
 test("member removal, owned agents, mentions, and remote coding require explicit authority", async () => {
   const [workspace, jobs, app] = await Promise.all([
     readFile(new URL("../lib/workspace.ts", import.meta.url), "utf8"),

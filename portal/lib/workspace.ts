@@ -855,6 +855,81 @@ function pairingCode(): string {
   return [...bytes].map((byte) => alphabet[byte % alphabet.length]).join("");
 }
 
+async function createWorkspaceInvite(
+  actor: MemberProfileActor,
+  emailValue: unknown,
+  roleValue: unknown,
+): Promise<MutationResult> {
+  if (!["owner", "admin"].includes(actor.role)) {
+    throw new Error("Your workspace role cannot perform this action.");
+  }
+  const email = text(emailValue, 240).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid teammate email.");
+  }
+  const role = oneOf(
+    roleValue,
+    ["admin", "member", "guest"] as const,
+    "member",
+  );
+  const existingMember = await first<{ id: string }>(
+    `SELECT u.id
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.workspace_id = ? AND lower(u.email) = lower(?)`,
+    actor.workspaceId,
+    email,
+  );
+  if (existingMember) {
+    throw new Error("That person is already a member of this workspace.");
+  }
+  const existingInvite = await first<{ id: string }>(
+    `SELECT id
+       FROM invites
+      WHERE workspace_id = ? AND lower(email) = lower(?)
+        AND accepted_at IS NULL AND expires_at > ?
+      LIMIT 1`,
+    actor.workspaceId,
+    email,
+    now(),
+  );
+  if (existingInvite) {
+    throw new Error("That email already has an active workspace invitation.");
+  }
+
+  const token = randomToken();
+  const tokenHash = await sha256(token);
+  const inviteId = id("invite");
+  const expiresAt = future(60 * 24 * 7);
+  const createdAt = now();
+  await run(
+    `INSERT INTO invites
+      (id, workspace_id, email, role, token_hash, invited_by,
+       expires_at, accepted_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    inviteId,
+    actor.workspaceId,
+    email,
+    role,
+    tokenHash,
+    actor.userId,
+    expiresAt,
+    createdAt,
+  );
+  await activity(
+    actor.workspaceId,
+    actor.userId,
+    "member.invited",
+    `Invited ${email} as ${role}`,
+    inviteId,
+  );
+  return {
+    ok: true,
+    invitePath: `/join/${encodeURIComponent(token)}`,
+    expiresAt,
+  };
+}
+
 export async function mutateWorkspace(
   headers: Headers,
   input: Record<string, unknown>,
@@ -2055,46 +2130,15 @@ export async function mutateWorkspace(
   }
 
   if (actionName === "create_invite") {
-    await requireRole(context, ["owner", "admin"]);
-    const email = text(input.email, 240).toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error("Enter a valid teammate email.");
-    }
-    const role = oneOf(
+    return createWorkspaceInvite(
+      {
+        workspaceId: context.workspace.id,
+        userId: context.user.id,
+        role: context.workspace.role,
+      },
+      input.email,
       input.role,
-      ["admin", "member", "guest"] as const,
-      "member",
     );
-    const token = randomToken();
-    const tokenHash = await sha256(token);
-    const inviteId = id("invite");
-    const expiresAt = future(60 * 24 * 7);
-    await run(
-      `INSERT INTO invites
-        (id, workspace_id, email, role, token_hash, invited_by,
-         expires_at, accepted_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-      inviteId,
-      context.workspace.id,
-      email,
-      role,
-      tokenHash,
-      context.user.id,
-      expiresAt,
-      createdAt,
-    );
-    await activity(
-      context.workspace.id,
-      context.user.id,
-      "member.invited",
-      `Invited ${email} as ${role}`,
-      inviteId,
-    );
-    return {
-      ok: true,
-      invitePath: `/join/${encodeURIComponent(token)}`,
-      expiresAt,
-    };
   }
 
   if (actionName === "update_member_role") {
@@ -2757,6 +2801,37 @@ export async function authorizeDevice(token: string) {
   );
   if (!device) throw new Error("Desktop connection is not authorized.");
   return device;
+}
+
+export async function mutateDeviceMember(
+  token: string,
+  input: Record<string, unknown>,
+): Promise<MutationResult> {
+  const device = await authorizeDevice(token);
+  const actor = await first<{ role: WorkspaceRole }>(
+    `SELECT role
+       FROM memberships
+      WHERE workspace_id = ? AND user_id = ?`,
+    device.workspaceId,
+    device.ownerUserId,
+  );
+  if (!actor) {
+    throw new Error("The paired desktop owner is no longer a workspace member.");
+  }
+
+  const actionName = text(input.action, 80);
+  if (actionName === "create_invite") {
+    return createWorkspaceInvite(
+      {
+        workspaceId: device.workspaceId,
+        userId: device.ownerUserId,
+        role: actor.role,
+      },
+      input.email,
+      input.role,
+    );
+  }
+  throw new Error("Unknown Spaces member action.");
 }
 
 export async function syncDevice(token: string, payload: unknown) {
