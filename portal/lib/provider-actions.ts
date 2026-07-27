@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { getD1 } from "../db";
 import {
   connectedAccountAccess,
   markConnectionSynced,
@@ -694,8 +695,39 @@ async function publishSocial(
 }
 
 interface AuthorizedDevice {
+  id: string;
   workspaceId: string;
   ownerUserId: string;
+}
+
+/**
+ * Desktop content rows keep the source project's local UUID. Project-account
+ * links live against the portal project id. Accept either form so already
+ * shipped desktops do not lose their publishing account merely because the
+ * request crossed that identity boundary.
+ */
+async function providerProjectId(
+  device: AuthorizedDevice,
+  requested: unknown,
+): Promise<string> {
+  const raw = cleanText(requested, 160);
+  if (!raw) return "";
+  const row = await getD1()
+    .prepare(
+      `SELECT p.id
+         FROM projects p
+         LEFT JOIN project_sources s
+           ON s.project_id = p.id AND s.workspace_id = p.workspace_id
+        WHERE p.workspace_id = ?
+          AND (
+            p.id = ?
+            OR (s.device_id = ? AND s.source_project_id = ?)
+          )
+        LIMIT 1`,
+    )
+    .bind(device.workspaceId, raw, device.id, raw)
+    .first<{ id: string }>();
+  return row?.id ?? raw;
 }
 
 export async function createConnectedCalendarEvent(
@@ -720,13 +752,14 @@ export async function runDeviceProviderAction(
 ) {
   const action = input.action;
   if (!action) throw new Error("A provider action is required.");
+  const projectId = await providerProjectId(device, input.projectId);
   const access = await connectedAccountAccess(
     device.workspaceId,
     input.provider ?? "",
     device.ownerUserId,
     {
       connectionId: cleanText(input.connectionId, 160),
-      projectId: cleanText(input.projectId, 160),
+      projectId,
     },
   );
   let result: unknown;

@@ -1,6 +1,10 @@
 import { getDb, now, uid } from "./db";
 import { invoke } from "@tauri-apps/api/core";
-import { portalProviderAction, uploadPortalMedia } from "./portal";
+import {
+  portalProjectIdForLocal,
+  portalProviderAction,
+  uploadPortalMedia,
+} from "./portal";
 import { useStore } from "./store";
 import { config } from "./config";
 
@@ -864,6 +868,12 @@ export async function publishContentItem(
     throw new Error("Direct publishing is currently available for Instagram, TikTok, and X.");
   }
   try {
+    const projectId = item.project_id
+      ? await portalProjectIdForLocal(item.project_id)
+      : "";
+    if (item.project_id && !projectId) {
+      throw new Error("This project has not finished syncing with Spaces web yet.");
+    }
     const result = await portalProviderAction<{
       state: "published" | "processing";
       externalId: string;
@@ -872,7 +882,7 @@ export async function publishContentItem(
       copy: item.copy,
       mediaUrl: item.media_url,
       mediaUrls: contentMedia(item).filter((media) => media.role !== "story").map((media) => media.url),
-      projectId: item.project_id,
+      projectId,
       connectionId: item.connection_id,
     });
     await patchContentItem(item.id, {

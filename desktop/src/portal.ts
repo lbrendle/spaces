@@ -106,6 +106,29 @@ export async function loadPortalConnection(): Promise<PortalConnection | null> {
   return rows[0] ?? null;
 }
 
+/**
+ * Resolve a desktop project's local UUID to the shared portal identity.
+ *
+ * Content Studio rows intentionally keep local project ids so they continue to
+ * work offline. Connected-account links are stored against the shared project,
+ * so provider actions must cross the mirror table before leaving the desktop.
+ */
+export async function portalProjectIdForLocal(
+  localProjectId: string,
+): Promise<string> {
+  const raw = localProjectId.trim();
+  if (!raw) return "";
+  const db = await getDb();
+  const rows = await db.select<{ remote_id: string }[]>(
+    `SELECT remote_id
+       FROM portal_links
+      WHERE entity = 'project' AND local_id = $1
+      LIMIT 1`,
+    [raw],
+  );
+  return rows[0]?.remote_id ?? "";
+}
+
 export async function pairPortal(
   baseUrl: string,
   code: string,

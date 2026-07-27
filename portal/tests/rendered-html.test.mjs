@@ -126,6 +126,23 @@ test("calendar creation reaches exact cloud calendars and queues native Apple de
   assert.match(app, /Event queued for Apple Calendar/);
 });
 
+test("device publishing accepts both local and shared project identities", async () => {
+  const actions = await readFile(
+    new URL("../lib/provider-actions.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(actions, /async function providerProjectId/);
+  assert.match(actions, /LEFT JOIN project_sources s/);
+  assert.match(actions, /s\.device_id = \?/);
+  assert.match(actions, /s\.source_project_id = \?/);
+  assert.match(actions, /const projectId = await providerProjectId/);
+  assert.match(
+    actions,
+    /connectionId: cleanText\(input\.connectionId, 160\),\s+projectId,/,
+  );
+});
+
 test("starter preview is removed and product metadata is present", async () => {
   const [page, layout, packageJson, app] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
@@ -138,17 +155,43 @@ test("starter preview is removed and product metadata is present", async () => {
   assert.match(page, /requireChatGPTUser/);
   assert.match(layout, /your company in one place/i);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.match(app, /Spaces-0\.1\.15-universal\.dmg/);
+  assert.match(app, /Spaces-0\.1\.16-universal\.dmg/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
 
 test("declares durable D1 storage for workspace state", async () => {
-  const hosting = JSON.parse(
-    await readFile(new URL("../.openai/hosting.example.json", import.meta.url), "utf8"),
-  );
-  assert.equal(hosting.d1, "DB");
-  assert.equal(hosting.r2, "MEDIA");
-  await assert.rejects(access(new URL("../.openai/hosting.json", import.meta.url)));
+  const manifests = [
+    JSON.parse(
+      await readFile(
+        new URL("../.openai/hosting.example.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  ];
+  try {
+    manifests.push(
+      JSON.parse(
+        await readFile(
+          new URL("../.openai/hosting.json", import.meta.url),
+          "utf8",
+        ),
+      ),
+    );
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  for (const hosting of manifests) {
+    assert.equal(hosting.d1, "DB");
+    assert.equal(hosting.r2, "MEDIA");
+  }
+  if (manifests.length > 1) {
+    assert.match(
+      manifests[1].project_id,
+      /^appgprj_/,
+    );
+  }
 });
 
 test("workspace media uploads use authenticated R2 storage and public delivery", async () => {

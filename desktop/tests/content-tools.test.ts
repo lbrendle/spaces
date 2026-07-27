@@ -37,3 +37,20 @@ test("agents receive the complete shared Content Studio lifecycle", async () => 
   );
   assert.match(sync, /new CustomEvent\("hq:content-change"\)/);
 });
+
+test("social publishing resolves desktop project identities before account lookup", async () => {
+  const [operations, portal] = await Promise.all([
+    readFile(new URL("../src/operations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/portal.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(operations, /portalProjectIdForLocal/);
+  assert.match(
+    operations,
+    /const projectId = item\.project_id\s+\? await portalProjectIdForLocal\(item\.project_id\)/,
+  );
+  assert.match(operations, /projectId,\s+connectionId: item\.connection_id/);
+  assert.doesNotMatch(operations, /projectId: item\.project_id/);
+  assert.match(portal, /export async function portalProjectIdForLocal/);
+  assert.match(portal, /entity = 'project' AND local_id = \$1/);
+});
