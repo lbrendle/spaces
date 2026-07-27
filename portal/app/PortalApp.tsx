@@ -27,7 +27,7 @@ import {
 } from "../lib/knowledge-tree";
 
 const OFFICIAL_DESKTOP_DOWNLOAD =
-  "https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.14-universal.dmg";
+  "https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.15-universal.dmg";
 const CONFIGURED_DESKTOP_DOWNLOAD =
   process.env.NEXT_PUBLIC_SPACES_DESKTOP_DOWNLOAD_URL?.trim() ?? "";
 const DESKTOP_DOWNLOAD_URL =
