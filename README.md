@@ -27,6 +27,14 @@
   <a href="./docs/ARCHITECTURE.md">Architecture</a>
 </p>
 
+## See Spaces in motion
+
+https://github.com/user-attachments/assets/f989acfa-c384-451c-8265-abbb767df1a1
+
+<p align="center">
+  <sub>76 seconds · multiplayer, live agents, shared work, company memory, and publishing</sub>
+</p>
+
 Spaces is the operating system for a small team of people and agents. It puts
 the work, conversation, code, knowledge, inbox, calendar, publishing, and live
 agent processes in one coherent workspace—without moving repositories or
