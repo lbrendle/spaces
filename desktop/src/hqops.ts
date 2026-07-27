@@ -355,6 +355,7 @@ async function resolvedMediaPath(
   mediaPath: string,
   ctx: OpContext,
   projectId: string,
+  instagramCompatible = false,
 ): Promise<string> {
   const state = useStore.getState();
   const project = state.projects.find((row) => row.id === projectId);
@@ -389,7 +390,12 @@ async function resolvedMediaPath(
     : `${allowedRoot.replace(/[\\/]$/, "")}${
         allowedRoot.includes("\\") ? "\\" : "/"
       }${mediaPath}`;
-  return uploadContentMedia(absolute, projectId, allowedRoot);
+  return uploadContentMedia(
+    absolute,
+    projectId,
+    allowedRoot,
+    instagramCompatible,
+  );
 }
 
 function validMediaUrl(mediaUrl: string): string {
@@ -410,6 +416,7 @@ async function resolvedMediaList(
   args: Record<string, unknown>,
   ctx: OpContext,
   projectId: string,
+  instagramCompatible = false,
 ): Promise<string[]> {
   const paths = [
     ...strings(args, "media_paths"),
@@ -423,7 +430,14 @@ async function resolvedMediaList(
     throw new Error("A message can include up to 10 images or videos.");
   }
   for (const path of paths) {
-    urls.push(await resolvedMediaPath(path, ctx, projectId));
+    urls.push(
+      await resolvedMediaPath(
+        path,
+        ctx,
+        projectId,
+        instagramCompatible,
+      ),
+    );
   }
   return [...new Set(urls)];
 }
@@ -2126,10 +2140,16 @@ export const OPERATIONS: Operation[] = [
       const title = str(args, "title");
       if (!title) return { ok: false, message: "title is required" };
       const projectId = projectOf(args, ctx);
+      const platform = str(args, "platform") || "multi";
       let mediaUrl = "";
       let mediaItems = "[]";
       try {
-        const postUrls = await resolvedMediaList(args, ctx, projectId);
+        const postUrls = await resolvedMediaList(
+          args,
+          ctx,
+          projectId,
+          platform === "instagram",
+        );
         const storyUrls = await resolvedMediaList(
           {
             media_paths: strings(args, "story_media_paths"),
@@ -2137,6 +2157,7 @@ export const OPERATIONS: Operation[] = [
           },
           ctx,
           projectId,
+          platform === "instagram",
         );
         mediaUrl = postUrls[0] ?? "";
         mediaItems = JSON.stringify([
@@ -2156,7 +2177,7 @@ export const OPERATIONS: Operation[] = [
         title,
         brief: str(args, "brief"),
         copy: str(args, "copy"),
-        platform: str(args, "platform") || "multi",
+        platform,
         connection_id: "",
         status:
           status === "drafting" || status === "review" ? status : "idea",
@@ -2291,7 +2312,14 @@ export const OPERATIONS: Operation[] = [
       ) {
         try {
           const targetProject = patch.project_id ?? item.project_id;
-          const postUrls = await resolvedMediaList(args, ctx, targetProject);
+          const instagramCompatible =
+            (patch.platform ?? item.platform) === "instagram";
+          const postUrls = await resolvedMediaList(
+            args,
+            ctx,
+            targetProject,
+            instagramCompatible,
+          );
           const storyUrls = await resolvedMediaList(
             {
               media_paths: strings(args, "story_media_paths"),
@@ -2299,6 +2327,7 @@ export const OPERATIONS: Operation[] = [
             },
             ctx,
             targetProject,
+            instagramCompatible,
           );
           patch.media_url = postUrls[0] ?? "";
           patch.media_items = JSON.stringify([
@@ -2434,7 +2463,12 @@ export const OPERATIONS: Operation[] = [
           Object.prototype.hasOwnProperty.call(args, "media_url") ||
           Object.prototype.hasOwnProperty.call(args, "media_urls")
         ) {
-          const postUrls = await resolvedMediaList(args, ctx, projectId);
+          const postUrls = await resolvedMediaList(
+            args,
+            ctx,
+            projectId,
+            platform === "instagram",
+          );
           mediaUrl = postUrls[0] ?? "";
           mediaItems = JSON.stringify(postUrls.map((url) => ({ url, role: "post" })));
         } else {

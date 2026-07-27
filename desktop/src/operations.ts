@@ -935,8 +935,14 @@ export async function uploadContentMedia(
   path: string,
   projectId = "",
   allowedRoot = "",
+  instagramCompatible = false,
 ): Promise<string> {
-  const media = await uploadPortalMedia(path, projectId, allowedRoot);
+  const media = await uploadPortalMedia(
+    path,
+    projectId,
+    allowedRoot,
+    instagramCompatible,
+  );
   return media.url;
 }
 

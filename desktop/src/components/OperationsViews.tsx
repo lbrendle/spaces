@@ -3697,7 +3697,12 @@ function ContentDetail({
     if (typeof chosen !== "string") return;
     setUploadingMedia(true);
     try {
-      const mediaUrl = await uploadContentMedia(chosen, draft.project_id);
+      const mediaUrl = await uploadContentMedia(
+        chosen,
+        draft.project_id,
+        "",
+        draft.platform === "instagram",
+      );
       onPatch({
         media_url: mediaUrl,
         media_items: JSON.stringify([{ url: mediaUrl, role: "post" }]),

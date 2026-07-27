@@ -208,6 +208,7 @@ async fn upload_portal_media(
     base_url: String,
     token: String,
     project_id: String,
+    instagram_compatible: bool,
 ) -> Result<PortalMedia, String> {
     tauri::async_runtime::spawn_blocking(move || {
         if token.trim().is_empty() {
@@ -234,48 +235,126 @@ async fn upload_portal_media(
         if metadata.len() > 95 * 1024 * 1024 {
             return Err("Media uploads are limited to 95 MB.".into());
         }
-        let file_name = real
+        let original_file_name = real
             .file_name()
             .and_then(|value| value.to_str())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| "The media file must have a valid filename.".to_string())?
             .to_string();
-        let content_type = media_content_type(&real)?;
-        let mut endpoint = reqwest::Url::parse(base_url.trim())
-            .map_err(|error| format!("Spaces site address is invalid: {error}"))?
-            .join("/api/device/media")
-            .map_err(|error| format!("Spaces upload address is invalid: {error}"))?;
-        endpoint
-            .query_pairs_mut()
-            .append_pair("filename", &file_name)
-            .append_pair("projectId", project_id.trim());
+        let mut upload_path = real.clone();
+        let mut file_name = original_file_name;
+        let mut content_type = media_content_type(&real)?.to_string();
+        let mut converted_path: Option<PathBuf> = None;
 
-        let file = std::fs::File::open(&real)
-            .map_err(|error| format!("could not open {}: {error}", real.display()))?;
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(300))
-            .build()
-            .map_err(|error| format!("could not prepare the media upload: {error}"))?;
-        let response = client
-            .post(endpoint)
-            .bearer_auth(token.trim())
-            .header(reqwest::header::CONTENT_TYPE, content_type)
-            .header(reqwest::header::CONTENT_LENGTH, metadata.len())
-            .body(reqwest::blocking::Body::sized(file, metadata.len()))
-            .send()
-            .map_err(|error| format!("Spaces could not upload the media file: {error}"))?;
-        let status = response.status();
-        let payload = response
-            .json::<PortalMediaResponse>()
-            .map_err(|error| format!("Spaces returned an invalid upload response: {error}"))?;
-        if !status.is_success() {
-            return Err(payload
-                .error
-                .unwrap_or_else(|| format!("Spaces rejected the upload ({status}).")));
+        // Instagram's publishing API accepts feed photos as JPEG. The Content
+        // Studio and channel media surfaces deliberately accept richer image
+        // formats, so normalize only the copy being sent to Instagram and
+        // leave the source asset untouched.
+        if instagram_compatible
+            && content_type.starts_with("image/")
+            && content_type != "image/jpeg"
+        {
+            #[cfg(target_os = "macos")]
+            {
+                let converted = std::env::temp_dir().join(format!(
+                    "spaces-instagram-{}.jpg",
+                    temp_suffix()
+                ));
+                let output = Command::new("/usr/bin/sips")
+                    .args(["-s", "format", "jpeg", "-s", "formatOptions", "95"])
+                    .arg(&real)
+                    .arg("--out")
+                    .arg(&converted)
+                    .output()
+                    .map_err(|error| {
+                        format!("could not prepare this image for Instagram: {error}")
+                    })?;
+                if !output.status.success() || !converted.is_file() {
+                    let _ = std::fs::remove_file(&converted);
+                    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    return Err(if detail.is_empty() {
+                        "Could not convert this image to the JPEG format Instagram requires."
+                            .into()
+                    } else {
+                        format!("Could not convert this image for Instagram: {detail}")
+                    });
+                }
+                upload_path = converted.clone();
+                file_name = real
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("{value}.jpg"))
+                    .unwrap_or_else(|| "instagram-media.jpg".into());
+                content_type = "image/jpeg".into();
+                converted_path = Some(converted);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                return Err(
+                    "Instagram feed images must be JPEG. Convert this image to .jpg and try again."
+                        .into(),
+                );
+            }
         }
-        payload
-            .media
-            .ok_or_else(|| "Spaces did not return the uploaded media URL.".into())
+        let upload_metadata = std::fs::metadata(&upload_path)
+            .map_err(|error| format!("could not inspect {}: {error}", upload_path.display()))?;
+        if upload_metadata.len() == 0 {
+            let _ = converted_path
+                .as_ref()
+                .map(|path| std::fs::remove_file(path));
+            return Err("The prepared media file is empty.".into());
+        }
+        if upload_metadata.len() > 95 * 1024 * 1024 {
+            let _ = converted_path
+                .as_ref()
+                .map(|path| std::fs::remove_file(path));
+            return Err("Media uploads are limited to 95 MB.".into());
+        }
+        let result = (|| -> Result<PortalMedia, String> {
+            let mut endpoint = reqwest::Url::parse(base_url.trim())
+                .map_err(|error| format!("Spaces site address is invalid: {error}"))?
+                .join("/api/device/media")
+                .map_err(|error| format!("Spaces upload address is invalid: {error}"))?;
+            endpoint
+                .query_pairs_mut()
+                .append_pair("filename", &file_name)
+                .append_pair("projectId", project_id.trim());
+            let file = std::fs::File::open(&upload_path).map_err(|error| {
+                format!("could not open {}: {error}", upload_path.display())
+            })?;
+            let client = reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(300))
+                .build()
+                .map_err(|error| format!("could not prepare the media upload: {error}"))?;
+            let response = client
+                .post(endpoint)
+                .bearer_auth(token.trim())
+                .header(reqwest::header::CONTENT_TYPE, &content_type)
+                .header(reqwest::header::CONTENT_LENGTH, upload_metadata.len())
+                .body(reqwest::blocking::Body::sized(
+                    file,
+                    upload_metadata.len(),
+                ))
+                .send()
+                .map_err(|error| format!("Spaces could not upload the media file: {error}"))?;
+            let status = response.status();
+            let payload = response
+                .json::<PortalMediaResponse>()
+                .map_err(|error| format!("Spaces returned an invalid upload response: {error}"))?;
+            if !status.is_success() {
+                return Err(payload
+                    .error
+                    .unwrap_or_else(|| format!("Spaces rejected the upload ({status}).")));
+            }
+            payload
+                .media
+                .ok_or_else(|| "Spaces did not return the uploaded media URL.".into())
+        })();
+        if let Some(path) = converted_path {
+            let _ = std::fs::remove_file(path);
+        }
+        result
     })
     .await
     .map_err(|error| format!("media upload task failed: {error}"))?

@@ -251,6 +251,7 @@ export async function uploadPortalMedia(
   path: string,
   projectId = "",
   allowedRoot = "",
+  instagramCompatible = false,
 ): Promise<PortalMedia> {
   const connection = await loadPortalConnection();
   if (!connection) {
@@ -262,6 +263,7 @@ export async function uploadPortalMedia(
     baseUrl: connection.base_url,
     token: connection.token,
     projectId,
+    instagramCompatible,
   });
 }
 
