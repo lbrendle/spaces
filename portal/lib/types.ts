@@ -164,6 +164,7 @@ export interface ContentItem {
   scheduledAt: number;
   publishedUrl: string;
   mediaUrl: string;
+  mediaItems: string;
   publishError: string;
   agentId: string;
   createdBy: string;

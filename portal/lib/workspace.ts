@@ -1076,9 +1076,9 @@ export async function mutateWorkspace(
       `INSERT INTO content_items
         (id, workspace_id, project_id, campaign, title, brief, copy, platform,
          connection_id, status, scheduled_at, published_url, media_url,
-         publish_error, agent_id, created_by, source_device_id,
+         media_items, publish_error, agent_id, created_by, source_device_id,
          source_content_id, created_at, updated_at, revision)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, ?, 0)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, ?, 0)`,
       contentId,
       context.workspace.id,
       projectId || null,
@@ -1100,6 +1100,7 @@ export async function mutateWorkspace(
       Math.max(0, Number(input.scheduledAt) || 0),
       text(input.publishedUrl, 2_000),
       text(input.mediaUrl, 2_000),
+      text(input.mediaItems, 20_000) || "[]",
       agentId,
       context.user.id,
       contentId,
@@ -1129,7 +1130,8 @@ export async function mutateWorkspace(
       `SELECT id, COALESCE(project_id, '') AS projectId, campaign, title, brief,
               copy, platform, connection_id AS connectionId, status,
               scheduled_at AS scheduledAt, published_url AS publishedUrl,
-              media_url AS mediaUrl, publish_error AS publishError,
+              media_url AS mediaUrl, media_items AS mediaItems,
+              publish_error AS publishError,
               agent_id AS agentId, created_by AS createdBy,
               source_device_id AS sourceDeviceId,
               source_content_id AS sourceContentId,
@@ -1190,7 +1192,7 @@ export async function mutateWorkspace(
       `UPDATE content_items
           SET project_id = ?, campaign = ?, title = ?, brief = ?, copy = ?,
               platform = ?, connection_id = ?, status = ?, scheduled_at = ?,
-              published_url = ?, media_url = ?, publish_error = ?,
+              published_url = ?, media_url = ?, media_items = ?, publish_error = ?,
               agent_id = ?, updated_at = ?
         WHERE workspace_id = ? AND id = ?`,
       projectId || null,
@@ -1224,6 +1226,9 @@ export async function mutateWorkspace(
         ? text(input.publishedUrl, 2_000)
         : existing.publishedUrl,
       has("mediaUrl") ? text(input.mediaUrl, 2_000) : existing.mediaUrl,
+      has("mediaItems")
+        ? text(input.mediaItems, 20_000) || "[]"
+        : existing.mediaItems,
       has("publishError") && typeof input.publishError === "string"
         ? input.publishError.slice(0, 4_000)
         : existing.publishError,

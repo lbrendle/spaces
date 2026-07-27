@@ -542,6 +542,7 @@ export const contentItems = sqliteTable(
     scheduledAt: integer("scheduled_at").notNull().default(0),
     publishedUrl: text("published_url").notNull().default(""),
     mediaUrl: text("media_url").notNull().default(""),
+    mediaItems: text("media_items").notNull().default("[]"),
     publishError: text("publish_error").notNull().default(""),
     agentId: text("agent_id").notNull().default(""),
     createdBy: text("created_by").notNull(),

@@ -74,6 +74,7 @@ export interface ContentItem {
   scheduled_at: number;
   published_url: string;
   media_url: string;
+  media_items: string;
   publish_error: string;
   agent_id: string;
   created_at: number;
@@ -748,13 +749,15 @@ export async function listContentItems(): Promise<ContentItem[]> {
 }
 
 export async function createContentItem(
-  input: Pick<ContentItem, "project_id" | "campaign" | "title" | "brief" | "copy" | "platform" | "connection_id" | "status" | "scheduled_at" | "agent_id" | "media_url">
+  input: Pick<ContentItem, "project_id" | "campaign" | "title" | "brief" | "copy" | "platform" | "connection_id" | "status" | "scheduled_at" | "agent_id" | "media_url"> &
+    Partial<Pick<ContentItem, "media_items">>
 ): Promise<ContentItem> {
   const db = await getDb();
   const stamp = now();
   const row: ContentItem = {
     id: uid(),
     ...input,
+    media_items: input.media_items ?? "[]",
     published_url: "",
     publish_error: "",
     created_at: stamp,
@@ -764,8 +767,8 @@ export async function createContentItem(
     `INSERT INTO content_items
      (id, project_id, campaign, title, brief, copy, platform, status,
       connection_id, scheduled_at, published_url, agent_id, media_url,
-      publish_error, created_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      media_items, publish_error, created_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
     [
       row.id,
       row.project_id,
@@ -780,6 +783,7 @@ export async function createContentItem(
       row.published_url,
       row.agent_id,
       row.media_url,
+      row.media_items,
       row.publish_error,
       row.created_at,
       row.updated_at,
@@ -804,6 +808,7 @@ export async function patchContentItem(
       | "scheduled_at"
       | "published_url"
       | "media_url"
+      | "media_items"
       | "publish_error"
       | "agent_id"
     >
@@ -824,6 +829,7 @@ export async function patchContentItem(
         "scheduled_at",
         "published_url",
         "media_url",
+        "media_items",
         "publish_error",
         "agent_id",
       ].includes(key)
@@ -865,6 +871,7 @@ export async function publishContentItem(
     }>("social.publish", provider, {
       copy: item.copy,
       mediaUrl: item.media_url,
+      mediaUrls: contentMedia(item).filter((media) => media.role !== "story").map((media) => media.url),
       projectId: item.project_id,
       connectionId: item.connection_id,
     });
@@ -880,6 +887,38 @@ export async function publishContentItem(
     });
     throw reason;
   }
+}
+
+export interface ContentMedia {
+  url: string;
+  role: "post" | "story";
+  label: string;
+}
+
+export function contentMedia(item: Pick<ContentItem, "media_url" | "media_items">): ContentMedia[] {
+  const values: ContentMedia[] = [];
+  try {
+    const parsed = JSON.parse(item.media_items || "[]");
+    if (Array.isArray(parsed)) {
+      for (const value of parsed) {
+        if (!value || typeof value !== "object") continue;
+        const entry = value as Record<string, unknown>;
+        const url = typeof entry.url === "string" ? entry.url.trim() : "";
+        if (!url || !/^https:\/\//i.test(url)) continue;
+        values.push({
+          url,
+          role: entry.role === "story" ? "story" : "post",
+          label: typeof entry.label === "string" ? entry.label.slice(0, 180) : "",
+        });
+      }
+    }
+  } catch {
+    // Keep the legacy cover below.
+  }
+  if (item.media_url && !values.some((entry) => entry.url === item.media_url)) {
+    values.unshift({ url: item.media_url, role: "post", label: "" });
+  }
+  return values;
 }
 
 export async function uploadContentMedia(

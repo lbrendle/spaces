@@ -36,6 +36,7 @@ import {
   createCalendarEvent,
   createCloudCalendarEvent,
   createContentItem,
+  contentMedia,
   createDocument,
   createDraft,
   deleteContentItem,
@@ -2803,6 +2804,7 @@ const CONTENT_FIELDS = [
   "scheduled_at",
   "published_url",
   "media_url",
+  "media_items",
   "publish_error",
   "agent_id",
 ] as const;
@@ -3696,7 +3698,10 @@ function ContentDetail({
     setUploadingMedia(true);
     try {
       const mediaUrl = await uploadContentMedia(chosen, draft.project_id);
-      onPatch({ media_url: mediaUrl });
+      onPatch({
+        media_url: mediaUrl,
+        media_items: JSON.stringify([{ url: mediaUrl, role: "post" }]),
+      });
       toast.success("Media uploaded to this workspace");
     } catch (reason) {
       toast.error("Could not upload that media", reason);
@@ -3932,7 +3937,15 @@ function ContentDetail({
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
-              onChange={(event) => onPatch({ media_url: event.target.value })}
+              onChange={(event) => {
+                const url = event.target.value;
+                onPatch({
+                  media_url: url,
+                  media_items: url
+                    ? JSON.stringify([{ url, role: "post" }])
+                    : "[]",
+                });
+              }}
             />
             <button
               className="btn subtle"
@@ -3952,6 +3965,16 @@ function ContentDetail({
                 ? `Spaces uploads the file and gives ${target.label} a URL it can fetch.`
                 : "Optional. Upload a local file or paste a URL the network can reach."}
             </p>
+          )}
+          {contentMedia(draft).length > 1 && (
+            <div className="content-media-set">
+              {contentMedia(draft).slice(1).map((media) => (
+                <div key={`${media.role}:${media.url}`}>
+                  <span>{media.role}</span>
+                  <MediaPreview url={media.url} />
+                </div>
+              ))}
+            </div>
           )}
         </section>
 

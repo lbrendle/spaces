@@ -321,6 +321,72 @@ function formValue(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
 }
 
+function messageContent(body: string): ReactNode[] {
+  const pattern = /!\[([^\]\n]*)\]\((https:\/\/[^\s)]+)\)/gi;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const match of body.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      parts.push(<span key={`text-${cursor}`}>{body.slice(cursor, index)}</span>);
+    }
+    const url = match[2];
+    const label = match[1] || "Shared media";
+    const video = /\.(?:mp4|mov|m4v|webm)(?:[?#]|$)/i.test(url);
+    parts.push(
+      video ? (
+        <video
+          key={`media-${index}`}
+          className="message-media"
+          controls
+          preload="metadata"
+          src={url}
+          aria-label={label}
+        />
+      ) : (
+        <a
+          key={`media-${index}`}
+          className="message-media-link"
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <img className="message-media" src={url} alt={label} loading="lazy" />
+        </a>
+      ),
+    );
+    cursor = index + match[0].length;
+  }
+  if (cursor < body.length) {
+    parts.push(<span key={`text-${cursor}`}>{body.slice(cursor)}</span>);
+  }
+  return parts.length ? parts : [<span key="text">{body}</span>];
+}
+
+function contentMedia(item: Pick<ContentItem, "mediaUrl" | "mediaItems">) {
+  const media: Array<{ url: string; role: "post" | "story" }> = [];
+  try {
+    const parsed = JSON.parse(item.mediaItems || "[]");
+    if (Array.isArray(parsed)) {
+      for (const value of parsed) {
+        if (!value || typeof value !== "object") continue;
+        const entry = value as Record<string, unknown>;
+        if (typeof entry.url !== "string" || !/^https:\/\//i.test(entry.url)) continue;
+        media.push({
+          url: entry.url,
+          role: entry.role === "story" ? "story" : "post",
+        });
+      }
+    }
+  } catch {
+    // The legacy cover remains the fallback below.
+  }
+  if (item.mediaUrl && !media.some((entry) => entry.url === item.mediaUrl)) {
+    media.unshift({ url: item.mediaUrl, role: "post" });
+  }
+  return media;
+}
+
 export function PortalApp() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [surface, setSurfaceState] = useState<Surface>("overview");
@@ -1969,7 +2035,7 @@ function MessagesSurface({
                           <time>{pending ? "sending…" : relative(message.createdAt)}</time>
                         </header>
                       )}
-                      <p>{message.body}</p>
+                      <div className="message-body">{messageContent(message.body)}</div>
                     </div>
                   </article>
                 );
@@ -2273,6 +2339,7 @@ function ContentStudioSurface({
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const scheduled = formValue(form, "scheduledAt");
+    const mediaUrl = formValue(form, "mediaUrl");
     const input: Record<string, unknown> = {
       action: selected ? "update_content" : "create_content",
       title: formValue(form, "title"),
@@ -2283,10 +2350,15 @@ function ContentStudioSurface({
       platform: formValue(form, "platform"),
       status: formValue(form, "status"),
       connectionId: formValue(form, "connectionId"),
-      mediaUrl: formValue(form, "mediaUrl"),
+      mediaUrl,
       agentId: formValue(form, "agentId"),
       scheduledAt: scheduled ? Date.parse(scheduled) : 0,
     };
+    if (!selected || mediaUrl !== selected.mediaUrl) {
+      input.mediaItems = mediaUrl
+        ? JSON.stringify([{ url: mediaUrl, role: "post" }])
+        : "[]";
+    }
     if (selected) input.contentId = selected.id;
     await mutate(
       input,
@@ -2365,9 +2437,11 @@ function ContentStudioSurface({
                     const agent = snapshot.agents.find(
                       (candidate) => candidate.id === item.agentId,
                     );
+                    const media = contentMedia(item);
+                    const cover = media.find((entry) => entry.role === "post")?.url || "";
                     const image =
-                      /^https:\/\//i.test(item.mediaUrl) &&
-                      /\.(png|jpe?g|gif|webp|avif)(?:[?#]|$)/i.test(item.mediaUrl);
+                      /^https:\/\//i.test(cover) &&
+                      /\.(png|jpe?g|gif|webp|avif)(?:[?#]|$)/i.test(cover);
                     return (
                       <article
                         className={`issue-card content-card ${
@@ -2398,10 +2472,15 @@ function ContentStudioSurface({
                         {image && (
                           <img
                             className="content-card-media"
-                            src={item.mediaUrl}
+                            src={cover}
                             alt=""
                             loading="lazy"
                           />
+                        )}
+                        {media.length > 1 && (
+                          <span className="content-media-count">
+                            {media.length} assets
+                          </span>
                         )}
                         <div className="issue-card-top">
                           <span className="content-platform">

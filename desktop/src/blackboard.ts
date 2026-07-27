@@ -17,7 +17,7 @@ import type {
   Agent, Assignment, Channel, ChannelMember, EntityRef, Link, MemoryEntry, MemoryKind,
   Project, Task, TaskStatus, Team, TeamMember, Vault, VaultFile,
 } from "./types";
-import type { ContentItem, DocumentRecord } from "./operations";
+import { contentMedia, type ContentItem, type DocumentRecord } from "./operations";
 import {
   stableKnowledgeIdentities,
   stableKnowledgeIdentity,
@@ -459,7 +459,11 @@ function buildContent(
       `- Owner: ${cell(agent?.name || "Unassigned")}`,
       `- Connection: \`${item.connection_id || ""}\``,
       `- Scheduled: ${item.scheduled_at ? new Date(item.scheduled_at).toISOString() : "Not scheduled"}`,
-      `- Media: ${item.media_url || "None"}`,
+      `- Media: ${
+        contentMedia(item).length
+          ? contentMedia(item).map((media) => `${media.role}:${media.url}`).join(", ")
+          : "None"
+      }`,
       `- Published: ${item.published_url || "Not published"}`,
       `- Updated: ${new Date(item.updated_at || 0).toISOString()}`,
       ...(item.publish_error ? [`- Publish error: ${oneLine(item.publish_error)}`] : []),

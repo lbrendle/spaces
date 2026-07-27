@@ -1638,6 +1638,24 @@
   max-width: 260px;
   margin: calc(var(--space-2) * -1) 0 var(--space-5);
 }
+.content-media-set {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-5);
+}
+.content-media-set > div {
+  min-width: 0;
+}
+.content-media-set > div > span {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+}
+.content-media-set .content-media {
+  margin-top: var(--space-1);
+}
 .content-media-entry {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

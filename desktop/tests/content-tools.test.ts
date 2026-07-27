@@ -20,7 +20,10 @@ test("agents receive the complete shared Content Studio lifecycle", async () => 
   }
   assert.match(operations, /Pass content:<id>/);
   assert.match(operations, /canonical shared Content Studio board/);
-  assert.match(operations, /resolvedContentMedia/);
+  assert.match(operations, /resolvedMediaList/);
+  assert.match(operations, /story_media_paths/);
+  assert.match(operations, /media_items/);
+  assert.match(sync, /mediaItems/);
   assert.match(sync, /contentItemRecords/);
   assert.match(sync, /entity = 'content_item'/);
   assert.match(

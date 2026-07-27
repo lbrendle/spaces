@@ -630,6 +630,11 @@ CREATE TABLE IF NOT EXISTS legacy_imports (
 );
 `;
 
+/** v21 — multi-asset Content Studio cards (carousel, story and video sets). */
+const MIGRATION_V21 = `
+ALTER TABLE content_items ADD COLUMN media_items TEXT NOT NULL DEFAULT '[]';
+`;
+
 async function importLegacyHqData(db: Database): Promise<void> {
   const legacyPath = await invoke<string | null>("legacy_hq_database_path");
   if (!legacyPath) return;
@@ -1050,6 +1055,10 @@ export async function getDb(): Promise<Database> {
         await applyStatements(db, MIGRATION_V20, true);
         await importLegacyHqData(db);
         await db.execute("PRAGMA user_version = 20");
+      }
+      if (at < 21) {
+        await applyStatements(db, MIGRATION_V21, true);
+        await db.execute("PRAGMA user_version = 21");
       }
       return db;
     })().catch((e) => {

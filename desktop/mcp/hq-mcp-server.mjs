@@ -455,6 +455,9 @@ function snapshotAnswer(tool, args) {
   if (tool.name === "spaces_list_messages") {
     return messageListAnswer(args);
   }
+  if (tool.name === "spaces_list_media") {
+    return mediaListAnswer(args);
+  }
   if (tool.name === "spaces_search_knowledge") {
     return knowledgeSearchAnswer(args);
   }
@@ -686,6 +689,130 @@ function messageListAnswer(args) {
           `${message.authorName} (${message.authorType}) [${message.status}]${route}\n${body}`
         );
       })
+      .join("\n\n"),
+  );
+}
+
+function mediaListAnswer(args) {
+  const requestedChannel =
+    typeof args.channel === "string"
+      ? args.channel.replace(/^channel:/i, "").trim()
+      : "";
+  let channelId = "";
+  if (requestedChannel) {
+    const found = rows(
+      `SELECT id
+         FROM channels
+        WHERE id = ? OR lower(name) = lower(?)
+        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+        LIMIT 2`,
+      [requestedChannel, requestedChannel, requestedChannel],
+    );
+    if (!found.ok) return text(found.problem, true);
+    if (found.rows.length !== 1) {
+      return text(
+        found.rows.length
+          ? `"${requestedChannel}" matches more than one channel. Use channel:<id>.`
+          : `No channel matches "${requestedChannel}".`,
+        true,
+      );
+    }
+    channelId = String(found.rows[0].id);
+  }
+
+  const requestedProject =
+    typeof args.project === "string" ? args.project.trim() : "";
+  let projectId =
+    requestedProject.toLowerCase() === "all"
+      ? ""
+      : requestedProject || CALLER.project_id;
+  if (projectId && projectId !== CALLER.project_id) {
+    const found = rows(
+      `SELECT id
+         FROM projects
+        WHERE id = ? OR lower(name) = lower(?)
+        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+        LIMIT 2`,
+      [projectId, projectId, projectId],
+    );
+    if (!found.ok) return text(found.problem, true);
+    if (found.rows.length !== 1) {
+      return text(
+        found.rows.length
+          ? `"${projectId}" matches more than one project. Use its exact id.`
+          : `No project matches "${projectId}".`,
+        true,
+      );
+    }
+    projectId = String(found.rows[0].id);
+  }
+
+  const loaded = rows(
+    `SELECT m.id, m.content, COALESCE(c.name, '') AS channelName
+       FROM messages m
+       JOIN channels c ON c.id = m.channel_id
+      WHERE (? = '' OR m.channel_id = ?)
+        AND (? = '' OR c.project_id = ?)
+      ORDER BY m.created_at DESC
+      LIMIT 500`,
+    [channelId, channelId, projectId, projectId],
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  let cards = rows(
+    `SELECT ci.id, ci.title, ci.media_url AS mediaUrl,
+            ci.media_items AS mediaItems
+       FROM content_items ci
+      WHERE ci.media_url <> ''
+        AND (? = '' OR ci.project_id = ?)
+      ORDER BY ci.updated_at DESC
+      LIMIT 200`,
+    [projectId, projectId],
+  );
+  if (!cards.ok && /no such column: .*media_items/i.test(cards.problem)) {
+    cards = rows(
+      `SELECT ci.id, ci.title, ci.media_url AS mediaUrl, '[]' AS mediaItems
+         FROM content_items ci
+        WHERE ci.media_url <> ''
+          AND (? = '' OR ci.project_id = ?)
+        ORDER BY ci.updated_at DESC
+        LIMIT 200`,
+      [projectId, projectId],
+    );
+  }
+  if (!cards.ok) return text(cards.problem, true);
+
+  const found = new Map();
+  const imagePattern = /!\[[^\]]*\]\((https:\/\/[^\s)]+)\)/gi;
+  for (const message of loaded.rows) {
+    for (const match of String(message.content).matchAll(imagePattern)) {
+      if (!found.has(match[1])) {
+        found.set(match[1], `message:${message.id} in #${message.channelName}`);
+      }
+    }
+  }
+  for (const card of cards.rows) {
+    const urls = [String(card.mediaUrl || "")];
+    try {
+      const items = JSON.parse(String(card.mediaItems || "[]"));
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          if (item && typeof item === "object" && typeof item.url === "string") {
+            urls.push(item.url);
+          }
+        }
+      }
+    } catch {
+      // Legacy or malformed sets still expose their cover URL.
+    }
+    for (const url of urls) {
+      if (url && !found.has(url)) found.set(url, `content:${card.id} — ${card.title}`);
+    }
+  }
+  if (!found.size) return text("No shared workspace media matches.");
+  return text(
+    [...found.entries()]
+      .slice(0, 100)
+      .map(([url, label]) => `${label}\n${url}`)
       .join("\n\n"),
   );
 }
@@ -1020,13 +1147,29 @@ function contentSections() {
 }
 
 function liveContentRows() {
+  const current = rows(
+    `SELECT c.id, c.project_id AS projectId, c.campaign, c.title, c.brief,
+            c.copy, c.platform, c.connection_id AS connectionId, c.status,
+            c.scheduled_at AS scheduledAt, c.published_url AS publishedUrl,
+            c.media_url AS mediaUrl, c.media_items AS mediaItems,
+            c.publish_error AS publishError,
+            c.updated_at AS updatedAt, COALESCE(p.name, '') AS project,
+            COALESCE(a.name, '') AS owner
+       FROM content_items c
+       LEFT JOIN projects p ON p.id = c.project_id
+       LEFT JOIN agents a ON a.id = c.agent_id
+      ORDER BY c.updated_at DESC, c.created_at DESC, c.id`,
+  );
+  if (current.ok || !/no such column: .*media_items/i.test(current.problem)) {
+    return current;
+  }
   return rows(
     `SELECT c.id, c.project_id AS projectId, c.campaign, c.title, c.brief,
             c.copy, c.platform, c.connection_id AS connectionId, c.status,
             c.scheduled_at AS scheduledAt, c.published_url AS publishedUrl,
-            c.media_url AS mediaUrl, c.publish_error AS publishError,
-            c.updated_at AS updatedAt, COALESCE(p.name, '') AS project,
-            COALESCE(a.name, '') AS owner
+            c.media_url AS mediaUrl, '[]' AS mediaItems,
+            c.publish_error AS publishError, c.updated_at AS updatedAt,
+            COALESCE(p.name, '') AS project, COALESCE(a.name, '') AS owner
        FROM content_items c
        LEFT JOIN projects p ON p.id = c.project_id
        LEFT JOIN agents a ON a.id = c.agent_id
@@ -1035,6 +1178,20 @@ function liveContentRows() {
 }
 
 function liveContentBlock(item) {
+  let media = [];
+  try {
+    const parsed = JSON.parse(String(item.mediaItems || "[]"));
+    if (Array.isArray(parsed)) {
+      media = parsed.filter(
+        (entry) => entry && typeof entry === "object" && typeof entry.url === "string",
+      );
+    }
+  } catch {
+    // Legacy cover below.
+  }
+  if (item.mediaUrl && !media.some((entry) => entry.url === item.mediaUrl)) {
+    media.unshift({ url: item.mediaUrl, role: "post" });
+  }
   return [
     `content:${item.id} — ${item.title}`,
     `stage=${item.status} · project=${item.project || "No project"} · platform=${item.platform}` +
@@ -1042,7 +1199,9 @@ function liveContentBlock(item) {
     `owner=${item.owner || "Unassigned"} · connection=${item.connectionId || "not selected"}`,
     item.brief ? `brief:\n${item.brief}` : "brief: No brief yet.",
     item.copy ? `copy:\n${item.copy}` : "copy: No copy yet.",
-    item.mediaUrl ? `media: ${item.mediaUrl}` : "media: None",
+    media.length
+      ? `media:\n${media.map((entry) => `- ${entry.role === "story" ? "story" : "post"}: ${entry.url}`).join("\n")}`
+      : "media: None",
     item.scheduledAt
       ? `scheduled: ${new Date(Number(item.scheduledAt)).toISOString()}`
       : "scheduled: Not scheduled",

@@ -15,6 +15,7 @@ import {
   mcpCodexArgs,
   mcpServerPath,
   setupControlMcp,
+  setupMcp,
 } from "./mcpsetup";
 import type {
   ActivityEvent, Agent, AgentKind, Channel, ChannelMode, Message, Project,
@@ -199,6 +200,27 @@ const claudeAdapter: AgentAdapter = {
 
   buildArgs(agent, resumeSession, runtimeContractPath) {
     const extra = parseArgs(agent.cli_args ?? "");
+    let hasPermissionMode = false;
+    for (let index = 0; index < extra.length; index++) {
+      const value = extra[index];
+      if (value === "--permission-mode") {
+        hasPermissionMode = true;
+        // acceptEdits was Spaces's old default. It cannot answer a permission
+        // prompt in print mode, so existing agents using that generated value
+        // are upgraded to the headless full-access mode automatically.
+        if (extra[index + 1] === "acceptEdits") {
+          extra[index + 1] = "bypassPermissions";
+        }
+      } else if (value.startsWith("--permission-mode=")) {
+        hasPermissionMode = true;
+        if (value === "--permission-mode=acceptEdits") {
+          extra[index] = "--permission-mode=bypassPermissions";
+        }
+      }
+    }
+    if (!hasPermissionMode) {
+      extra.push("--permission-mode", "bypassPermissions");
+    }
     const args = ["-p", "--output-format", "stream-json", "--verbose"];
     if (resumeSession) args.push("--resume", resumeSession);
     if (agent.model) args.push("--model", agent.model);
@@ -1539,6 +1561,28 @@ export async function runAgent(
     }
   }
 
+  // The harness discovers project MCP servers from its launch directory. An
+  // isolated agent starts in a git worktree, so the registration written in
+  // the main checkout is not visible there. Repair and verify the complete
+  // contract at the final cwd on every run; launching without tools makes a
+  // healthy-looking agent that cannot actually use Spaces.
+  if (!remote && mcpProject && cwd) {
+    try {
+      const setup = await setupMcp(mcpProject, cwd);
+      const problems = [
+        setup.server.error,
+        setup.tools.error,
+        setup.runtime.error,
+        setup.registration.error,
+        setup.permissions.error,
+        setup.status.problem,
+      ].filter(Boolean);
+      if (problems.length) throw new Error(problems.join("; "));
+    } catch (error) {
+      return fail(`Spaces could not make its tools available to ${agent.name}: ${String(error)}`);
+    }
+  }
+
   await store.insertMessage({
     id: msgId,
     channel_id: channelId,
@@ -1652,10 +1696,9 @@ export async function runAgent(
         error: "could not write the runtime contract",
       }))
     : { path: "", written: false, error: "" };
-  // Codex takes its MCP config as spawn arguments; Claude reads .mcp.json from
-  // the project, which blackboard.ts writes. Ritz has neither and reaches the
-  // same operations through .hq/actions.jsonl — the transport every kind can
-  // use, and the reason MCP is an accelerant here rather than a requirement.
+  // Codex takes its MCP config as spawn arguments. Claude reads the .mcp.json
+  // we verified in the exact cwd above. Ritz has neither and reaches the same
+  // operations through .hq/actions.jsonl.
   const adapterArgs = [
     ...(agent.kind === "codex" && mcpProject ? mcpCodexArgs(mcpProject) : []),
     ...adapter.buildArgs(agent, session, runtimeContract.error ? "" : runtimeContract.path),

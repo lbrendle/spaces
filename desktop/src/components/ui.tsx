@@ -13,6 +13,7 @@ function escapeHtml(s: string): string {
 /** Tiny markdown renderer: fences, inline code, bold/italic, links, headings, lists, quotes. */
 export function mdToHtml(src: string): string {
   const fences: string[] = [];
+  const media: string[] = [];
   // NUL sentinels cannot collide with message text: NULs are stripped first.
   let text = src.replace(/\u0000/g, "").replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, lang, code) => {
     fences.push(
@@ -21,6 +22,21 @@ export function mdToHtml(src: string): string {
     return ` \u0000F${fences.length - 1}\u0000 `;
   });
   text = escapeHtml(text);
+  // Protect media before ordinary link/autolink handling, otherwise the URL
+  // inside the generated element is linked a second time. Only HTTPS is
+  // accepted; local worktree paths must be uploaded through Spaces first.
+  text = text.replace(
+    /!\[([^\]\n]*)\]\((https:\/\/[^\s)]+)\)/g,
+    (_match, alt, url) => {
+      const video = /\.(?:mp4|mov|m4v|webm)(?:[?#]|$)/i.test(url);
+      media.push(
+        video
+          ? `<video class="md-media" controls preload="metadata" src="${url}" aria-label="${alt || "Shared video"}"></video>`
+          : `<a class="md-media-link" href="${url}" target="_blank" rel="noreferrer"><img class="md-media" src="${url}" alt="${alt || "Shared image"}" loading="lazy" /></a>`,
+      );
+      return ` \u0000I${media.length - 1}\u0000 `;
+    },
+  );
   text = text.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   text = text.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   text = text.replace(/(^|\W)\*([^*\n]+)\*(?=\W|$)/g, "$1<em>$2</em>");
@@ -56,6 +72,7 @@ export function mdToHtml(src: string): string {
   if (inList) out.push("</ul>");
   let html = out.join("");
   html = html.replace(/ ?\u0000F(\d+)\u0000 ?/g, (_m, i) => fences[Number(i)]);
+  html = html.replace(/ ?\u0000I(\d+)\u0000 ?/g, (_m, i) => media[Number(i)]);
   return html;
 }
 

@@ -30,6 +30,7 @@ interface ActionInput {
   allDay?: boolean;
   copy?: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   connectionId?: string;
   projectId?: string;
 }
@@ -563,26 +564,69 @@ async function publishSocial(
     };
   }
   if (access.provider === "meta") {
-    const mediaUrl = httpsMediaUrl(input.mediaUrl);
+    const mediaUrls = [
+      ...(Array.isArray(input.mediaUrls) ? input.mediaUrls : []),
+      ...(input.mediaUrl ? [input.mediaUrl] : []),
+    ]
+      .map(httpsMediaUrl)
+      .filter((url, index, values) => values.indexOf(url) === index)
+      .slice(0, 10);
+    if (!mediaUrls.length) throw new Error("Instagram media is required.");
     const version = requiredRuntime("META_GRAPH_VERSION");
     const instagramId = access.accountId;
     if (!instagramId) {
       throw new Error("The connected Instagram account is missing its account ID.");
     }
-    const containerBody = new URLSearchParams({
-      image_url: mediaUrl,
-      caption: copy,
-    });
-    const container = await providerJson<{ id?: string }>(
-      `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media`,
-      access,
-      { method: "POST", body: containerBody },
-    );
-    if (!container.id) {
+    let creationId = "";
+    if (mediaUrls.length === 1) {
+      const container = await providerJson<{ id?: string }>(
+        `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media`,
+        access,
+        {
+          method: "POST",
+          body: new URLSearchParams({
+            image_url: mediaUrls[0],
+            caption: copy,
+          }),
+        },
+      );
+      creationId = String(container.id ?? "");
+    } else {
+      const children: string[] = [];
+      for (const imageUrl of mediaUrls) {
+        const child = await providerJson<{ id?: string }>(
+          `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media`,
+          access,
+          {
+            method: "POST",
+            body: new URLSearchParams({
+              image_url: imageUrl,
+              is_carousel_item: "true",
+            }),
+          },
+        );
+        if (!child.id) throw new Error("Instagram could not create a carousel item.");
+        children.push(String(child.id));
+      }
+      const carousel = await providerJson<{ id?: string }>(
+        `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media`,
+        access,
+        {
+          method: "POST",
+          body: new URLSearchParams({
+            media_type: "CAROUSEL",
+            children: children.join(","),
+            caption: copy,
+          }),
+        },
+      );
+      creationId = String(carousel.id ?? "");
+    }
+    if (!creationId) {
       throw new Error("Instagram could not create the media post.");
     }
     const publishBody = new URLSearchParams({
-      creation_id: String(container.id),
+      creation_id: creationId,
     });
     const published = await providerJson<{ id?: string }>(
       `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media_publish`,

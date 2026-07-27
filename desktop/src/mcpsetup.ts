@@ -45,6 +45,8 @@ export const MCP_ACTIONS_REL = `${SPACES_DIR}/actions.jsonl`;
 export const RUNTIME_CONTRACT_REL = `${SPACES_DIR}/RUNTIME.md`;
 /** The harness's own config file, at the root of the directory it starts in. */
 export const MCP_CONFIG_REL = ".mcp.json";
+const LOCAL_GIT_EXCLUDE_REL = ".git/info/exclude";
+const LOCAL_HARNESS_EXCLUDES = [MCP_CONFIG_REL, ".claude/settings.local.json"];
 /** Our key inside `mcpServers`. Anything else in there is someone else's. */
 export const MCP_SERVER_KEY = "hq";
 const MCP_RUNTIME_ENV_VARS = [
@@ -169,6 +171,28 @@ async function writeIfChanged(root: string, rel: string, contents: string): Prom
   } catch (e) {
     return { path, written: false, error: String(e) };
   }
+}
+
+/**
+ * Harness registration contains absolute machine paths and must never become
+ * part of an agent checkpoint. Git's local exclude applies to every linked
+ * worktree without modifying the repository's shared .gitignore.
+ */
+async function ensureLocalHarnessExcludes(project: Project): Promise<void> {
+  const root = mainRoot(project);
+  if (!root) return;
+  const current = await statFile(root, LOCAL_GIT_EXCLUDE_REL);
+  if (current.kind === "unknown") return;
+  const existing = current.kind === "file" ? current.text : "";
+  const lines = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const missing = LOCAL_HARNESS_EXCLUDES.filter((entry) => !lines.has(entry));
+  if (!missing.length) return;
+  const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
+  await writeIfChanged(
+    root,
+    LOCAL_GIT_EXCLUDE_REL,
+    `${existing}${prefix}\n# Spaces local harness registration\n${missing.join("\n")}\n`,
+  );
 }
 
 /* ── the manifest ─────────────────────────────────────────────── */
@@ -506,6 +530,7 @@ export async function mcpStatus(project: Project, root?: string): Promise<McpSta
  * caller can report exactly what changed rather than "done".
  */
 export async function setupMcp(project: Project, root?: string): Promise<McpSetup> {
+  await ensureLocalHarnessExcludes(project);
   const server = await ensureMcpServer(project);
   const toolList = await writeMcpManifest(project);
   const runtime = await ensureRuntimeContract(project);

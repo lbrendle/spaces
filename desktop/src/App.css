@@ -809,6 +809,24 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 .md .md-h2 { font-size: calc(var(--fs) * 1.15); }
 .md .md-h3 { font-size: calc(var(--fs) * 1.04); }
 .md .md-gap { height: var(--space-3); }
+.md .md-media-link {
+  display: inline-block;
+  max-width: min(100%, 760px);
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  vertical-align: top;
+}
+.md .md-media {
+  display: block;
+  width: auto;
+  max-width: min(100%, 760px);
+  max-height: 70vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  object-fit: contain;
+}
 .mention {
   color: var(--accent); background: var(--accent-soft);
   padding: 0.5px 5px; border-radius: var(--radius-sm); font-weight: 600;

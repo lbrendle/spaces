@@ -219,7 +219,7 @@ const CLAUDE_OPTIONS: readonly HarnessOption[] = [
     kind: "flag",
     flag: "--permission-mode",
     choices: ["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"],
-    default: "acceptEdits",
+    default: "bypassPermissions",
     group: "Permissions",
     chip: true,
     risky: {

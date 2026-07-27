@@ -34,6 +34,7 @@ import {
   createAppleCalendarEvent,
   createCloudCalendarEvent,
   createContentItem,
+  contentMedia,
   deleteDocument,
   deleteContentItem,
   listDocuments,
@@ -75,7 +76,7 @@ export type Effect = "auto" | "propose";
 
 export interface OpParam {
   name: string;
-  type: "string" | "number" | "boolean" | "ref" | "enum";
+  type: "string" | "number" | "boolean" | "ref" | "enum" | "array";
   required?: boolean;
   /** For `enum`. */
   choices?: readonly string[];
@@ -115,6 +116,29 @@ export interface Operation {
 function str(args: Record<string, unknown>, key: string): string {
   const v = args[key];
   return typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
+}
+
+function strings(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key];
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter(Boolean);
+  }
+  if (typeof value !== "string") return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter(Boolean);
+    }
+  } catch {
+    // CLI/file-drop callers may use one path per line instead of JSON.
+  }
+  return trimmed.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
 }
 
 function num(args: Record<string, unknown>, key: string): number | null {
@@ -327,50 +351,48 @@ async function contentItem(
   return { error: `No Content Studio card matches "${raw}".` };
 }
 
-async function resolvedContentMedia(
-  args: Record<string, unknown>,
+async function resolvedMediaPath(
+  mediaPath: string,
   ctx: OpContext,
   projectId: string,
-  fallback = "",
 ): Promise<string> {
-  let mediaUrl = str(args, "media_url") || fallback;
-  const mediaPath = str(args, "media_path");
-  if (mediaPath) {
-    const state = useStore.getState();
-    const project = state.projects.find((row) => row.id === projectId);
-    if (!project?.local_path) {
-      throw new Error(
-        "media_path needs a project with a local folder. Link the project folder in Spaces or provide media_url.",
-      );
-    }
-    const agent = state.agents.find((row) => row.id === ctx.agentId);
-    const allowedRoots = [
-      ...(project.isolate && agent ? [worktreePath(project, agent)] : []),
-      project.local_path,
-    ];
-    const isAbsolute =
-      mediaPath.startsWith("/") ||
-      /^[a-zA-Z]:[\\/]/.test(mediaPath) ||
-      mediaPath.startsWith("\\\\");
-    const normalizePath = (value: string) =>
-      value.replace(/\\/g, "/").replace(/\/+$/, "");
-    const normalizedMedia = normalizePath(mediaPath);
-    const allowedRoot = isAbsolute
-      ? allowedRoots.find((root) => {
-          const normalizedRoot = normalizePath(root);
-          return (
-            normalizedMedia === normalizedRoot ||
-            normalizedMedia.startsWith(`${normalizedRoot}/`)
-          );
-        }) ?? project.local_path
-      : allowedRoots[0];
-    const absolute = isAbsolute
-      ? mediaPath
-      : `${allowedRoot.replace(/[\\/]$/, "")}${
-          allowedRoot.includes("\\") ? "\\" : "/"
-        }${mediaPath}`;
-    mediaUrl = await uploadContentMedia(absolute, projectId, allowedRoot);
+  const state = useStore.getState();
+  const project = state.projects.find((row) => row.id === projectId);
+  if (!project?.local_path) {
+    throw new Error(
+      "media_path needs a project with a local folder. Link the project folder in Spaces or provide media_url.",
+    );
   }
+  const agent = state.agents.find((row) => row.id === ctx.agentId);
+  const allowedRoots = [
+    ...(project.isolate && agent ? [worktreePath(project, agent)] : []),
+    project.local_path,
+  ];
+  const isAbsolute =
+    mediaPath.startsWith("/") ||
+    /^[a-zA-Z]:[\\/]/.test(mediaPath) ||
+    mediaPath.startsWith("\\\\");
+  const normalizePath = (value: string) =>
+    value.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedMedia = normalizePath(mediaPath);
+  const allowedRoot = isAbsolute
+    ? allowedRoots.find((root) => {
+        const normalizedRoot = normalizePath(root);
+        return (
+          normalizedMedia === normalizedRoot ||
+          normalizedMedia.startsWith(`${normalizedRoot}/`)
+        );
+      }) ?? project.local_path
+    : allowedRoots[0];
+  const absolute = isAbsolute
+    ? mediaPath
+    : `${allowedRoot.replace(/[\\/]$/, "")}${
+        allowedRoot.includes("\\") ? "\\" : "/"
+      }${mediaPath}`;
+  return uploadContentMedia(absolute, projectId, allowedRoot);
+}
+
+function validMediaUrl(mediaUrl: string): string {
   if (!mediaUrl) return "";
   let parsed: URL;
   try {
@@ -382,6 +404,28 @@ async function resolvedContentMedia(
     throw new Error("media_url must use HTTPS");
   }
   return parsed.toString();
+}
+
+async function resolvedMediaList(
+  args: Record<string, unknown>,
+  ctx: OpContext,
+  projectId: string,
+): Promise<string[]> {
+  const paths = [
+    ...strings(args, "media_paths"),
+    ...(str(args, "media_path") ? [str(args, "media_path")] : []),
+  ];
+  const urls = [
+    ...strings(args, "media_urls"),
+    ...(str(args, "media_url") ? [str(args, "media_url")] : []),
+  ].map(validMediaUrl);
+  if (paths.length + urls.length > 10) {
+    throw new Error("A message can include up to 10 images or videos.");
+  }
+  for (const path of paths) {
+    urls.push(await resolvedMediaPath(path, ctx, projectId));
+  }
+  return [...new Set(urls)];
 }
 
 const REF_HELP = 'either "type:id" as printed in .hq/, or an exact title';
@@ -1621,8 +1665,165 @@ export const OPERATIONS: Operation[] = [
   },
 
   {
+    name: "spaces_list_media",
+    describe:
+      "List durable images and videos already shared in workspace messages or Content Studio. Download an HTTPS URL into your working directory before using your harness image reader.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "channel",
+        type: "ref",
+        describe: "Optional channel name or channel:<id>. Defaults to all channels in the current project.",
+      },
+      {
+        name: "project",
+        type: "string",
+        describe: "Optional project name or id. Defaults to the current project; use all for the workspace.",
+      },
+    ],
+    async run(args, ctx) {
+      const db = await getDb();
+      const requestedChannel = str(args, "channel");
+      const channel = requestedChannel
+        ? resolveRef(requestedChannel, ctx, ["channel"])
+        : {};
+      if (requestedChannel && !channel.ref) {
+        return { ok: false, message: channel.error ?? "channel not found" };
+      }
+      const requestedProject = str(args, "project");
+      const projectId =
+        requestedProject.toLowerCase() === "all"
+          ? ""
+          : requestedProject
+            ? projectOf(args, ctx)
+            : ctx.projectId;
+      const messageRows = await db.select<
+        Array<{ id: string; channel_id: string; channel_name: string; content: string; created_at: number }>
+      >(
+        `SELECT m.id, m.channel_id, c.name AS channel_name, m.content, m.created_at
+           FROM messages m
+           JOIN channels c ON c.id = m.channel_id
+          WHERE ($1 = '' OR m.channel_id = $1)
+            AND ($2 = '' OR c.project_id = $2)
+          ORDER BY m.created_at DESC
+          LIMIT 500`,
+        [channel.ref?.id ?? "", projectId],
+      );
+      const contentRows = await listContentItems();
+      const media = new Map<string, string>();
+      const add = (url: string, label: string) => {
+        try {
+          media.set(validMediaUrl(url), label);
+        } catch {
+          // Ignore malformed or non-HTTPS text that only looks like a URL.
+        }
+      };
+      for (const row of messageRows) {
+        const urls = row.content.match(/https:\/\/[^\s<>)\]]+/gi) ?? [];
+        for (const url of urls) {
+          add(url, `message:${row.id} in #${row.channel_name}`);
+        }
+      }
+      for (const row of contentRows) {
+        if ((!projectId || row.project_id === projectId) && row.media_url) {
+          add(row.media_url, `content:${row.id} — ${row.title}`);
+        }
+      }
+      if (!media.size) {
+        return { ok: true, message: "No shared workspace media matches." };
+      }
+      return {
+        ok: true,
+        message: [...media.entries()]
+          .slice(0, 100)
+          .map(([url, label]) => `${label}\n${url}`)
+          .join("\n\n"),
+      };
+    },
+  },
+
+  {
+    name: "spaces_send_message",
+    describe:
+      "Send text plus up to 10 local images or videos into a Spaces channel. Local files are uploaded to durable shared workspace storage so people and agents on every paired device can see them.",
+    effect: "auto",
+    params: [
+      {
+        name: "channel",
+        type: "ref",
+        describe: "Channel name or channel:<id>. Defaults to the current channel.",
+      },
+      {
+        name: "content",
+        type: "string",
+        describe: "Optional message text. @mentions trigger agents just like a human message.",
+      },
+      {
+        name: "media_paths",
+        type: "array",
+        describe: "Local image or video paths inside this agent's project workspace.",
+      },
+      {
+        name: "media_urls",
+        type: "array",
+        describe: "Existing public HTTPS image or video URLs.",
+      },
+      {
+        name: "project",
+        type: "string",
+        describe: "Project name or id used to scope uploads. Defaults to the current project.",
+      },
+    ],
+    async run(args, ctx) {
+      const requested = str(args, "channel");
+      const resolved = requested
+        ? resolveRef(requested, ctx, ["channel"])
+        : { ref: ctx.channelId ? ({ type: "channel", id: ctx.channelId } as EntityRef) : undefined };
+      if (!resolved.ref) {
+        return { ok: false, message: resolved.error ?? "channel is required" };
+      }
+      const projectId = projectOf(args, ctx);
+      let urls: string[];
+      try {
+        urls = await resolvedMediaList(args, ctx, projectId);
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : "Could not share media.",
+        };
+      }
+      const content = str(args, "content");
+      if (!content && !urls.length) {
+        return { ok: false, message: "content or media_paths is required" };
+      }
+      const attachments = urls.map((url, index) => `![Shared media ${index + 1}](${url})`);
+      const body = [content, ...attachments].filter(Boolean).join("\n\n");
+      const store = useStore.getState();
+      const agent = store.agents.find((candidate) => candidate.id === ctx.agentId);
+      const message = await store.insertMessage({
+        id: crypto.randomUUID(),
+        channel_id: resolved.ref.id,
+        author_type: agent ? "agent" : "system",
+        author_id: ctx.agentId,
+        author_name: agent?.name ?? "Spaces",
+        content: body,
+        status: "done",
+        meta: urls.length ? `${urls.length} shared media attachment${urls.length === 1 ? "" : "s"}` : "",
+      });
+      return {
+        ok: true,
+        message:
+          `Sent message:${message.id} to ${describeEntity(resolved.ref).title}` +
+          `${urls.length ? ` with ${urls.length} shared attachment${urls.length === 1 ? "" : "s"}` : ""}.`,
+        ref: { type: "message", id: message.id },
+      };
+    },
+  },
+
+  {
     name: "hq_post",
-    describe: "Post a message into a channel other than the one you are replying in — for handing something to a different team without waiting for a human to relay it.",
+    describe: "Legacy text-only cross-channel post. Prefer spaces_send_message, which also supports durable shared images and videos.",
     effect: "auto",
     params: [
       { name: "channel", type: "ref", required: true, describe: "Channel name or channel:<id>." },
@@ -1798,6 +1999,11 @@ export const OPERATIONS: Operation[] = [
               row.brief ? `brief: ${row.brief}` : "",
               row.copy ? `copy:\n${row.copy}` : "",
               row.media_url ? `media: ${row.media_url}` : "",
+              contentMedia(row).length > 1
+                ? `media set: ${contentMedia(row)
+                    .map((media) => `${media.role}:${media.url}`)
+                    .join("\n")}`
+                : "",
               row.scheduled_at
                 ? `scheduled: ${new Date(row.scheduled_at).toISOString()}`
                 : "",
@@ -1850,6 +2056,11 @@ export const OPERATIONS: Operation[] = [
             row.scheduled_at ? new Date(row.scheduled_at).toISOString() : "Not scheduled"
           }`,
           `Media: ${row.media_url || "None"}`,
+          contentMedia(row).length > 1
+            ? `Media set:\n${contentMedia(row)
+                .map((media) => `- ${media.role}: ${media.url}`)
+                .join("\n")}`
+            : "",
           `Published: ${row.published_url || "Not published"}`,
           row.publish_error ? `Publish error: ${row.publish_error}` : "",
           `\n## Brief\n${row.brief || "No brief yet."}`,
@@ -1890,14 +2101,48 @@ export const OPERATIONS: Operation[] = [
         type: "string",
         describe: "Local media inside the project. Spaces uploads it to shared workspace storage and attaches it to the card.",
       },
+      {
+        name: "media_paths",
+        type: "array",
+        describe: "Up to 10 local images or videos for a carousel or multi-asset post.",
+      },
+      {
+        name: "media_urls",
+        type: "array",
+        describe: "Existing public HTTPS images or videos for a carousel or multi-asset post.",
+      },
+      {
+        name: "story_media_paths",
+        type: "array",
+        describe: "Local story assets attached to the same campaign card but excluded from the feed carousel.",
+      },
+      {
+        name: "story_media_urls",
+        type: "array",
+        describe: "Existing public HTTPS story assets attached to the same campaign card.",
+      },
     ],
     async run(args, ctx) {
       const title = str(args, "title");
       if (!title) return { ok: false, message: "title is required" };
       const projectId = projectOf(args, ctx);
       let mediaUrl = "";
+      let mediaItems = "[]";
       try {
-        mediaUrl = await resolvedContentMedia(args, ctx, projectId);
+        const postUrls = await resolvedMediaList(args, ctx, projectId);
+        const storyUrls = await resolvedMediaList(
+          {
+            media_paths: strings(args, "story_media_paths"),
+            media_urls: strings(args, "story_media_urls"),
+          },
+          ctx,
+          projectId,
+        );
+        mediaUrl = postUrls[0] ?? "";
+        mediaItems = JSON.stringify([
+          ...postUrls.map((url) => ({ url, role: "post" })),
+          ...storyUrls.map((url) => ({ url, role: "story" })),
+        ]);
       } catch (error) {
         return {
           ok: false,
@@ -1918,6 +2163,7 @@ export const OPERATIONS: Operation[] = [
         scheduled_at: 0,
         agent_id: ctx.agentId,
         media_url: mediaUrl,
+        media_items: mediaItems,
       });
       return {
         ok: true,
@@ -1962,6 +2208,26 @@ export const OPERATIONS: Operation[] = [
         describe: "Local media inside the project. Spaces uploads and attaches it.",
       },
       {
+        name: "media_paths",
+        type: "array",
+        describe: "Replacement carousel or multi-asset post files. Up to 10.",
+      },
+      {
+        name: "media_urls",
+        type: "array",
+        describe: "Replacement public HTTPS carousel or multi-asset URLs.",
+      },
+      {
+        name: "story_media_paths",
+        type: "array",
+        describe: "Replacement story assets attached to this campaign card.",
+      },
+      {
+        name: "story_media_urls",
+        type: "array",
+        describe: "Replacement public HTTPS story assets attached to this campaign card.",
+      },
+      {
         name: "scheduled_at",
         type: "string",
         describe: "ISO 8601 scheduled time, or an empty value to clear it.",
@@ -1986,6 +2252,7 @@ export const OPERATIONS: Operation[] = [
           | "status"
           | "scheduled_at"
           | "media_url"
+          | "media_items"
           | "agent_id"
         >
       > = {};
@@ -2014,13 +2281,30 @@ export const OPERATIONS: Operation[] = [
           patch.scheduled_at = stamp;
         }
       }
-      if (has("media_url") || has("media_path")) {
+      if (
+        has("media_url") ||
+        has("media_path") ||
+        has("media_paths") ||
+        has("media_urls") ||
+        has("story_media_paths") ||
+        has("story_media_urls")
+      ) {
         try {
-          patch.media_url = await resolvedContentMedia(
-            args,
+          const targetProject = patch.project_id ?? item.project_id;
+          const postUrls = await resolvedMediaList(args, ctx, targetProject);
+          const storyUrls = await resolvedMediaList(
+            {
+              media_paths: strings(args, "story_media_paths"),
+              media_urls: strings(args, "story_media_urls"),
+            },
             ctx,
-            patch.project_id ?? item.project_id,
+            targetProject,
           );
+          patch.media_url = postUrls[0] ?? "";
+          patch.media_items = JSON.stringify([
+            ...postUrls.map((url) => ({ url, role: "post" })),
+            ...storyUrls.map((url) => ({ url, role: "story" })),
+          ]);
         } catch (error) {
           return {
             ok: false,
@@ -2098,6 +2382,16 @@ export const OPERATIONS: Operation[] = [
           "A local image or video path inside the project. After human approval, Spaces uploads it to workspace storage before publishing.",
       },
       {
+        name: "media_paths",
+        type: "array",
+        describe: "Up to 10 local images for an Instagram carousel, or one local video for TikTok.",
+      },
+      {
+        name: "media_urls",
+        type: "array",
+        describe: "Up to 10 public HTTPS images for an Instagram carousel, or one video for TikTok.",
+      },
+      {
         name: "account",
         type: "string",
         describe: "Connected account handle, label, or connection id. Required when the project has no default.",
@@ -2132,13 +2426,20 @@ export const OPERATIONS: Operation[] = [
         ? projectOf(args, ctx)
         : existing.item?.project_id || ctx.projectId;
       let mediaUrl = "";
+      let mediaItems = existing.item?.media_items || "[]";
       try {
-        mediaUrl = await resolvedContentMedia(
-          args,
-          ctx,
-          projectId,
-          existing.item?.media_url || "",
-        );
+        if (
+          Object.prototype.hasOwnProperty.call(args, "media_path") ||
+          Object.prototype.hasOwnProperty.call(args, "media_paths") ||
+          Object.prototype.hasOwnProperty.call(args, "media_url") ||
+          Object.prototype.hasOwnProperty.call(args, "media_urls")
+        ) {
+          const postUrls = await resolvedMediaList(args, ctx, projectId);
+          mediaUrl = postUrls[0] ?? "";
+          mediaItems = JSON.stringify(postUrls.map((url) => ({ url, role: "post" })));
+        } else {
+          mediaUrl = existing.item?.media_url || "";
+        }
       } catch (error) {
         return {
           ok: false,
@@ -2175,6 +2476,7 @@ export const OPERATIONS: Operation[] = [
           status: "review" as const,
           agent_id: ctx.agentId || existing.item.agent_id,
           media_url: mediaUrl,
+          media_items: mediaItems,
           publish_error: "",
         };
         await patchContentItem(existing.item.id, patch);
@@ -2192,6 +2494,7 @@ export const OPERATIONS: Operation[] = [
           scheduled_at: 0,
           agent_id: ctx.agentId,
           media_url: mediaUrl,
+          media_items: mediaItems,
         });
       }
       const result = await publishContentItem(item);
@@ -2221,6 +2524,13 @@ export function schemaFor(op: Operation): Record<string, unknown> {
           ? { type: "number", description: p.describe }
           : p.type === "boolean"
             ? { type: "boolean", description: p.describe }
+            : p.type === "array"
+              ? {
+                  type: "array",
+                  items: { type: "string" },
+                  maxItems: 10,
+                  description: p.describe,
+                }
             : { type: "string", description: p.describe };
   }
   return {

@@ -1007,7 +1007,8 @@ async function syncContentItems(
                   campaign, title, brief, copy, platform,
                   connection_id AS connectionId, status,
                   scheduled_at AS scheduledAt, published_url AS publishedUrl,
-                  media_url AS mediaUrl, publish_error AS publishError,
+                  media_url AS mediaUrl, media_items AS mediaItems,
+                  publish_error AS publishError,
                   agent_id AS agentId, created_by AS createdBy,
                   source_device_id AS sourceDeviceId,
                   source_content_id AS sourceContentId,
@@ -1022,7 +1023,8 @@ async function syncContentItems(
                   campaign, title, brief, copy, platform,
                   connection_id AS connectionId, status,
                   scheduled_at AS scheduledAt, published_url AS publishedUrl,
-                  media_url AS mediaUrl, publish_error AS publishError,
+                  media_url AS mediaUrl, media_items AS mediaItems,
+                  publish_error AS publishError,
                   agent_id AS agentId, created_by AS createdBy,
                   source_device_id AS sourceDeviceId,
                   source_content_id AS sourceContentId,
@@ -1134,6 +1136,7 @@ async function syncContentItems(
       scheduledAt: Math.max(0, number(record.scheduledAt)),
       publishedUrl: text(record.publishedUrl, 2_000),
       mediaUrl: text(record.mediaUrl, 2_000),
+      mediaItems: text(record.mediaItems, 20_000) || "[]",
       publishError: content(record.publishError, 4_000),
       agentId: agent?.id ?? "",
     };
@@ -1150,6 +1153,7 @@ async function syncContentItems(
       Number(existing.scheduledAt) !== next.scheduledAt ||
       existing.publishedUrl !== next.publishedUrl ||
       existing.mediaUrl !== next.mediaUrl ||
+      existing.mediaItems !== next.mediaItems ||
       existing.publishError !== next.publishError ||
       existing.agentId !== next.agentId ||
       existing.updatedAt !== incomingUpdatedAt;
@@ -1159,9 +1163,9 @@ async function syncContentItems(
         `INSERT INTO content_items
           (id, workspace_id, project_id, campaign, title, brief, copy,
            platform, connection_id, status, scheduled_at, published_url,
-           media_url, publish_error, agent_id, created_by, source_device_id,
+           media_url, media_items, publish_error, agent_id, created_by, source_device_id,
            source_content_id, created_at, updated_at, revision)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
         contentId,
         device.workspaceId,
         next.projectId || null,
@@ -1175,6 +1179,7 @@ async function syncContentItems(
         next.scheduledAt,
         next.publishedUrl,
         next.mediaUrl,
+        next.mediaItems,
         next.publishError,
         next.agentId,
         device.ownerUserId,
@@ -1189,7 +1194,7 @@ async function syncContentItems(
             SET project_id = ?, campaign = ?, title = ?, brief = ?, copy = ?,
                 platform = ?, connection_id = ?, status = ?,
                 scheduled_at = ?, published_url = ?, media_url = ?,
-                publish_error = ?, agent_id = ?, updated_at = ?
+                media_items = ?, publish_error = ?, agent_id = ?, updated_at = ?
           WHERE workspace_id = ? AND id = ?`,
         next.projectId || null,
         next.campaign,
@@ -1202,6 +1207,7 @@ async function syncContentItems(
         next.scheduledAt,
         next.publishedUrl,
         next.mediaUrl,
+        next.mediaItems,
         next.publishError,
         next.agentId,
         incomingUpdatedAt,
@@ -1470,7 +1476,8 @@ export async function loadSharedWorkspace(
     `SELECT id, COALESCE(project_id, '') AS projectId, campaign, title, brief,
             copy, platform, connection_id AS connectionId, status,
             scheduled_at AS scheduledAt, published_url AS publishedUrl,
-            media_url AS mediaUrl, publish_error AS publishError,
+            media_url AS mediaUrl, media_items AS mediaItems,
+            publish_error AS publishError,
             agent_id AS agentId, created_by AS createdBy,
             source_device_id AS sourceDeviceId,
             source_content_id AS sourceContentId,

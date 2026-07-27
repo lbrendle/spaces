@@ -112,6 +112,7 @@ export interface RemoteContentItem {
   scheduledAt: number;
   publishedUrl: string;
   mediaUrl: string;
+  mediaItems: string;
   publishError: string;
   agentId: string;
   createdBy: string;
@@ -211,6 +212,7 @@ interface ContentItemRecord {
   scheduledAt?: number;
   publishedUrl?: string;
   mediaUrl?: string;
+  mediaItems?: string;
   publishError?: string;
   agentId?: string;
   agentPortalId?: string;
@@ -641,6 +643,7 @@ export async function buildSharedPortalPayload(
       scheduledAt: item.scheduled_at,
       publishedUrl: item.published_url,
       mediaUrl: item.media_url,
+      mediaItems: item.media_items,
       publishError: item.publish_error,
       agentId: item.agent_id,
       agentPortalId: item.agent_id
@@ -1254,8 +1257,8 @@ export async function applySharedPortalResponse(
       `INSERT INTO content_items
         (id, project_id, campaign, title, brief, copy, platform, status,
          connection_id, scheduled_at, published_url, agent_id, media_url,
-         publish_error, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         media_items, publish_error, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        ON CONFLICT(id) DO UPDATE SET
          project_id=excluded.project_id,
          campaign=excluded.campaign,
@@ -1269,6 +1272,7 @@ export async function applySharedPortalResponse(
          published_url=excluded.published_url,
          agent_id=excluded.agent_id,
          media_url=excluded.media_url,
+         media_items=excluded.media_items,
          publish_error=excluded.publish_error,
          updated_at=excluded.updated_at`,
       [
@@ -1285,6 +1289,7 @@ export async function applySharedPortalResponse(
         item.publishedUrl,
         agent[0]?.local_id ?? "",
         item.mediaUrl,
+        item.mediaItems || "[]",
         item.publishError,
         createdAt,
         updatedAt,
@@ -1303,6 +1308,7 @@ export async function applySharedPortalResponse(
       scheduledAt: Number(item.scheduledAt) || 0,
       publishedUrl: item.publishedUrl,
       mediaUrl: item.mediaUrl,
+      mediaItems: item.mediaItems || "[]",
       publishError: item.publishError,
       agentId: agent[0]?.local_id ?? "",
       agentPortalId: item.agentId,
