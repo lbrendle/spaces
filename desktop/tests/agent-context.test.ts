@@ -104,6 +104,15 @@ test("web-authored channel messages durably dispatch to local agents", async () 
   assert.match(portal, /schedulePortalMessageDispatch\(\)/);
 });
 
+test("failed approvals become durable channel context for agent retries", async () => {
+  const actions = await readFile(new URL("../src/actions.ts", import.meta.url), "utf8");
+
+  assert.match(actions, /surfaceProposalFailure/);
+  assert.match(actions, /The proposal is closed/);
+  assert.match(actions, /if \(!result\.ok && op\.effect === "propose"\)/);
+  assert.match(actions, /insertMessage/);
+});
+
 test("Knowledge references use shared sync identities and exclude private collections", async () => {
   const [blackboard, operations, refs] = await Promise.all([
     readFile(new URL("../src/blackboard.ts", import.meta.url), "utf8"),

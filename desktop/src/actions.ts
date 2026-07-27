@@ -156,6 +156,39 @@ async function rowById(id: string): Promise<AgentActionRow | null> {
 }
 
 /**
+ * A failed approval has to become shared channel context, not a toast that
+ * disappears on the approver's machine. Otherwise the agent only sees its
+ * earlier "waiting on you" receipt and can incorrectly refuse a safe retry.
+ */
+async function surfaceProposalFailure(
+  row: AgentActionRow,
+  message: string,
+): Promise<void> {
+  if (!row.channel_id) return;
+  try {
+    const { useStore } = await import("./store");
+    await useStore.getState().insertMessage({
+      id: uid(),
+      channel_id: row.channel_id,
+      author_type: "system",
+      author_id: "spaces",
+      author_name: "Spaces",
+      content:
+        `**${row.op} did not apply**\n\n${message}\n\n` +
+        "The proposal is closed. After fixing the connection or configuration, it is safe to ask the agent to try again.",
+      status: "done",
+      meta: "",
+      parent_id: row.run_id,
+      run_id: row.run_id,
+    });
+  } catch (error) {
+    // The action result remains authoritative even if the channel is gone or
+    // the UI store is unavailable during shutdown.
+    console.error("[spaces] could not surface failed proposal", error);
+  }
+}
+
+/**
  * The approval queue, oldest first: it is a to-do list, and the proposal that
  * has waited longest is the one to decide next.
  */
@@ -223,6 +256,9 @@ export async function applyAction(row: AgentActionRow | string): Promise<OpResul
     result = { ok: false, message: String(e) };
   }
   await settle(target.id, result.ok ? "applied" : "failed", result.message).catch(() => {});
+  if (!result.ok && op.effect === "propose") {
+    await surfaceProposalFailure(target, result.message);
+  }
   emitActions();
   return result;
 }
