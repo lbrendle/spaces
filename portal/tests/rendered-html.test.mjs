@@ -276,6 +276,13 @@ test("social accounts are distinct, project-linked, and explicitly selectable", 
   assert.match(actions, /PULL_FROM_URL/);
   assert.match(actions, /graph\.instagram\.com/);
   assert.doesNotMatch(actions, /graph\.facebook\.com.*media_publish/);
+  assert.match(actions, /waitForInstagramContainer/);
+  assert.match(actions, /\?fields=status_code,status/);
+  assert.match(actions, /status === "FINISHED"/);
+  assert.match(
+    actions,
+    /await waitForInstagramContainer\(access, version, creationId\)/,
+  );
   assert.match(workspace, /actionName === "link_project_connection"/);
   assert.match(workspace, /actionName === "set_project_connection_default"/);
   assert.match(app, /Add account/);

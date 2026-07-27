@@ -538,6 +538,54 @@ function httpsMediaUrl(value: unknown): string {
   return url.toString();
 }
 
+type InstagramContainerStatus =
+  | "ERROR"
+  | "EXPIRED"
+  | "FINISHED"
+  | "IN_PROGRESS"
+  | "PUBLISHED";
+
+const INSTAGRAM_CONTAINER_POLL_INTERVAL_MS = 3_000;
+const INSTAGRAM_CONTAINER_POLL_ATTEMPTS = 20;
+
+async function waitForInstagramContainer(
+  access: ConnectedAccountAccess,
+  version: string,
+  creationId: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < INSTAGRAM_CONTAINER_POLL_ATTEMPTS; attempt += 1) {
+    const raw = await providerJson<{
+      status_code?: InstagramContainerStatus;
+      status?: string;
+    }>(
+      `https://graph.instagram.com/${version}/${encodeURIComponent(creationId)}?fields=status_code,status`,
+      access,
+    );
+    const status = String(raw.status_code ?? "").toUpperCase();
+    if (status === "FINISHED") return;
+    if (status === "ERROR") {
+      throw new Error(
+        cleanText(raw.status, 1_000) ||
+          "Instagram could not process this media. Check the image or video and try again.",
+      );
+    }
+    if (status === "EXPIRED") {
+      throw new Error("Instagram's media container expired. Submit the post again.");
+    }
+    if (status === "PUBLISHED") {
+      throw new Error("Instagram reports that this media container was already published.");
+    }
+    if (attempt < INSTAGRAM_CONTAINER_POLL_ATTEMPTS - 1) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, INSTAGRAM_CONTAINER_POLL_INTERVAL_MS),
+      );
+    }
+  }
+  throw new Error(
+    "Instagram is still processing this media. Wait a moment, then submit the post again.",
+  );
+}
+
 async function publishSocial(
   access: ConnectedAccountAccess,
   input: ActionInput,
@@ -609,6 +657,11 @@ async function publishSocial(
         if (!child.id) throw new Error("Instagram could not create a carousel item.");
         children.push(String(child.id));
       }
+      await Promise.all(
+        children.map((childId) =>
+          waitForInstagramContainer(access, version, childId),
+        ),
+      );
       const carousel = await providerJson<{ id?: string }>(
         `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media`,
         access,
@@ -626,6 +679,7 @@ async function publishSocial(
     if (!creationId) {
       throw new Error("Instagram could not create the media post.");
     }
+    await waitForInstagramContainer(access, version, creationId);
     const publishBody = new URLSearchParams({
       creation_id: creationId,
     });
