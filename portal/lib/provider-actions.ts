@@ -577,7 +577,7 @@ async function publishSocial(
     if (!instagramId) {
       throw new Error("The connected Instagram account is missing its account ID.");
     }
-    let creationId = "";
+    let creationId: string;
     if (mediaUrls.length === 1) {
       const container = await providerJson<{ id?: string }>(
         `https://graph.instagram.com/${version}/${encodeURIComponent(instagramId)}/media`,
