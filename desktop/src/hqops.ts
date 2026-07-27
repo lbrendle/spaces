@@ -35,6 +35,7 @@ import {
   publishContentItem,
   saveDocument,
   sendCloudMail,
+  uploadContentMedia,
   type IntegrationAccount,
 } from "./operations";
 import {
@@ -875,8 +876,14 @@ export const OPERATIONS: Operation[] = [
       {
         name: "media_url",
         type: "string",
-        required: true,
-        describe: "A public HTTPS image URL for Instagram or video URL for TikTok.",
+        describe:
+          "An existing public HTTPS image URL for Instagram or video URL for TikTok. Use media_path instead for a file in the project.",
+      },
+      {
+        name: "media_path",
+        type: "string",
+        describe:
+          "A local image or video path inside the project. After human approval, Spaces uploads it to workspace storage before publishing.",
       },
       {
         name: "account",
@@ -900,9 +907,42 @@ export const OPERATIONS: Operation[] = [
         return { ok: false, message: "platform must be instagram or tiktok" };
       }
       const copy = str(args, "copy");
-      const mediaUrl = str(args, "media_url");
-      if (!copy || !mediaUrl) {
-        return { ok: false, message: "copy and media_url are required" };
+      let mediaUrl = str(args, "media_url");
+      const mediaPath = str(args, "media_path");
+      if (!copy || (!mediaUrl && !mediaPath)) {
+        return { ok: false, message: "copy and either media_url or media_path are required" };
+      }
+      const projectId = projectOf(args, ctx);
+      if (mediaPath && !mediaUrl) {
+        const project = useStore.getState().projects.find((row) => row.id === projectId);
+        if (!project?.local_path) {
+          return {
+            ok: false,
+            message:
+              "media_path needs a project with a local folder. Link the project folder in Spaces or provide media_url.",
+          };
+        }
+        const absolute =
+          mediaPath.startsWith("/") ||
+          /^[a-zA-Z]:[\\/]/.test(mediaPath) ||
+          mediaPath.startsWith("\\\\")
+            ? mediaPath
+            : `${project.local_path.replace(/[\\/]$/, "")}${
+                project.local_path.includes("\\") ? "\\" : "/"
+              }${mediaPath}`;
+        try {
+          mediaUrl = await uploadContentMedia(
+            absolute,
+            projectId,
+            project.local_path,
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            message:
+              error instanceof Error ? error.message : "Spaces could not upload the media file.",
+          };
+        }
       }
       let parsedMedia: URL;
       try {
@@ -914,7 +954,6 @@ export const OPERATIONS: Operation[] = [
         return { ok: false, message: "media_url must use HTTPS" };
       }
 
-      const projectId = projectOf(args, ctx);
       const selected = socialAccount(
         await listIntegrationAccounts(),
         platform,

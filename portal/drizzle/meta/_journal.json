@@ -92,6 +92,13 @@
       "when": 1785115200000,
       "tag": "0012_shared_desktop_workspace",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1785123000000,
+      "tag": "0013_media_assets",
+      "breakpoints": true
     }
   ]
 }

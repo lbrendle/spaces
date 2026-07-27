@@ -501,6 +501,31 @@ export const projectSources = sqliteTable(
   ],
 );
 
+export const mediaAssets = sqliteTable(
+  "media_assets",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    projectId: text("project_id"),
+    objectKey: text("object_key").notNull(),
+    fileName: text("file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    etag: text("etag").notNull(),
+    createdByUserId: text("created_by_user_id").notNull(),
+    createdByDeviceId: text("created_by_device_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("media_assets_object_key_idx").on(table.objectKey),
+    index("media_assets_workspace_created_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    index("media_assets_project_idx").on(table.workspaceId, table.projectId),
+  ],
+);
+
 export const cycles = sqliteTable(
   "cycles",
   {

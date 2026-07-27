@@ -21,6 +21,7 @@
  * prompt you never see is a surface that quietly decides what an agent knows.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   CSSProperties,
   DragEvent as ReactDragEvent,
@@ -52,6 +53,7 @@ import {
   syncAppleCalendar,
   syncCloudCalendar,
   syncCloudMail,
+  uploadContentMedia,
 } from "../operations";
 import type {
   CalendarEventRecord,
@@ -3643,6 +3645,7 @@ function ContentDetail({
 }) {
   const projects = useStore((state) => state.projects);
   const agents = useStore((state) => state.agents);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
   const owner = draft.agent_id ? agentIdentity(draft.agent_id) : null;
   const project = projects.find((row) => row.id === draft.project_id);
   const selectedAccount = accounts.find(
@@ -3657,6 +3660,47 @@ function ContentDetail({
   const canPublish = target.publishable && connected && !blockers.length;
   const scheduled = draft.scheduled_at > 0;
   const past = scheduled && draft.scheduled_at < Date.now();
+
+  async function chooseMedia() {
+    const wantsVideo = target.media === "video";
+    const wantsImage = target.media === "image";
+    const chosen = await open({
+      multiple: false,
+      directory: false,
+      filters: [
+        {
+          name: wantsVideo ? "Video" : wantsImage ? "Image" : "Image or video",
+          extensions: wantsVideo
+            ? ["mp4", "mov", "m4v", "webm"]
+            : wantsImage
+              ? ["png", "jpg", "jpeg", "webp", "gif", "avif"]
+              : [
+                  "png",
+                  "jpg",
+                  "jpeg",
+                  "webp",
+                  "gif",
+                  "avif",
+                  "mp4",
+                  "mov",
+                  "m4v",
+                  "webm",
+                ],
+        },
+      ],
+    });
+    if (typeof chosen !== "string") return;
+    setUploadingMedia(true);
+    try {
+      const mediaUrl = await uploadContentMedia(chosen, draft.project_id);
+      onPatch({ media_url: mediaUrl });
+      toast.success("Media uploaded to this workspace");
+    } catch (reason) {
+      toast.error("Could not upload that media", reason);
+    } finally {
+      setUploadingMedia(false);
+    }
+  }
 
   const saveState: SaveState = saveFailed
     ? "error"
@@ -3877,15 +3921,24 @@ function ContentDetail({
 
         <section className="content-block">
           <span className="field-label">Media</span>
-          <input
-            aria-label="Media URL"
-            value={draft.media_url}
-            placeholder="https://…"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            onChange={(event) => onPatch({ media_url: event.target.value })}
-          />
+          <div className="content-media-entry">
+            <input
+              aria-label="Media URL"
+              value={draft.media_url}
+              placeholder="Upload a file or paste an HTTPS URL"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(event) => onPatch({ media_url: event.target.value })}
+            />
+            <button
+              className="btn subtle"
+              disabled={uploadingMedia}
+              onClick={() => void chooseMedia()}
+            >
+              {uploadingMedia ? "Uploading…" : "Choose file"}
+            </button>
+          </div>
           {draft.media_url.trim() ? (
             <div className="content-media-check">
               <MediaPreview url={draft.media_url.trim()} />
@@ -3893,8 +3946,8 @@ function ContentDetail({
           ) : (
             <p className="content-note">
               {target.media
-                ? `${target.label} cannot post without ${mediaNeed(target)}.`
-                : "Optional here. A URL the network can reach, not a local file."}
+                ? `Spaces uploads the file and gives ${target.label} a URL it can fetch.`
+                : "Optional. Upload a local file or paste a URL the network can reach."}
             </p>
           )}
         </section>

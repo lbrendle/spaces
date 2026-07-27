@@ -10,7 +10,8 @@ workspace; this web panel administers:
 - privacy-safe health summaries from paired desktops; and
 - durable, host-bound agent job delivery between paired devices.
 
-Workspace data is stored in Cloudflare D1. Identity comes from the authenticated
+Workspace data is stored in Cloudflare D1; provider-ready Content Studio media
+is stored in the workspace R2 bucket. Identity comes from the authenticated
 OpenAI workspace request headers. The browser UI requires ChatGPT sign-in and
 server-side membership. Public machine endpoints accept only expiring,
 single-use pairing codes or a separate hashed token per device. Repository
@@ -63,4 +64,5 @@ npm run lint
 
 Do not commit `.openai/hosting.json`; it binds the source tree to one Sites
 deployment. Copy `.openai/hosting.example.json` and insert your own project ID.
+The template declares the required `DB` and `MEDIA` bindings.
 See the root [self-hosting guide](../docs/SELF_HOSTING.md).

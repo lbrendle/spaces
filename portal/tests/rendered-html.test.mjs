@@ -144,8 +144,24 @@ test("declares durable D1 storage for workspace state", async () => {
     await readFile(new URL("../.openai/hosting.example.json", import.meta.url), "utf8"),
   );
   assert.equal(hosting.d1, "DB");
-  assert.equal(hosting.r2, null);
+  assert.equal(hosting.r2, "MEDIA");
   await assert.rejects(access(new URL("../.openai/hosting.json", import.meta.url)));
+});
+
+test("workspace media uploads use authenticated R2 storage and public delivery", async () => {
+  const [schema, migration, media, uploadRoute, deliveryRoute] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0013_media_assets.sql", import.meta.url), "utf8"),
+    readFile(new URL("../lib/media.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/device/media/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/media/[id]/[name]/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(schema, /mediaAssets/);
+  assert.match(migration, /CREATE TABLE `media_assets`/);
+  assert.match(media, /storage\.put/);
+  assert.match(media, /authorizeDevice/);
+  assert.match(uploadRoute, /uploadDeviceMedia/);
+  assert.match(deliveryRoute, /serveMedia/);
 });
 
 test("social accounts are distinct, project-linked, and explicitly selectable", async () => {

@@ -1761,6 +1761,9 @@ function MessagesSurface({
       authorName: snapshot.currentUser.name,
       body: messageBody,
       parentId: "",
+      status: "done",
+      meta: "",
+      runId: "",
       createdAt: new Date().toISOString(),
     };
     setPendingMessages((current) => [...current, optimisticMessage]);

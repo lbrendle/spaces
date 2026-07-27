@@ -11,7 +11,7 @@ cross-device sync, and remote jobs are unavailable.
 
 ## Shared portal on Sites
 
-1. Create a new Sites project with D1.
+1. Create a new Sites project with D1 and R2.
 2. Copy `portal/.openai/hosting.example.json` to
    `portal/.openai/hosting.json` and insert the new opaque project ID.
 3. Add a high-entropy `INTEGRATION_TOKEN_KEY`.
@@ -45,7 +45,10 @@ boundary before requests reach the application. Do not accept user-supplied
 email/name headers directly.
 
 You must also provide a D1-compatible database binding named `DB`, or adapt
-`portal/db/` to another transactional SQL service.
+`portal/db/` to another transactional SQL service. Native Content Studio media
+uploads also require an R2-compatible object binding named `MEDIA`; without it,
+existing public `media_url` publishing can still work, but local file uploads
+cannot.
 
 ## OAuth review
 

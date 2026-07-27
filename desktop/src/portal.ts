@@ -33,6 +33,16 @@ export interface PortalConnection {
   content_revision: number;
 }
 
+export interface PortalMedia {
+  id: string;
+  projectId: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+  etag: string;
+  url: string;
+}
+
 export type PortalProviderAction =
   | "calendar.sources"
   | "calendar.list"
@@ -169,6 +179,24 @@ export async function portalProviderAction<T>(
     throw new Error(body.error || "The connected account action failed.");
   }
   return body.result as T;
+}
+
+export async function uploadPortalMedia(
+  path: string,
+  projectId = "",
+  allowedRoot = "",
+): Promise<PortalMedia> {
+  const connection = await loadPortalConnection();
+  if (!connection) {
+    throw new Error(`Pair this ${config().brand} desktop before uploading media.`);
+  }
+  return invoke<PortalMedia>("upload_portal_media", {
+    path,
+    allowedRoot,
+    baseUrl: connection.base_url,
+    token: connection.token,
+    projectId,
+  });
 }
 
 interface CalendarCommand {

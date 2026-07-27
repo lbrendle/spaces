@@ -26,8 +26,9 @@ test("lists and approval-queues the social publishing tool", async () => {
               platform: { type: "string", enum: ["instagram", "tiktok"] },
               copy: { type: "string" },
               media_url: { type: "string" },
+              media_path: { type: "string" },
             },
-            required: ["platform", "copy", "media_url"],
+            required: ["platform", "copy"],
             additionalProperties: false,
           },
         },
@@ -66,7 +67,7 @@ test("lists and approval-queues the social publishing tool", async () => {
       arguments: {
         platform: "instagram",
         copy: "A reviewed launch post",
-        media_url: "https://example.com/image.png",
+        media_path: "assets/social/launch.png",
       },
     },
   });
@@ -92,7 +93,7 @@ test("lists and approval-queues the social publishing tool", async () => {
   assert.deepEqual(queued.args, {
     platform: "instagram",
     copy: "A reviewed launch post",
-    media_url: "https://example.com/image.png",
+    media_path: "assets/social/launch.png",
   });
 });
 

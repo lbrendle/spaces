@@ -12,7 +12,7 @@ the feature has been exercised against your deployment.
 Included:
 
 - the macOS Tauri desktop source;
-- the Cloudflare/Sites portal and D1 migrations;
+- the Cloudflare/Sites portal, D1 migrations, and R2 media binding;
 - local SQLite migrations;
 - the Spaces MCP action transport and approval queue;
 - provider OAuth and action implementations;
@@ -43,7 +43,7 @@ Deliberately excluded:
 | Git activity and isolated worktrees | Implemented | Local repository plus `gh` reads | Spaces coordinates Git; it is not a Git object host or GitHub replacement. |
 | Personal GitHub account connection | Implemented in source | Member-owned encrypted OAuth token in D1; local `gh` credential stays on that member's desktop | Members connect and see their own account. The portal never exposes the app owner’s personal token to other members. A deployment must configure a GitHub OAuth app. |
 | Spaces agent MCP tools | Implemented | Generated `.hq/` files plus desktop approval log | Code projects use their checkout. Non-code projects receive a private control directory so tools do not disappear. Spawned harnesses receive explicit run, agent, channel, and project identity. |
-| Agent social publishing proposal | Implemented | Desktop approval log + Content Studio + portal provider action | `spaces_publish_social` always waits for human approval. Existing agent sessions must restart to discover a newly added tool. |
+| Agent social publishing proposal | Implemented | Desktop approval log + Content Studio + portal provider action | `spaces_publish_social` accepts a public `media_url` or a project-local `media_path` and always waits for human approval before uploading or publishing. Existing agent sessions must restart to discover a newly added tool. |
 | Documents and knowledge | Implemented | Desktop SQLite; explicitly shared pages in D1 | Nested source/folder/note trees, preserved cross-member paths, native shared-note editing, Markdown, versions, wikilinks/backlinks, project memory, and read-only vault imports are supported. This is not simultaneous multiplayer text editing. |
 | Agent Knowledge references | Implemented | Permission-filtered `.hq/KNOWLEDGE.md` snapshot | `spaces_search_knowledge` and `spaces_read_knowledge` return stable `knowledge:source:path` citations. Snapshot size is bounded and says when notes were omitted or truncated. |
 | Obsidian-style vault mounting | Implemented, read-only | Original files stay on disk; index/cache in desktop SQLite | Spaces does not rewrite the mounted vault. |
@@ -52,12 +52,12 @@ Deliberately excluded:
 | Apple Calendar | List/create implemented on macOS | Calendar.app plus desktop SQLite/shared command state | Runs through local macOS automation permission; there is no cloud Apple Calendar OAuth path. |
 | Team/shared calendars | Implemented in Spaces | D1 and desktop SQLite | Provider-backed calendars still obey the connected account’s own permissions. |
 | Instagram OAuth | Implemented with Instagram Login | Encrypted token in D1 | Every account must be eligible for the Meta app; development-role and app-review rules are external. Multiple accounts are stored separately. |
-| Instagram image publishing | Implemented | Portal provider action and Content Studio audit row | Requires a public HTTPS image URL and `instagram_business_content_publish`. A connected account alone does not grant a native Claude/Codex connector. |
+| Instagram image publishing | Implemented | Portal R2 media, provider action, and Content Studio audit row | A local image can be uploaded to a stable provider-ready HTTPS URL. The Meta app still needs `instagram_business_content_publish`; a connected account alone does not grant a native Claude/Codex connector. |
 | TikTok OAuth | Implemented | Encrypted token in D1 | Sandbox/production target and Content Posting approval are controlled by TikTok. Multiple accounts are stored separately. |
-| TikTok video publishing | Implemented | Portal provider action and Content Studio audit row | Requires a public HTTPS video URL. TikTok may return a processing job rather than a finished post. |
+| TikTok video publishing | Implemented | Portal R2 media, provider action, and Content Studio audit row | Local videos are uploaded with byte-range delivery. TikTok may require the deployed media URL prefix to be verified and may return a processing job rather than a finished post. |
 | X OAuth and text publishing | Implemented, optional | Encrypted token in D1; portal provider action | The provider can be omitted from a deployment by leaving its OAuth configuration unset. |
 | Project-to-social-account links | Implemented | D1 | Publishing enforces project links and the selected/default account, including multiple accounts for one provider. |
-| Content Studio | Implemented | Desktop SQLite plus provider action result | Draft/review/schedule/published workflow exists. It is not a Buffer/Later connector and does not import their queues. |
+| Content Studio | Implemented | Desktop SQLite, workspace R2 media, and provider action result | Draft/review/schedule/published workflow and native image/video upload exist. It is not a Buffer/Later connector and does not import their queues. |
 | ChatGPT-authenticated portal | Implemented for Sites | Sites request identity + D1 membership | Authentication proves identity; membership/invitation policy grants access. Self-hosters outside Sites must supply an equivalent trusted identity layer. |
 | Invitations, roles, removal | Implemented | D1 | Removing a person also revokes devices and removes or transfers their governed resources. |
 | Desktop pairing | Implemented | Hashed device token in D1; token on that desktop | Pairing codes are short-lived and single-use. |

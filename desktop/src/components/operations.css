@@ -1638,6 +1638,16 @@
   max-width: 260px;
   margin: calc(var(--space-2) * -1) 0 var(--space-5);
 }
+.content-media-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+.content-media-entry .btn {
+  min-height: 36px;
+  white-space: nowrap;
+}
 .content-published {
   display: block;
   overflow: hidden;

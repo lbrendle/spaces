@@ -35,6 +35,24 @@ struct AgentRunRequest {
     prompt: String,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortalMedia {
+    id: String,
+    project_id: String,
+    file_name: String,
+    content_type: String,
+    size: u64,
+    etag: String,
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct PortalMediaResponse {
+    media: Option<PortalMedia>,
+    error: Option<String>,
+}
+
 /// PATH from a login shell — a bundled .app gets a minimal launchd PATH, which
 /// breaks both finding CLIs and the node/git tooling they spawn.
 fn login_path() -> &'static str {
@@ -151,6 +169,109 @@ fn agent_control_root(app: AppHandle, project_id: String) -> Result<String, Stri
     std::fs::canonicalize(&root)
         .map(|path| path.to_string_lossy().to_string())
         .map_err(|error| format!("could not resolve {}: {error}", root.display()))
+}
+
+fn media_content_type(path: &Path) -> Result<&'static str, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "avif" => Ok("image/avif"),
+        "gif" => Ok("image/gif"),
+        "jpeg" | "jpg" => Ok("image/jpeg"),
+        "png" => Ok("image/png"),
+        "webp" => Ok("image/webp"),
+        "mp4" => Ok("video/mp4"),
+        "mov" => Ok("video/quicktime"),
+        "webm" => Ok("video/webm"),
+        "m4v" => Ok("video/x-m4v"),
+        _ => Err("Choose a PNG, JPEG, WebP, GIF, AVIF, MP4, MOV, M4V, or WebM file.".into()),
+    }
+}
+
+/// Stream a local media file through the paired Spaces site into its R2
+/// bucket. The desktop owns the connection token; agent processes only submit
+/// a path, and an approved operation invokes this command on their behalf.
+#[tauri::command]
+async fn upload_portal_media(
+    path: String,
+    allowed_root: String,
+    base_url: String,
+    token: String,
+    project_id: String,
+) -> Result<PortalMedia, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if token.trim().is_empty() {
+            return Err("Pair this Spaces desktop before uploading media.".into());
+        }
+        let real = std::fs::canonicalize(&path)
+            .map_err(|error| format!("media file is unavailable ({path}): {error}"))?;
+        if !real.is_file() {
+            return Err(format!("media path is not a file: {}", real.display()));
+        }
+        if !allowed_root.trim().is_empty() {
+            let root = std::fs::canonicalize(&allowed_root).map_err(|error| {
+                format!("project folder is unavailable ({allowed_root}): {error}")
+            })?;
+            if !root.is_dir() || !real.starts_with(&root) {
+                return Err("Agent media must be inside the selected project's folder.".into());
+            }
+        }
+        let metadata = std::fs::metadata(&real)
+            .map_err(|error| format!("could not inspect {}: {error}", real.display()))?;
+        if metadata.len() == 0 {
+            return Err("The media file is empty.".into());
+        }
+        if metadata.len() > 95 * 1024 * 1024 {
+            return Err("Media uploads are limited to 95 MB.".into());
+        }
+        let file_name = real
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "The media file must have a valid filename.".to_string())?
+            .to_string();
+        let content_type = media_content_type(&real)?;
+        let mut endpoint = reqwest::Url::parse(base_url.trim())
+            .map_err(|error| format!("Spaces site address is invalid: {error}"))?
+            .join("/api/device/media")
+            .map_err(|error| format!("Spaces upload address is invalid: {error}"))?;
+        endpoint
+            .query_pairs_mut()
+            .append_pair("filename", &file_name)
+            .append_pair("projectId", project_id.trim());
+
+        let file = std::fs::File::open(&real)
+            .map_err(|error| format!("could not open {}: {error}", real.display()))?;
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+            .map_err(|error| format!("could not prepare the media upload: {error}"))?;
+        let response = client
+            .post(endpoint)
+            .bearer_auth(token.trim())
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .header(reqwest::header::CONTENT_LENGTH, metadata.len())
+            .body(reqwest::blocking::Body::sized(file, metadata.len()))
+            .send()
+            .map_err(|error| format!("Spaces could not upload the media file: {error}"))?;
+        let status = response.status();
+        let payload = response
+            .json::<PortalMediaResponse>()
+            .map_err(|error| format!("Spaces returned an invalid upload response: {error}"))?;
+        if !status.is_success() {
+            return Err(payload
+                .error
+                .unwrap_or_else(|| format!("Spaces rejected the upload ({status}).")));
+        }
+        payload
+            .media
+            .ok_or_else(|| "Spaces did not return the uploaded media URL.".into())
+    })
+    .await
+    .map_err(|error| format!("media upload task failed: {error}"))?
 }
 
 async fn run_tool(
@@ -1618,6 +1739,7 @@ pub fn run() {
             current_platform,
             legacy_hq_database_path,
             agent_control_root,
+            upload_portal_media,
             run_gh,
             run_gh_in,
             run_git,

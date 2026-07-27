@@ -1,6 +1,6 @@
 import { getDb, now, uid } from "./db";
 import { invoke } from "@tauri-apps/api/core";
-import { portalProviderAction } from "./portal";
+import { portalProviderAction, uploadPortalMedia } from "./portal";
 import { useStore } from "./store";
 import { config } from "./config";
 
@@ -872,6 +872,15 @@ export async function publishContentItem(
     });
     throw reason;
   }
+}
+
+export async function uploadContentMedia(
+  path: string,
+  projectId = "",
+  allowedRoot = "",
+): Promise<string> {
+  const media = await uploadPortalMedia(path, projectId, allowedRoot);
+  return media.url;
 }
 
 export async function listIntegrationAccounts(): Promise<IntegrationAccount[]> {
