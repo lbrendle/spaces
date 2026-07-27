@@ -28,6 +28,7 @@ jobs:
           workspaces: desktop/src-tauri
       - run: npm ci
       - run: npm run build
+      - run: npm run test:knowledge
       - run: npm run test:mcp
       - run: npm audit
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check

@@ -146,6 +146,13 @@ export interface KbFileRead {
   from: "workspace" | "origin";
 }
 
+export interface KbBacklink {
+  id: string;
+  rel_path: string;
+  title: string;
+  modified_at: number;
+}
+
 /** What a drop resolved to, before anything is written. */
 export interface DropInspection {
   /** Dropped folders, each worth its own collection with provenance. */
@@ -672,6 +679,63 @@ export async function readKbFile(collectionId: string, relPath: string): Promise
     }
   }
   return { text: row.body, size: row.size, modified_at: row.modified_at, truncated, from: "workspace" };
+}
+
+/**
+ * Notes in the same collection that point at `relPath` with an Obsidian
+ * wikilink. The candidate filter stays in SQLite and exact resolution stays in
+ * JavaScript, keeping a large vault responsive without treating plain text as
+ * a backlink.
+ */
+export async function listKbBacklinks(
+  collectionId: string,
+  relPath: string,
+): Promise<KbBacklink[]> {
+  const collection = await getCollection(collectionId);
+  if (!collection || !kbAccess(collection)) return [];
+  const targetPath = normalizeRelPath(relPath).toLowerCase();
+  const fileName = targetPath.slice(targetPath.lastIndexOf("/") + 1);
+  const targetName = fileName.replace(/\.[^.]+$/, "");
+  const targetWithoutExtension = targetPath.replace(/\.[^./]+$/, "");
+  const db = await getDb();
+  const rows = await db.select<
+    Array<KbBacklink & { body: string }>
+  >(
+    `SELECT id, rel_path, title, modified_at, body
+       FROM vault_files
+      WHERE vault_id = $1
+        AND rel_path <> $2
+        AND (lower(body) LIKE $3 OR lower(body) LIKE $4)
+      ORDER BY title, rel_path
+      LIMIT 500`,
+    [
+      collectionId,
+      relPath,
+      `%[[${targetName.toLowerCase()}%`,
+      `%[[${targetWithoutExtension}%`,
+    ],
+  );
+  return rows
+    .filter((row) => {
+      const links = row.body.matchAll(/\[\[([^\][|\n]+)(?:\|[^\]\n]+)?\]\]/g);
+      for (const link of links) {
+        const bare = normalizeRelPath(
+          String(link[1] ?? "").split(/[#^]/)[0].replace(/^\.?\//, ""),
+        ).toLowerCase();
+        if (!bare) continue;
+        const withoutExtension = bare.replace(/\.[^./]+$/, "");
+        const linkedName = withoutExtension.slice(withoutExtension.lastIndexOf("/") + 1);
+        if (
+          bare === targetPath ||
+          withoutExtension === targetWithoutExtension ||
+          linkedName === targetName.toLowerCase()
+        ) {
+          return true;
+        }
+      }
+      return false;
+    })
+    .map(({ body: _body, ...row }) => row);
 }
 
 /* ── search ───────────────────────────────────────────────────── */

@@ -18,21 +18,35 @@
  * no MCP, and a second definition of "what an agent may do" would drift from
  * the first within a week. The transports differ only in how a call arrives.
  *
- * Nothing here talks to SQLite directly — every operation goes through the
- * same store actions the UI calls, so an agent creating a task and a human
- * creating a task are the same code path, with the same invariants and the
- * same reactivity.
+ * Product mutations use the same store/operation paths as the UI. Knowledge
+ * reads use the same permission-aware SQLite helpers as the Knowledge surface,
+ * and the one direct document visibility update preserves saveDocument's
+ * existing version-history path.
  */
 import { useStore } from "./store";
+import { getDb } from "./db";
 import { describeEntity, searchEntities } from "./entities";
 import { LINK_KINDS } from "./links";
 import { ASSIGN_ROLES } from "./links";
 import {
+  createDocument,
   createContentItem,
   listIntegrationAccounts,
   publishContentItem,
+  saveDocument,
+  sendCloudMail,
   type IntegrationAccount,
 } from "./operations";
+import {
+  listCollections,
+  readKbFile,
+  searchKb,
+} from "./kb";
+import {
+  localKnowledgeIdentity,
+  stableKnowledgeIdentities,
+  stableKnowledgeIdentity,
+} from "./knowledgeRefs";
 import type { EntityRef, EntityType, LinkKind, AssignRole, TaskStatus, MemoryKind } from "./types";
 
 /**
@@ -313,6 +327,171 @@ export const OPERATIONS: Operation[] = [
   },
 
   {
+    name: "spaces_search_knowledge",
+    describe:
+      "Search workspace-visible vault notes and documents by title, folder path, or content. Returns stable knowledge:source:path references for citations and follow-up reads.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "query",
+        type: "string",
+        required: true,
+        describe: "Words or a folder path to find in shared Knowledge.",
+      },
+    ],
+    async run(args) {
+      const query = str(args, "query");
+      if (!query) return { ok: false, message: "query is required" };
+      const workspaceViewer = { type: "member", id: "" } as const;
+      const [hits, collections, documents, identities] = await Promise.all([
+        searchKb(query, { limit: 25, viewer: workspaceViewer }),
+        listCollections(workspaceViewer),
+        getDb().then((db) =>
+          db.select<
+            Array<{
+              id: string;
+              title: string;
+              path: string;
+              body: string;
+            }>
+          >(
+            `SELECT id, title, path, body
+               FROM documents
+              WHERE visibility = 'workspace'
+                AND (
+                  lower(title) LIKE $1 OR lower(path) LIKE $1 OR
+                  lower(body) LIKE $1
+                )
+              ORDER BY updated_at DESC
+              LIMIT 25`,
+            [`%${query.toLowerCase()}%`],
+          ),
+        ),
+        stableKnowledgeIdentities(),
+      ]);
+      const names = new Map(
+        collections.map((collection) => [collection.id, collection.name]),
+      );
+      const lines = [
+        ...hits.map(
+          (hit) =>
+            `knowledge:${stableKnowledgeIdentity(
+              identities,
+              "vault",
+              hit.collection_id,
+            )}:${encodeURIComponent(hit.rel_path)} — ` +
+            `${names.get(hit.collection_id) ?? "Shared vault"} / ${hit.rel_path} — ${hit.title}`,
+        ),
+        ...documents.map(
+          (document) =>
+            `knowledge:document:${encodeURIComponent(
+              stableKnowledgeIdentity(
+                identities,
+                "document",
+                document.id,
+              ),
+            )} — Workspace documents / ` +
+            `${document.path || `${document.title}.md`} — ${document.title}`,
+        ),
+      ].slice(0, 25);
+      return {
+        ok: true,
+        message: lines.length ? lines.join("\n") : "No Knowledge matches.",
+      };
+    },
+  },
+
+  {
+    name: "spaces_read_knowledge",
+    describe:
+      "Read one shared Knowledge note in full from the stable knowledge:source:path reference returned by search, preserving its source and folder path for citation.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "ref",
+        type: "string",
+        required: true,
+        describe:
+          "An exact knowledge:source:path reference from spaces_search_knowledge.",
+      },
+    ],
+    async run(args) {
+      const ref = str(args, "ref");
+      const match = /^knowledge:([^:]+):(.+)$/.exec(ref);
+      if (!match) {
+        return {
+          ok: false,
+          message:
+            "Use an exact knowledge:source:path reference from spaces_search_knowledge.",
+        };
+      }
+      const sourceId = match[1];
+      let key = match[2];
+      try {
+        key = decodeURIComponent(key);
+      } catch {
+        return { ok: false, message: "The Knowledge reference is malformed." };
+      }
+      if (sourceId === "document") {
+        const documentId = await localKnowledgeIdentity("document", key);
+        if (!documentId) {
+          return { ok: false, message: "Knowledge note not found." };
+        }
+        const db = await getDb();
+        const [document] = await db.select<
+          Array<{
+            id: string;
+            title: string;
+            path: string;
+            body: string;
+          }>
+        >(
+          `SELECT id, title, path, body
+             FROM documents
+            WHERE id = $1 AND visibility = 'workspace'
+            LIMIT 1`,
+          [documentId],
+        );
+        if (!document) return { ok: false, message: "Knowledge note not found." };
+        return {
+          ok: true,
+          message: [
+            ref,
+            `# ${document.title}`,
+            `Source: Workspace documents`,
+            `Path: ${document.path || `${document.title}.md`}`,
+            "",
+            document.body,
+          ].join("\n"),
+        };
+      }
+      const collectionId = await localKnowledgeIdentity("vault", sourceId);
+      if (!collectionId) {
+        return { ok: false, message: "Knowledge source not found." };
+      }
+      const workspaceViewer = { type: "member", id: "" } as const;
+      const collection = (await listCollections(workspaceViewer)).find(
+        (candidate) => candidate.id === collectionId,
+      );
+      if (!collection) return { ok: false, message: "Knowledge source not found." };
+      const note = await readKbFile(collectionId, key);
+      return {
+        ok: true,
+        message: [
+          ref,
+          `# ${key.split("/").pop()?.replace(/\.[^.]+$/, "") || "Untitled"}`,
+          `Source: ${collection.name}`,
+          `Path: ${key}`,
+          "",
+          note.text,
+        ].join("\n"),
+      };
+    },
+  },
+
+  {
     name: "hq_create_task",
     describe: "File a task on the board. Use this instead of describing work in prose that nobody will act on.",
     effect: "auto",
@@ -480,6 +659,127 @@ export const OPERATIONS: Operation[] = [
         kind: (str(args, "kind") || "note") as MemoryKind,
       });
       return { ok: true, message: `Recorded memory:${entry.id} — ${entry.title}`, ref: { type: "memory", id: entry.id } };
+    },
+  },
+
+  {
+    name: "spaces_create_document",
+    describe:
+      "Create a durable Markdown document in Spaces, optionally inside a project and nested folder. Workspace visibility makes it available to paired teammates and Knowledge-aware agents.",
+    effect: "auto",
+    params: [
+      {
+        name: "title",
+        type: "string",
+        required: true,
+        describe: "Document title.",
+      },
+      {
+        name: "body",
+        type: "string",
+        describe: "Markdown document body.",
+      },
+      {
+        name: "folder",
+        type: "string",
+        describe: "Nested folder path, e.g. Company/Runbooks.",
+      },
+      {
+        name: "tags",
+        type: "string",
+        describe: "Comma-separated tags.",
+      },
+      {
+        name: "visibility",
+        type: "enum",
+        choices: ["private", "workspace"],
+        describe: "Defaults to workspace.",
+      },
+      {
+        name: "project",
+        type: "string",
+        describe: "Defaults to the project this run belongs to.",
+      },
+    ],
+    async run(args, ctx) {
+      const title = str(args, "title");
+      if (!title) return { ok: false, message: "title is required" };
+      const projectId = projectOf(args, ctx);
+      const document = await createDocument(
+        projectId,
+        str(args, "folder") || "Notes",
+      );
+      const visibility =
+        str(args, "visibility") === "private" ? "private" : "workspace";
+      const saved = await saveDocument({
+        ...document,
+        title,
+        body: str(args, "body"),
+        tags: str(args, "tags"),
+        visibility,
+      });
+      const db = await getDb();
+      await db.execute(
+        "UPDATE documents SET visibility = $1 WHERE id = $2",
+        [visibility, saved.id],
+      );
+      return {
+        ok: true,
+        message:
+          `Created document ${saved.title} in ${saved.path} ` +
+          `(${visibility === "workspace" ? "shared with the workspace" : "private"}).`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_send_mail",
+    describe:
+      "Send mail through the current member's connected Google or Microsoft account. This always waits for human approval before the external send.",
+    effect: "propose",
+    params: [
+      {
+        name: "provider",
+        type: "enum",
+        choices: ["google", "microsoft"],
+        required: true,
+        describe: "The member-owned mail account provider.",
+      },
+      {
+        name: "to",
+        type: "string",
+        required: true,
+        describe: "Recipient email address.",
+      },
+      {
+        name: "subject",
+        type: "string",
+        required: true,
+        describe: "Message subject.",
+      },
+      {
+        name: "body",
+        type: "string",
+        required: true,
+        describe: "Plain-text message body.",
+      },
+    ],
+    async run(args) {
+      const provider = str(args, "provider");
+      if (provider !== "google" && provider !== "microsoft") {
+        return { ok: false, message: "provider must be google or microsoft" };
+      }
+      const to = str(args, "to");
+      const subject = str(args, "subject");
+      const body = str(args, "body");
+      if (!to || !subject || !body) {
+        return { ok: false, message: "to, subject, and body are required" };
+      }
+      const sent = await sendCloudMail(provider, { to, subject, body });
+      return {
+        ok: true,
+        message: `Sent “${sent.subject}” to ${sent.to_email} through ${provider}.`,
+      };
     },
   },
 

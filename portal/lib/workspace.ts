@@ -5,7 +5,11 @@ import {
   canUseConnection,
   connectionAudience,
 } from "./connection-policy";
-import { loadSharedWorkspace, syncSharedContent } from "./shared-content";
+import {
+  loadSharedWorkspace,
+  rebuildPageLinks,
+  syncSharedContent,
+} from "./shared-content";
 import {
   canCreateWorkspace,
   signupDeniedMessage,
@@ -112,6 +116,31 @@ function slug(value: string): string {
 
 function text(value: unknown, max = 2_000): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function cleanKnowledgeSegment(value: string): string {
+  return [...value]
+    .map((character) => (character.charCodeAt(0) < 32 ? " " : character))
+    .join("")
+    .replace(/[<>:"|?*]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function knowledgeFolder(value: unknown): string {
+  return text(value, 400)
+    .replace(/\\/g, "/")
+    .split("/")
+    .map(cleanKnowledgeSegment)
+    .filter((part) => part && part !== "." && part !== "..")
+    .join("/");
+}
+
+function knowledgePath(folder: unknown, title: string): string {
+  const safeTitle =
+    cleanKnowledgeSegment(title.replace(/[\\/]/g, " ")) || "Untitled";
+  const normalizedFolder = knowledgeFolder(folder);
+  return `${normalizedFolder ? `${normalizedFolder}/` : ""}${safeTitle}.md`;
 }
 
 function oneOf<T extends string>(
@@ -273,14 +302,20 @@ async function createFounderWorkspace(user: PortalUser & { id: string }) {
     db()
       .prepare(
         `INSERT INTO knowledge_pages
-          (id, workspace_id, title, slug, body, kind, tags_json, created_by, created_at, updated_at)
-         VALUES (?, ?, 'Operating charter', 'operating-charter', ?, 'charter', '["company","operating-system"]', ?, ?, ?)`,
+          (id, workspace_id, title, slug, body, kind, tags_json, created_by,
+           owner_user_id, visibility, source_type, source_record_id,
+           source_label, path, created_at, updated_at)
+         VALUES (?, ?, 'Operating charter', 'operating-charter', ?, 'charter',
+           '["company","operating-system"]', ?, ?, 'workspace', 'portal', ?,
+           'Workspace knowledge', 'Company/Operating charter.md', ?, ?)`,
       )
       .bind(
         id("page"),
         workspaceId,
         "Spaces is the shared place for work, decisions, messages, knowledge, and agent coordination. Keep the important context here so people and agents can operate without reconstructing the company from scattered tools.",
         user.id,
+        user.id,
+        id("page_source"),
         createdAt,
         createdAt,
       ),
@@ -1130,12 +1165,14 @@ export async function mutateWorkspace(
     const title = text(input.title, 180);
     if (!title) throw new Error("Page title is required.");
     const pageId = id("page");
+    const path = knowledgePath(input.folder, title);
     await run(
       `INSERT INTO knowledge_pages
         (id, workspace_id, title, slug, body, kind, tags_json,
          created_by, owner_user_id, visibility, source_type, source_record_id,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'workspace', 'portal', ?, ?, ?)`,
+         source_label, path, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'workspace', 'portal', ?,
+         'Workspace knowledge', ?, ?, ?)`,
       pageId,
       context.workspace.id,
       title,
@@ -1156,14 +1193,78 @@ export async function mutateWorkspace(
       context.user.id,
       context.user.id,
       pageId,
+      path,
       createdAt,
       createdAt,
     );
+    await rebuildPageLinks(context.workspace.id);
     await activity(
       context.workspace.id,
       context.user.id,
       "knowledge.created",
       `Added “${title}” to knowledge`,
+      pageId,
+    );
+    return { ok: true };
+  }
+
+  if (actionName === "update_knowledge") {
+    const pageId = text(input.pageId, 180);
+    const existing = await first<{
+      id: string;
+      title: string;
+      ownerUserId: string;
+      sourceType: string;
+    }>(
+      `SELECT id, title, owner_user_id AS ownerUserId, source_type AS sourceType
+         FROM knowledge_pages
+        WHERE id = ? AND workspace_id = ?`,
+      pageId,
+      context.workspace.id,
+    );
+    if (!existing) throw new Error("Knowledge page not found.");
+    if (existing.sourceType !== "portal") {
+      throw new Error("Imported vault files are edited at their source.");
+    }
+    const canAdmin =
+      context.workspace.role === "owner" || context.workspace.role === "admin";
+    if (existing.ownerUserId !== context.user.id && !canAdmin) {
+      throw new Error("You do not have write access to this page.");
+    }
+    const title = text(input.title, 180);
+    if (!title) throw new Error("Page title is required.");
+    const path = knowledgePath(input.folder, title);
+    await run(
+      `UPDATE knowledge_pages
+          SET title = ?, slug = ?, body = ?, kind = ?, tags_json = ?,
+              source_label = 'Workspace knowledge', path = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?`,
+      title,
+      `${slug(title)}-${pageId.slice(-4)}`,
+      text(input.body, 30_000),
+      oneOf(
+        input.kind,
+        ["note", "brief", "runbook", "charter", "research"] as const,
+        "note",
+      ),
+      JSON.stringify(
+        text(input.tags, 600)
+          .split(",")
+          .map((tag) => slug(tag))
+          .filter(Boolean)
+          .slice(0, 12),
+      ),
+      path,
+      createdAt,
+      pageId,
+      context.workspace.id,
+    );
+    await rebuildPageLinks(context.workspace.id);
+    await activity(
+      context.workspace.id,
+      context.user.id,
+      "knowledge.updated",
+      `Updated “${title}”`,
       pageId,
     );
     return { ok: true };

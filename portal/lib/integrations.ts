@@ -5,7 +5,13 @@ import {
   connectionAudience,
 } from "./connection-policy";
 
-export type ProviderId = "google" | "microsoft" | "x" | "tiktok" | "meta";
+export type ProviderId =
+  | "github"
+  | "google"
+  | "microsoft"
+  | "x"
+  | "tiktok"
+  | "meta";
 
 interface Provider {
   id: ProviderId;
@@ -21,6 +27,15 @@ interface Provider {
 type Runtime = Record<string, string | undefined>;
 
 const PROVIDERS: Record<ProviderId, Provider> = {
+  github: {
+    id: "github",
+    label: "GitHub",
+    clientIdKey: "GITHUB_CLIENT_ID",
+    clientSecretKey: "GITHUB_CLIENT_SECRET",
+    authorizeUrl: () => "https://github.com/login/oauth/authorize",
+    tokenUrl: () => "https://github.com/login/oauth/access_token",
+    scopes: ["read:user", "user:email", "repo", "read:org"],
+  },
   google: {
     id: "google",
     label: "Google Workspace",
@@ -328,9 +343,9 @@ async function exchangeCode(
   const values = runtime();
   const body = new URLSearchParams({
     code,
-    grant_type: "authorization_code",
     redirect_uri: callbackUrl(request, config.id),
   });
+  if (config.id !== "github") body.set("grant_type", "authorization_code");
   const headers: Record<string, string> = {
     "content-type": "application/x-www-form-urlencoded",
     accept: "application/json",
@@ -393,7 +408,9 @@ async function accountIdentity(
   accessToken: string,
 ): Promise<{ id: string; label: string }> {
   let url: string;
-  if (providerId === "google") {
+  if (providerId === "github") {
+    url = "https://api.github.com/user";
+  } else if (providerId === "google") {
     url = "https://openidconnect.googleapis.com/v1/userinfo";
   } else if (providerId === "microsoft") {
     url = "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName";
@@ -406,7 +423,16 @@ async function accountIdentity(
     url = `https://graph.instagram.com/${version}/me?fields=user_id,username`;
   }
   const response = await fetch(url, {
-    headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      accept: "application/json",
+      ...(providerId === "github"
+        ? {
+            "user-agent": "Spaces",
+            "x-github-api-version": "2022-11-28",
+          }
+        : {}),
+    },
   });
   const raw = (await response.json()) as Record<string, unknown>;
   if (!response.ok) throw new Error("Connected, but the provider account could not be identified.");
@@ -428,6 +454,7 @@ async function accountIdentity(
   const label = String(
     data.email ??
       data.userPrincipalName ??
+      data.login ??
       data.username ??
       data.display_name ??
       data.displayName ??
@@ -465,13 +492,19 @@ export async function finishIntegration(
   })();
   const existingRows = await getD1()
     .prepare(
-      `SELECT id, metadata_json AS metadataJson
+      `SELECT id, created_by AS createdBy, metadata_json AS metadataJson
          FROM connections
         WHERE workspace_id = ? AND kind = ?`,
     )
     .bind(state.workspaceId, config.id)
-    .all<{ id: string; metadataJson: string }>();
+    .all<{ id: string; createdBy: string; metadataJson: string }>();
   const existing = (existingRows.results ?? []).find((row) => {
+    if (
+      connectionAudience(config.id) === "personal" &&
+      row.createdBy !== state.userId
+    ) {
+      return false;
+    }
     try {
       const metadata = JSON.parse(row.metadataJson) as { accountId?: string };
       return metadata.accountId === identity.id;
@@ -625,6 +658,9 @@ async function refreshTokens(
   }
 
   const refreshToken = String(tokens.refresh_token ?? "");
+  if (config.id === "github" && typeof tokens.access_token === "string") {
+    return tokens;
+  }
   if (!refreshToken) {
     throw new Error(`${config.label} needs to be reconnected before it can sync.`);
   }
@@ -743,7 +779,7 @@ export async function connectedAccountAccess(
           ? `That ${config.label} account is no longer available.`
           : audience === "workspace"
         ? `${config.label} is not connected to this workspace.`
-        : `Connect your own ${config.label} account before using mail or calendar.`,
+        : `Connect your own ${config.label} account before using it in Spaces.`,
     );
   }
 

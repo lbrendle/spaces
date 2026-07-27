@@ -1,13 +1,14 @@
 {
   "name": "spaces",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "test:mcp": "node --test mcp/*.test.mjs",
+    "test:knowledge": "node --test tests/*.test.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "release:manifest": "node release/make-manifest.mjs"

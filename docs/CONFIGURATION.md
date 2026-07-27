@@ -33,6 +33,7 @@ Core:
 
 Providers:
 
+- GitHub: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 - Microsoft: `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`
 - Instagram/Meta: `META_APP_ID`, `META_APP_SECRET`,
@@ -43,6 +44,7 @@ Providers:
 Redirect URIs are:
 
 ```text
+https://YOUR_HOST/api/integrations/github/callback
 https://YOUR_HOST/api/integrations/google/callback
 https://YOUR_HOST/api/integrations/microsoft/callback
 https://YOUR_HOST/api/integrations/meta/callback

@@ -544,6 +544,69 @@ button.kb-vis:disabled {
   overflow: hidden;
 }
 
+/* With no query, Knowledge is a vault rather than an empty search result.
+   Folder identity comes from the synced source/path pair, so the same expanded
+   hierarchy can be restored on every machine without persisting local row IDs. */
+.kb-tree,
+.kb-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.kb-tree {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3) var(--space-3) var(--space-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.kb-tree-row {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-left: calc(var(--space-2) + var(--tree-depth) * var(--space-4));
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.kb-tree-row:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.kb-tree-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-tree-folder {
+  grid-template-columns: 12px 14px minmax(0, 1fr) auto;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+}
+.kb-tree-folder small {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.kb-tree-note {
+  grid-template-columns: 14px minmax(0, 1fr);
+  font-size: var(--fs-sm);
+}
+.kb-tree-on,
+.kb-tree-on:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
 /*
  * The search highlight has to survive 39 palettes, including the ones whose
  * yellow is a pale sand and the ones whose yellow is nearly orange. A --*-soft
@@ -800,6 +863,62 @@ button.kb-vis:disabled {
   height: 5px;
   border-radius: 50%;
   background: var(--yellow);
+}
+
+.kb-backlinks {
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-soft);
+}
+.kb-backlinks h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+.kb-backlinks > p {
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.kb-backlinks > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.kb-backlinks button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kb-backlinks button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.kb-backlinks strong,
+.kb-backlinks code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-backlinks strong {
+  font-size: var(--fs-xs);
+}
+.kb-backlinks code {
+  color: var(--text-faint);
+  background: none;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  text-align: right;
 }
 
 /* A resolved wikilink is navigation and looks like it. */
@@ -1086,6 +1205,7 @@ button.kb-vis:disabled {
   }
   .kb-src,
   .kb-hit,
+  .kb-tree-row,
   .kb-mini,
   .kb-vis,
   .kb-drop,

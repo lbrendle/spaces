@@ -54,7 +54,10 @@ const ACTIONS_REL = `${SPACES_DIR}/actions.jsonl`;
  * directory listing here on purpose — these four names are Spaces's contract
  * (see src/blackboard.ts), and guessing at others would only produce noise.
  */
-const SNAPSHOT_RELS = ["CONTEXT.md", "ROSTER.md", "BOARD.md", "LINKS.md"].map((n) => `${SPACES_DIR}/${n}`);
+const KNOWLEDGE_REL = `${SPACES_DIR}/KNOWLEDGE.md`;
+const SNAPSHOT_RELS = ["CONTEXT.md", "ROSTER.md", "BOARD.md", "LINKS.md", "KNOWLEDGE.md"].map(
+  (n) => `${SPACES_DIR}/${n}`,
+);
 
 /** A single appended line stays atomic while it is small. See queueAction(). */
 const MAX_LINE_BYTES = 512 * 1024;
@@ -93,12 +96,9 @@ try {
 /**
  * Who is calling, when Spaces can say.
  *
- * .mcp.json is per-project, so the project fields are always present, but the
- * agent, channel and run are per-run and Spaces does not currently put them in the
- * harness's environment. They are read anyway: the day `start_agent_run` adds
- * `.env("SPACES_AGENT_ID", …)`, every action starts arriving fully attributed with
- * no change here. Until then the drain attributes calls by `cwd`, which is the
- * agent's own worktree.
+ * Spaces injects agent, channel, run and project into each harness process, so
+ * actions stay attributable even when several agents share a checkout. `cwd`
+ * remains an independently inspectable routing hint.
  */
 const CALLER = {
   agent_id: (process.env.SPACES_AGENT_ID ?? "").trim(),
@@ -206,7 +206,8 @@ function initializeResult(params) {
       "is written to Spaces's action queue and applied by the app, so the tool result tells you the call " +
       "was accepted, never what it produced. Additive operations apply on their own; anything that " +
       "removes or reassigns existing work waits for a human. To see current state, read the generated " +
-      "markdown in .hq/ (CONTEXT.md, ROSTER.md, BOARD.md, LINKS.md).",
+      "markdown in .hq/ (CONTEXT.md, ROSTER.md, BOARD.md, LINKS.md, KNOWLEDGE.md). Use " +
+      "spaces_search_knowledge and spaces_read_knowledge for stable, citable Knowledge references.",
   };
 }
 
@@ -431,6 +432,12 @@ function queueAction(tool, args) {
  * confidently acting on a task that was closed ten minutes ago.
  */
 function snapshotAnswer(tool, args) {
+  if (tool.name === "spaces_search_knowledge") {
+    return knowledgeSearchAnswer(args);
+  }
+  if (tool.name === "spaces_read_knowledge") {
+    return knowledgeReadAnswer(args);
+  }
   const parts = [];
   for (const rel of SNAPSHOT_RELS) {
     const path = join(ROOT, rel);
@@ -487,6 +494,107 @@ function snapshotAnswer(tool, args) {
     out.push("", `## ${part.rel}`, "", body.trimEnd());
   }
   return text(out.join("\n"));
+}
+
+function knowledgeSections() {
+  const path = join(ROOT, KNOWLEDGE_REL);
+  let raw;
+  let age;
+  try {
+    raw = readFileSync(path, "utf8");
+    age = Date.now() - statSync(path).mtimeMs;
+  } catch (e) {
+    return {
+      ok: false,
+      age: 0,
+      sections: [],
+      problem:
+        `Spaces has not written ${KNOWLEDGE_REL} for this project (${describe(e)}). ` +
+        "Open or sync the project in Spaces first.",
+    };
+  }
+  const markers = [...raw.matchAll(/^<!-- spaces-knowledge-ref: ([^\n]+) -->$/gm)];
+  const sections = markers.map((marker, index) => {
+    const start = marker.index ?? 0;
+    const end = markers[index + 1]?.index ?? raw.length;
+    const block = raw.slice(start, end).trim();
+    const title = /^###\s+(.+)$/m.exec(block)?.[1]?.trim() ?? "Untitled";
+    const source = /^- Source:\s*(.+)$/m.exec(block)?.[1]?.trim() ?? "";
+    const notePath = /^- Path:\s*`([^`]+)`$/m.exec(block)?.[1]?.trim() ?? "";
+    return {
+      ref: marker[1].trim(),
+      title,
+      source,
+      path: notePath,
+      block,
+    };
+  });
+  return { ok: true, age, sections, problem: "" };
+}
+
+function knowledgeSearchAnswer(args) {
+  const query = firstStringArg(args).toLowerCase();
+  if (!query) return text("spaces_search_knowledge needs a query.", true);
+  const loaded = knowledgeSections();
+  if (!loaded.ok) return text(loaded.problem, true);
+  const hits = loaded.sections
+    .filter((section) =>
+      [section.ref, section.title, section.source, section.path, section.block]
+        .join("\n")
+        .toLowerCase()
+        .includes(query),
+    )
+    .slice(0, 25);
+  if (!hits.length) {
+    return text(
+      `No workspace-visible Knowledge note in ${KNOWLEDGE_REL} mentions "${query}". ` +
+        `Snapshot written ${ago(loaded.age)}.`,
+    );
+  }
+  return text(
+    [
+      `Knowledge snapshot written ${ago(loaded.age)}. Use the exact reference with spaces_read_knowledge.`,
+      "",
+      ...hits.map((hit) => {
+        const lines = hit.block
+          .split("\n")
+          .filter((line) => line && !line.startsWith("<!--") && !line.startsWith("- "))
+          .slice(1)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .slice(0, 240);
+        return `- \`${hit.ref}\` — ${hit.source} / \`${hit.path}\` — ${hit.title}${lines ? `\n  ${lines}` : ""}`;
+      }),
+    ].join("\n"),
+  );
+}
+
+function knowledgeReadAnswer(args) {
+  const ref =
+    typeof args.ref === "string" ? args.ref.trim() : firstStringArg(args);
+  if (!ref) return text("spaces_read_knowledge needs a Knowledge reference.", true);
+  const loaded = knowledgeSections();
+  if (!loaded.ok) return text(loaded.problem, true);
+  const exact = loaded.sections.find((section) => section.ref === ref);
+  if (!exact) {
+    return text(
+      `No note has the exact reference "${ref}" in ${KNOWLEDGE_REL}. Search again rather than guessing; ` +
+        `the snapshot was written ${ago(loaded.age)}.`,
+      true,
+    );
+  }
+  const body =
+    exact.block.length > 80_000
+      ? `${exact.block.slice(0, 80_000)}\n\n… truncated by the MCP response limit`
+      : exact.block;
+  return text(
+    [
+      `Knowledge snapshot written ${ago(loaded.age)}.`,
+      `Cite this note as \`${exact.ref}\` or by its preserved path \`${exact.path}\`.`,
+      "",
+      body,
+    ].join("\n"),
+  );
 }
 
 /** The query an agent typed, whatever the operation happens to call it. */

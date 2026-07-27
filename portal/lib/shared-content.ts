@@ -33,9 +33,15 @@ export interface SharedTombstone {
   revision: number;
 }
 
-interface KnowledgeRow extends Omit<KnowledgePage, "tags" | "access"> {
+interface KnowledgeRow
+  extends Omit<KnowledgePage, "tags" | "access" | "backlinks"> {
   tagsJson: string;
   revision: number;
+}
+
+interface PageLinkRow {
+  fromPageId: string;
+  toPageId: string;
 }
 
 interface CalendarRow extends Omit<SharedCalendar, "access"> {
@@ -388,15 +394,31 @@ async function deleteKnowledgePage(
   }
 }
 
-async function rebuildPageLinks(workspaceId: string): Promise<void> {
-  const pages = await all<{ id: string; title: string; slug: string; body: string }>(
-    "SELECT id, title, slug, body FROM knowledge_pages WHERE workspace_id = ?",
+export async function rebuildPageLinks(workspaceId: string): Promise<void> {
+  const pages = await all<{
+    id: string;
+    title: string;
+    slug: string;
+    path: string;
+    body: string;
+  }>(
+    "SELECT id, title, slug, path, body FROM knowledge_pages WHERE workspace_id = ?",
     workspaceId,
   );
   const targets = new Map<string, string>();
   for (const page of pages) {
-    targets.set(page.title.trim().toLowerCase(), page.id);
-    targets.set(page.slug.trim().toLowerCase(), page.id);
+    const path = page.path.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
+    const pathWithoutExtension = path.replace(/\.[^./]+$/, "");
+    const fileName = pathWithoutExtension.slice(pathWithoutExtension.lastIndexOf("/") + 1);
+    for (const alias of [
+      page.title.trim().toLowerCase(),
+      page.slug.trim().toLowerCase(),
+      path,
+      pathWithoutExtension,
+      fileName,
+    ]) {
+      if (alias) targets.set(alias, page.id);
+    }
   }
   await run("DELETE FROM page_links WHERE workspace_id = ?", workspaceId);
   const pattern = /\[\[([^\]]+)\]\]/g;
@@ -404,8 +426,20 @@ async function rebuildPageLinks(workspaceId: string): Promise<void> {
     const found = new Set<string>();
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(page.body))) {
-      const label = match[1].split("|", 1)[0].split("#", 1)[0].trim().toLowerCase();
-      const targetId = targets.get(label) ?? targets.get(slug(label));
+      const label = match[1]
+        .split("|", 1)[0]
+        .split("#", 1)[0]
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\.?\//, "")
+        .toLowerCase();
+      const withoutExtension = label.replace(/\.[^./]+$/, "");
+      const fileName = withoutExtension.slice(withoutExtension.lastIndexOf("/") + 1);
+      const targetId =
+        targets.get(label) ??
+        targets.get(withoutExtension) ??
+        targets.get(fileName) ??
+        targets.get(slug(label));
       if (targetId && targetId !== page.id) found.add(targetId);
     }
     for (const targetId of found) {
@@ -981,7 +1015,14 @@ export async function loadSharedWorkspace(
   calendarEvents: SharedCalendarEvent[];
   revision: number;
 }> {
-  const [teamIds, knowledgeRows, knowledgeShares, calendarRows, calendarShares] =
+  const [
+    teamIds,
+    knowledgeRows,
+    knowledgeShares,
+    pageLinks,
+    calendarRows,
+    calendarShares,
+  ] =
     await Promise.all([
       teamsForUser(workspaceId, userId),
       all<KnowledgeRow>(
@@ -1006,6 +1047,12 @@ export async function loadSharedWorkspace(
         `SELECT page_id AS pageId, subject_type AS subjectType,
                 subject_id AS subjectId, access
            FROM knowledge_access
+          WHERE workspace_id = ?`,
+        workspaceId,
+      ),
+      all<PageLinkRow>(
+        `SELECT from_page_id AS fromPageId, to_page_id AS toPageId
+           FROM page_links
           WHERE workspace_id = ?`,
         workspaceId,
       ),
@@ -1052,7 +1099,31 @@ export async function loadSharedWorkspace(
       access,
       tags: jsonArray(tagsJson),
       backlinkCount: Number(page.backlinkCount ?? 0),
+      backlinks: [],
     });
+  }
+
+  // Only reveal backlinks whose source and target are both visible to this
+  // member. This keeps private page titles out of workspace-visible counts.
+  const visiblePages = new Map(knowledgePages.map((page) => [page.id, page]));
+  for (const page of knowledgePages) {
+    page.backlinks = pageLinks
+      .filter((link) => link.toPageId === page.id)
+      .map((link) => visiblePages.get(link.fromPageId))
+      .filter((source): source is KnowledgePage => Boolean(source))
+      .map((source) => ({
+        id: source.id,
+        title: source.title,
+        path: source.path,
+        sourceLabel: source.sourceLabel,
+      }))
+      .sort((left, right) =>
+        left.title.localeCompare(right.title, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+    page.backlinkCount = page.backlinks.length;
   }
 
   const calendars: SharedCalendar[] = [];

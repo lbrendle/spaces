@@ -2078,6 +2078,12 @@ kbd {
   grid-template-columns: 220px minmax(0, 1fr) 250px;
 }
 
+.knowledge-index {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .knowledge-search {
   height: 47px;
   display: flex;
@@ -2159,6 +2165,73 @@ kbd {
   font-size: 8px;
 }
 
+.knowledge-tree,
+.knowledge-tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-tree {
+  min-height: 0;
+  flex: 1;
+  padding: 7px;
+  overflow: auto;
+}
+
+.knowledge-tree-row {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  padding-left: calc(7px + var(--tree-depth) * 14px);
+  border-radius: 7px;
+  color: var(--ink-3);
+  background: transparent;
+  text-align: left;
+}
+
+.knowledge-tree-row:hover {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+
+.knowledge-tree-row.folder {
+  grid-template-columns: 10px 13px minmax(0, 1fr) auto;
+  font-size: 9px;
+}
+
+.knowledge-tree-row.folder strong,
+.knowledge-tree-row.note span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-tree-row.folder small {
+  font-family: var(--mono);
+  font-size: 7px;
+}
+
+.knowledge-tree-row.note {
+  grid-template-columns: 12px minmax(0, 1fr);
+  font-size: 9px;
+}
+
+.knowledge-tree-row.note > span:first-child {
+  color: var(--violet);
+  font-family: var(--mono);
+  text-align: center;
+}
+
+.knowledge-tree-row.note.active {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
 .knowledge-page {
   min-width: 0;
   overflow: auto;
@@ -2167,6 +2240,13 @@ kbd {
 
 .knowledge-page > header {
   max-width: 700px;
+}
+
+.knowledge-page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .knowledge-page h2 {
@@ -2216,6 +2296,21 @@ kbd {
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.knowledge-editor {
+  max-width: 700px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.knowledge-editor > footer {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .calendar-layout {
@@ -2466,8 +2561,48 @@ kbd {
 
 .decision-rail {
   min-width: 0;
+  overflow: auto;
   border-left: 1px solid var(--line);
   background: var(--surface-2);
+}
+
+.knowledge-backlinks {
+  padding: 7px;
+  border-bottom: 1px solid var(--line);
+}
+
+.knowledge-backlinks > button {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 7px;
+  color: var(--ink-2);
+  background: transparent;
+  text-align: left;
+}
+
+.knowledge-backlinks > button:hover {
+  background: var(--surface-3);
+}
+
+.knowledge-backlinks strong,
+.knowledge-backlinks small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-backlinks strong {
+  font-size: 9px;
+}
+
+.knowledge-backlinks small {
+  color: var(--ink-4);
+  font-family: var(--mono);
+  font-size: 7px;
 }
 
 .decision-rail article {
@@ -4166,6 +4301,10 @@ kbd {
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--surface);
+  }
+
+  .knowledge-editor {
+    grid-template-columns: 1fr;
   }
 
   .inbox-reader,

@@ -25,6 +25,18 @@ cross-device sync, and remote jobs are unavailable.
 The real `hosting.json` is ignored because it identifies one deployment. Never
 copy another operator’s project ID or secrets.
 
+GitHub uses a standard OAuth App with this callback:
+
+```text
+https://YOUR_HOST/api/integrations/github/callback
+```
+
+Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` in the hosted environment.
+GitHub is a personal connection: every owner, admin, or member authorizes their
+own account, and only that member can see or use its token. Shared
+project/repository references do not grant teammates access to private
+repositories.
+
 ## Outside Sites
 
 The portal trusts authenticated identity headers supplied by the hosting layer.

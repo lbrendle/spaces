@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 /// run_id -> process-group id (children are spawned in their own group).
@@ -20,6 +20,19 @@ struct AgentEvent {
     kind: String, // "line" | "stderr" | "done" | "error"
     data: String,
     exit_code: Option<i32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentRunRequest {
+    run_id: String,
+    agent_id: String,
+    channel_id: String,
+    project_id: String,
+    program: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    prompt: String,
 }
 
 /// PATH from a login shell — a bundled .app gets a minimal launchd PATH, which
@@ -773,16 +786,26 @@ fn kill_group(pgid: u32) {
 async fn start_agent_run(
     app: AppHandle,
     state: State<'_, RunningAgents>,
-    run_id: String,
-    program: String,
-    args: Vec<String>,
-    cwd: Option<String>,
-    prompt: String,
+    request: AgentRunRequest,
 ) -> Result<(), String> {
+    let AgentRunRequest {
+        run_id,
+        agent_id,
+        channel_id,
+        project_id,
+        program,
+        args,
+        cwd,
+        prompt,
+    } = request;
     let bin = resolve_bin(&program);
     let mut cmd = Command::new(&bin);
     cmd.args(&args)
         .env("PATH", login_path())
+        .env("SPACES_RUN_ID", &run_id)
+        .env("SPACES_AGENT_ID", agent_id)
+        .env("SPACES_CHANNEL_ID", channel_id)
+        .env("SPACES_PROJECT_ID", project_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

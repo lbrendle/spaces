@@ -31,7 +31,12 @@
  * are looking at without losing a word of the question.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useStore } from "../store";
@@ -51,6 +56,7 @@ import {
   importFromFolder,
   inspectDrop,
   kbAccess,
+  listKbBacklinks,
   listCollections,
   listKbFiles,
   originReachable,
@@ -65,12 +71,20 @@ import {
   type CollectionFile,
   type ImportProgress,
   type ImportReport,
+  type KbBacklink,
 } from "../kb";
+import {
+  buildKnowledgeTree,
+  type KnowledgeTreeNode,
+} from "../knowledgeTree";
 import { Field, mdToHtml, Spinner } from "./ui";
 import { PanelSection, SidePanel, usePanel } from "./SidePanel";
 import {
   IconAgents,
+  IconChevronDown,
+  IconChevronRight,
   IconDocument,
+  IconFolder,
   IconMemory,
   IconPlus,
   IconRefresh,
@@ -151,6 +165,8 @@ interface ReaderState {
   resolve: (target: string) => string | null;
   /** Files in the same collection, for turning a resolved wikilink into a Hit. */
   siblings: CollectionFile[];
+  /** Notes in the same collection that point at this one. */
+  backlinks: KbBacklink[];
 }
 
 interface ImportingState {
@@ -435,6 +451,62 @@ const HitList = memo(function HitList({
   );
 });
 
+function KnowledgeTree({
+  nodes,
+  expanded,
+  selectedKey,
+  onToggle,
+  onSelect,
+}: {
+  nodes: KnowledgeTreeNode<Hit>[];
+  expanded: Set<string>;
+  selectedKey: string;
+  onToggle: (id: string) => void;
+  onSelect: (hit: Hit) => void;
+}) {
+  function render(items: KnowledgeTreeNode<Hit>[], depth: number): ReactNode {
+    return items.map((node) => {
+      if (node.kind === "note") {
+        return (
+          <li key={node.id}>
+            <button
+              type="button"
+              className={"kb-tree-row kb-tree-note" + (node.value.key === selectedKey ? " kb-tree-on" : "")}
+              style={{ "--tree-depth": depth } as CSSProperties}
+              onClick={() => onSelect(node.value)}
+              title={node.path}
+            >
+              <IconDocument size={12} />
+              <span>{node.name}</span>
+            </button>
+          </li>
+        );
+      }
+      const stateId = depth === 0 ? `closed:${node.id}` : node.id;
+      const open = depth === 0 ? !expanded.has(stateId) : expanded.has(stateId);
+      return (
+        <li key={node.id}>
+          <button
+            type="button"
+            className="kb-tree-row kb-tree-folder"
+            style={{ "--tree-depth": depth } as CSSProperties}
+            aria-expanded={open}
+            onClick={() => onToggle(stateId)}
+          >
+            {open ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}
+            <IconFolder size={12} />
+            <span>{node.name}</span>
+            <small>{node.children.length}</small>
+          </button>
+          {open && node.children.length > 0 && <ul>{render(node.children, depth + 1)}</ul>}
+        </li>
+      );
+    });
+  }
+
+  return <ul className="kb-tree" aria-label="Knowledge folders">{render(nodes, 0)}</ul>;
+}
+
 /* ── the view ─────────────────────────────────────────────────── */
 
 export function KnowledgeView() {
@@ -492,6 +564,7 @@ export function KnowledgeView() {
 
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
+  const [treeHits, setTreeHits] = useState<Hit[]>([]);
   const [terms, setTerms] = useState<string[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -500,6 +573,14 @@ export function KnowledgeView() {
   const [readerBusy, setReaderBusy] = useState(false);
   const [readerError, setReaderError] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("spaces.knowledge.expanded") ?? "[]");
+      return new Set(Array.isArray(stored) ? stored.filter((value) => typeof value === "string") : []);
+    } catch {
+      return new Set();
+    }
+  });
 
   const asking = usePanel();
 
@@ -547,6 +628,113 @@ export function KnowledgeView() {
     (id: string) => projects.find((p) => p.id === id)?.name ?? "No project",
     [projects]
   );
+
+  const treeKey = [
+    activeCollections.map((collection) => `${collection.id}:${collection.last_indexed_at}`).join(","),
+    docsOn ? docs.map((document) => `${document.id}:${document.updated_at}:${document.path}`).join(",") : "-",
+    memoryOn ? memory.map((entry) => `${entry.id}:${entry.updated_at}:${entry.project_id}`).join(",") : "-",
+  ].join("|");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const collected: Hit[] = [];
+      const perCollection = await Promise.all(
+        activeCollections.map(async (collection) => {
+          try {
+            return { collection, files: await kbFiles(collection.id) };
+          } catch {
+            return { collection, files: [] as CollectionFile[] };
+          }
+        }),
+      );
+      for (const { collection, files } of perCollection) {
+        for (const file of files) {
+          collected.push({
+            key: `collection:${file.id}`,
+            kind: "collection",
+            sourceId: collection.id,
+            sourceLabel: collection.name,
+            id: file.id,
+            title: file.title || file.rel_path,
+            path: file.rel_path,
+            snippet: "",
+            score: 0,
+            modified: file.modified_at,
+          });
+        }
+      }
+      if (docsOn) {
+        for (const document of docs) {
+          const folder = (document.path || "Notes").replace(/\/+$/, "");
+          collected.push({
+            key: `document:${document.id}`,
+            kind: "document",
+            sourceId: SPACES_DOCUMENTS,
+            sourceLabel: "Spaces documents",
+            id: document.id,
+            title: document.title || "Untitled",
+            path: `${folder}/${document.title || "Untitled"}.md`,
+            snippet: "",
+            score: 0,
+            modified: document.updated_at,
+          });
+        }
+      }
+      if (memoryOn) {
+        for (const entry of memory) {
+          collected.push({
+            key: `memory:${entry.id}`,
+            kind: "memory",
+            sourceId: SPACES_MEMORY,
+            sourceLabel: "Project memory",
+            id: entry.id,
+            title: entry.title || "Untitled",
+            path: `${projectName(entry.project_id)}/${entry.kind}/${entry.title || "Untitled"}.md`,
+            snippet: "",
+            score: 0,
+            modified: entry.updated_at,
+          });
+        }
+      }
+      if (!cancelled) setTreeHits(collected);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // treeKey contains the complete structural inputs and avoids reloading a
+    // large collection for unrelated agent/message renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeKey]);
+
+  const tree = useMemo(
+    () =>
+      buildKnowledgeTree(
+        treeHits.map((hit) => ({
+          id: hit.id,
+          sourceId: hit.sourceId,
+          sourceLabel: hit.sourceLabel,
+          path: hit.path,
+          title: hit.title,
+          value: hit,
+        })),
+      ),
+    [treeHits],
+  );
+
+  const toggleFolder = useCallback((id: string) => {
+    setExpandedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem("spaces.knowledge.expanded", JSON.stringify([...next]));
+      } catch {
+        // Private browsing can refuse persistence; the tree still works now.
+      }
+      return next;
+    });
+  }, []);
 
   /* ── search ─────────────────────────────────────────────────── */
 
@@ -737,9 +925,10 @@ export function KnowledgeView() {
       void (async () => {
         try {
           if (hit.kind === "collection") {
-            const [file, files] = await Promise.all([
+            const [file, files, backlinks] = await Promise.all([
               readKbFile(hit.sourceId, hit.path),
               kbFiles(hit.sourceId),
+              listKbBacklinks(hit.sourceId, hit.path),
             ]);
             const meta = files.find((f) => f.rel_path === hit.path);
             const collection = collections.find((c) => c.id === hit.sourceId);
@@ -759,6 +948,7 @@ export function KnowledgeView() {
                 root && reachable[hit.sourceId] ? `${root.replace(/\/+$/, "")}/${hit.path}` : "",
               resolve: buildResolver(files),
               siblings: files,
+              backlinks,
             });
           } else {
             const body =
@@ -778,6 +968,7 @@ export function KnowledgeView() {
               // [[wikilink]] written in one has no file to point at.
               resolve: () => null,
               siblings: [],
+              backlinks: [],
             });
           }
         } catch (e) {
@@ -1232,7 +1423,17 @@ export function KnowledgeView() {
           </p>
         </div>
       ) : (
-        <HitList hits={hits} terms={terms} selectedKey={selectedKey} onSelect={openHit} />
+        query.trim() ? (
+          <HitList hits={hits} terms={terms} selectedKey={selectedKey} onSelect={openHit} />
+        ) : (
+          <KnowledgeTree
+            nodes={tree}
+            expanded={expandedFolders}
+            selectedKey={selectedKey}
+            onToggle={toggleFolder}
+            onSelect={openHit}
+          />
+        )
       )}
     </div>
   );
@@ -1326,6 +1527,37 @@ export function KnowledgeView() {
                 Only the first {count(KB_CONTENT_CAP)} characters of this note were imported.
                 The rest is in the file it came from.
               </p>
+            )}
+            {reader.backlinks.length > 0 && (
+              <section className="kb-backlinks">
+                <h3>Linked mentions</h3>
+                <p>{count(reader.backlinks.length)} notes point here.</p>
+                <div>
+                  {reader.backlinks.map((backlink) => (
+                    <button
+                      type="button"
+                      key={backlink.id}
+                      onClick={() =>
+                        openHit({
+                          key: `collection:${backlink.id}`,
+                          kind: "collection",
+                          sourceId: reader.hit.sourceId,
+                          sourceLabel: reader.hit.sourceLabel,
+                          id: backlink.id,
+                          title: backlink.title || backlink.rel_path,
+                          path: backlink.rel_path,
+                          snippet: "",
+                          score: 0,
+                          modified: backlink.modified_at,
+                        })
+                      }
+                    >
+                      <strong>{backlink.title || backlink.rel_path}</strong>
+                      <code>{backlink.rel_path}</code>
+                    </button>
+                  ))}
+                </div>
+              </section>
             )}
           </div>
         </>

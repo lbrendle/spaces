@@ -73,8 +73,28 @@ test("shared knowledge and calendars have permission-aware durable storage", asy
   assert.match(workspace, /revision > \?/);
   assert.match(workspace, /redacted \? "Busy"/);
   assert.match(workspace, /visibility === "private"/);
+  assert.match(workspace, /from_page_id AS fromPageId/);
+  assert.match(workspace, /page\.backlinks = pageLinks/);
   assert.match(app, /function CalendarSurface/);
+  assert.match(app, /function PortalKnowledgeTree/);
+  assert.match(app, /action: "update_knowledge"/);
+  assert.match(app, /Linked mentions/);
+  assert.match(app, /Company\/Runbooks/);
   assert.match(app, /Busy-only events arrive redacted from the server/);
+});
+
+test("GitHub is a member-owned connection and not the app owner's shared token", async () => {
+  const [integrations, policy, app] = await Promise.all([
+    readFile(new URL("../lib/integrations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/connection-policy.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(integrations, /id: "github"/);
+  assert.match(integrations, /GITHUB_CLIENT_ID/);
+  assert.match(integrations, /https:\/\/api\.github\.com\/user/);
+  assert.match(integrations, /row\.createdBy !== state\.userId/);
+  assert.doesNotMatch(policy, /WORKSPACE_SOCIAL_PROVIDERS.*github/);
+  assert.match(app, /Private to you/);
 });
 
 test("calendar creation reaches exact cloud calendars and queues native Apple delivery", async () => {

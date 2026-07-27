@@ -12,6 +12,10 @@
 # OAuth token encryption. Changing this invalidates existing stored tokens.
 INTEGRATION_TOKEN_KEY=
 
+# GitHub personal accounts
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
 # Google Workspace
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=

@@ -41,9 +41,11 @@ Deliberately excluded:
 | Persistent terminal panes | Implemented | Desktop process state | A terminal survives pane/tab navigation while the desktop process remains open; it is not a cloud shell. |
 | Embedded project browser | Implemented on macOS | Desktop WebView state | It is an embedded webview, not a remote browser and not available in the portal. |
 | Git activity and isolated worktrees | Implemented | Local repository plus `gh` reads | Spaces coordinates Git; it is not a Git object host or GitHub replacement. |
-| Spaces agent MCP tools | Implemented | Generated `.hq/` files plus desktop approval log | Code projects use their checkout. Non-code projects receive a private control directory so tools do not disappear. |
+| Personal GitHub account connection | Implemented in source | Member-owned encrypted OAuth token in D1; local `gh` credential stays on that member's desktop | Members connect and see their own account. The portal never exposes the app owner’s personal token to other members. A deployment must configure a GitHub OAuth app. |
+| Spaces agent MCP tools | Implemented | Generated `.hq/` files plus desktop approval log | Code projects use their checkout. Non-code projects receive a private control directory so tools do not disappear. Spawned harnesses receive explicit run, agent, channel, and project identity. |
 | Agent social publishing proposal | Implemented | Desktop approval log + Content Studio + portal provider action | `spaces_publish_social` always waits for human approval. Existing agent sessions must restart to discover a newly added tool. |
-| Documents and knowledge | Implemented | Desktop SQLite; explicitly shared pages in D1 | Markdown, versions, links/backlinks, project memory, and read-only vault imports are supported. This is not simultaneous multiplayer text editing. |
+| Documents and knowledge | Implemented | Desktop SQLite; explicitly shared pages in D1 | Nested source/folder/note trees, preserved cross-member paths, native shared-note editing, Markdown, versions, wikilinks/backlinks, project memory, and read-only vault imports are supported. This is not simultaneous multiplayer text editing. |
+| Agent Knowledge references | Implemented | Permission-filtered `.hq/KNOWLEDGE.md` snapshot | `spaces_search_knowledge` and `spaces_read_knowledge` return stable `knowledge:source:path` citations. Snapshot size is bounded and says when notes were omitted or truncated. |
 | Obsidian-style vault mounting | Implemented, read-only | Original files stay on disk; index/cache in desktop SQLite | Spaces does not rewrite the mounted vault. |
 | Mail list/send | Implemented for Google and Microsoft | Tokens encrypted in D1; synced rows in desktop SQLite | Provider APIs and scopes must be enabled. Personal mail connections are not workspace-shared by default. |
 | Google/Microsoft calendars | List/create implemented | Tokens encrypted in D1; shared metadata/events in D1 and desktop SQLite | Upstream edit/delete and attendee invitations are not complete. |
@@ -60,7 +62,7 @@ Deliberately excluded:
 | Invitations, roles, removal | Implemented | D1 | Removing a person also revokes devices and removes or transfers their governed resources. |
 | Desktop pairing | Implemented | Hashed device token in D1; token on that desktop | Pairing codes are short-lived and single-use. |
 | Cross-device/BYO agent jobs | Implemented | Bounded job/result state in D1; execution on host desktop | Repositories and live process streams remain on the host. The requested prompt and sanitized final result cross the control plane. |
-| Desktop auto-update | Not enabled in the public source | N/A | Forks must create their own signing key, updater endpoint, release process, and platform signatures before enabling it. |
+| Desktop auto-update | Implemented in the public source | Operator-hosted signed manifest and artifacts | The public source includes the updater client and release worker. Every fork must create its own updater key, endpoint, and platform signatures; private signing material is never committed. |
 | Windows/Linux desktop | Not release-verified | N/A | Some code is portable, but macOS is the only supported and audited desktop target today. |
 
 ## Verification levels

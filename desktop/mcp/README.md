@@ -51,10 +51,13 @@ So the whole server is three moves:
   *queued*, not done — the transport is one-way and the result never comes back.
 - **read-only calls** can't be answered that way, since the agent needs the
   answer in the same turn. Those return Spaces's mirrored markdown from `.hq/`
-  (`CONTEXT.md`, `ROSTER.md`, `BOARD.md`, `LINKS.md`) with the age of each file
-  stated in the first two lines. A stale answer that admits it is stale is
-  useful; a stale answer wearing a live one's clothes is how an agent ends up
-  confidently acting on a task that closed ten minutes ago.
+  (`CONTEXT.md`, `ROSTER.md`, `BOARD.md`, `LINKS.md`, `KNOWLEDGE.md`) with the
+  age of each file stated in the first two lines. Knowledge gets dedicated
+  `spaces_search_knowledge` and `spaces_read_knowledge` tools so agents cite
+  the same stable collection/path reference on every member device. A stale
+  answer that admits it is stale is useful; a stale answer wearing a live
+  one's clothes is how an agent ends up confidently acting on a task that
+  closed ten minutes ago.
 
 It has no npm dependencies and never will. It is spawned from a user's checkout
 by a harness we do not control, and `npm install` is not something that may fail
@@ -84,13 +87,12 @@ harness captures in its MCP logs.
 ```
 
 The routing fields are named after the `agent_actions` columns so the drain is a
-near-1:1 mapping. `agent_id` / `run_id` / `channel_id` come from `SPACES_AGENT_ID`,
-`SPACES_RUN_ID` and `SPACES_CHANNEL_ID` and are usually empty today: `.mcp.json` is
-per-project, and Spaces does not yet put per-run identity into the harness's
-environment. The day `start_agent_run` in `src-tauri/src/lib.rs` gains
-`.env("SPACES_AGENT_ID", …)`, every action starts arriving fully attributed with no
-change here. Until then `cwd` is the attribution hint — Spaces gives each isolated
-agent its own worktree, so the path identifies the caller.
+near-1:1 mapping. `agent_id` / `run_id` / `channel_id` come from
+`SPACES_AGENT_ID`, `SPACES_RUN_ID` and `SPACES_CHANNEL_ID`; Spaces injects all
+three plus `SPACES_PROJECT_ID` into every harness process. `cwd` remains a
+second routing hint — Spaces gives each isolated agent its own worktree, so the
+path identifies the caller even when a harness strips inherited environment
+variables.
 
 Several agents can be mid-call at once, so a call is exactly one
 `appendFileSync` of one line plus its newline. An `O_APPEND` write of a small

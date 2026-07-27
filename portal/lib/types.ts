@@ -72,6 +72,13 @@ export interface Decision {
   createdAt: string;
 }
 
+export interface KnowledgeBacklink {
+  id: string;
+  title: string;
+  path: string;
+  sourceLabel: string;
+}
+
 export interface KnowledgePage {
   id: string;
   title: string;
@@ -80,6 +87,7 @@ export interface KnowledgePage {
   kind: string;
   tags: string[];
   backlinkCount: number;
+  backlinks: KnowledgeBacklink[];
   sourceType: "portal" | "document" | "vault";
   sourceLabel: string;
   sourceDeviceId: string;

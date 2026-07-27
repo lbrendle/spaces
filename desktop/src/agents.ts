@@ -1650,11 +1650,16 @@ export async function runAgent(
       });
     } else {
       await invoke("start_agent_run", {
-        runId: msgId,
-        program: adapter.program,
-        args: adapterArgs,
-        cwd: cwd || null,
-        prompt,
+        request: {
+          runId: msgId,
+          agentId: agent.id,
+          channelId,
+          projectId: project?.id ?? "",
+          program: adapter.program,
+          args: adapterArgs,
+          cwd: cwd || null,
+          prompt,
+        },
       });
     }
   } catch (e) {

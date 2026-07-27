@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
   useEffect,
@@ -18,6 +19,10 @@ import type {
   WorkspaceSnapshot,
   WorkspaceUnchanged,
 } from "../lib/types";
+import {
+  buildKnowledgeTree,
+  type KnowledgeTreeNode,
+} from "../lib/knowledge-tree";
 
 const UPSTREAM_REPOSITORY = "https://github.com/lbrendle/spaces";
 const CONFIGURED_DESKTOP_DOWNLOAD =
@@ -856,7 +861,12 @@ export function PortalApp() {
             />
           )}
           {surface === "knowledge" && (
-            <KnowledgeSurface snapshot={snapshot} />
+            <KnowledgeSurface
+              key={snapshot.workspace.id}
+              snapshot={snapshot}
+              working={working}
+              mutate={mutate}
+            />
           )}
           {surface === "people" && <PeopleSurface snapshot={snapshot} />}
           {surface === "connections" && (
@@ -2248,11 +2258,130 @@ function InboxSurface({
   );
 }
 
-function KnowledgeSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+function knowledgeSource(page: KnowledgePage): {
+  id: string;
+  label: string;
+} {
+  if (page.sourceType === "vault") {
+    return {
+      id:
+        page.sourceCollectionId ||
+        `${page.sourceDeviceId}:${page.sourceLabel || "vault"}`,
+      label: page.sourceLabel || "Shared vault",
+    };
+  }
+  if (page.sourceType === "document") {
+    return {
+      id: `documents:${page.sourceDeviceId || page.ownerUserId}`,
+      label: page.sourceLabel || "Shared documents",
+    };
+  }
+  return { id: "workspace", label: "Workspace knowledge" };
+}
+
+function folderFromKnowledgePath(path: string): string {
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+}
+
+function PortalKnowledgeTree({
+  nodes,
+  selectedId,
+  expanded,
+  onToggle,
+  onSelect,
+}: {
+  nodes: KnowledgeTreeNode<KnowledgePage>[];
+  selectedId: string;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  function render(
+    items: KnowledgeTreeNode<KnowledgePage>[],
+    depth: number,
+  ): ReactNode {
+    return items.map((node) => {
+      if (node.kind === "note") {
+        return (
+          <li key={node.id}>
+            <button
+              type="button"
+              className={`knowledge-tree-row note${node.value.id === selectedId ? " active" : ""}`}
+              style={{ "--tree-depth": depth } as CSSProperties}
+              title={node.path}
+              onClick={() => onSelect(node.value.id)}
+            >
+              <span aria-hidden="true">·</span>
+              <span>{node.name}</span>
+            </button>
+          </li>
+        );
+      }
+      const stateId = depth === 0 ? `closed:${node.id}` : node.id;
+      const open = depth === 0
+        ? !expanded.has(stateId)
+        : expanded.has(stateId);
+      return (
+        <li key={node.id}>
+          <button
+            type="button"
+            className="knowledge-tree-row folder"
+            style={{ "--tree-depth": depth } as CSSProperties}
+            aria-expanded={open}
+            onClick={() => onToggle(stateId)}
+          >
+            <span aria-hidden="true">{open ? "⌄" : "›"}</span>
+            <span aria-hidden="true">▱</span>
+            <strong>{node.name}</strong>
+            <small>{node.children.length}</small>
+          </button>
+          {open && node.children.length > 0 && (
+            <ul>{render(node.children, depth + 1)}</ul>
+          )}
+        </li>
+      );
+    });
+  }
+
+  return (
+    <ul className="knowledge-tree" aria-label="Knowledge folders">
+      {render(nodes, 0)}
+    </ul>
+  );
+}
+
+function KnowledgeSurface({
+  snapshot,
+  working,
+  mutate,
+}: {
+  snapshot: WorkspaceSnapshot;
+  working: boolean;
+  mutate: (
+    input: Record<string, unknown>,
+    success: string,
+  ) => Promise<Record<string, unknown>>;
+}) {
   const [selected, setSelected] = useState(snapshot.knowledgePages[0]?.id ?? "");
   const [filter, setFilter] = useState("");
+  const [editingPageId, setEditingPageId] = useState("");
+  const storageKey = `spaces.knowledge.expanded.${snapshot.workspace.id}`;
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) ?? "[]");
+      return new Set(
+        Array.isArray(stored)
+          ? stored.filter((value) => typeof value === "string")
+          : [],
+      );
+    } catch {
+      return new Set();
+    }
+  });
+
   const pages = snapshot.knowledgePages.filter((page) =>
-    `${page.title} ${page.body} ${page.tags.join(" ")}`
+    `${page.title} ${page.path} ${page.body} ${page.tags.join(" ")}`
       .toLowerCase()
       .includes(filter.toLowerCase()),
   );
@@ -2260,6 +2389,56 @@ function KnowledgeSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     pages.find((page) => page.id === selected) ??
     snapshot.knowledgePages.find((page) => page.id === selected) ??
     pages[0];
+  const tree = useMemo(
+    () =>
+      buildKnowledgeTree(
+        snapshot.knowledgePages.map((page) => {
+          const source = knowledgeSource(page);
+          return {
+            id: page.id,
+            sourceId: source.id,
+            sourceLabel: source.label,
+            path: page.path || `${page.title}.md`,
+            title: page.title,
+            value: page,
+          };
+        }),
+      ),
+    [snapshot.knowledgePages],
+  );
+
+  function toggleFolder(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify([...next]));
+      } catch {
+        // The tree remains usable if browser storage is unavailable.
+      }
+      return next;
+    });
+  }
+
+  async function savePage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!current) return;
+    const form = new FormData(event.currentTarget);
+    await mutate(
+      {
+        action: "update_knowledge",
+        pageId: current.id,
+        title: formValue(form, "title"),
+        folder: formValue(form, "folder"),
+        kind: formValue(form, "kind"),
+        tags: formValue(form, "tags"),
+        body: formValue(form, "body"),
+      },
+      "Knowledge page updated.",
+    );
+    setEditingPageId("");
+  }
 
   return (
     <div className="knowledge-layout">
@@ -2274,25 +2453,51 @@ function KnowledgeSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
           />
         </div>
         <div className="surface-subhead">
-          <span>Pages</span>
-          <small>{pages.length}</small>
+          <span>{filter.trim() ? "Matches" : "Vaults"}</span>
+          <small>{snapshot.knowledgePages.length}</small>
         </div>
-        {pages.map((page) => (
-          <KnowledgeIndexRow
-            key={page.id}
-            page={page}
-            active={current?.id === page.id}
-            onClick={() => setSelected(page.id)}
+        {filter.trim() ? (
+          pages.map((page) => (
+            <KnowledgeIndexRow
+              key={page.id}
+              page={page}
+              active={current?.id === page.id}
+              onClick={() => setSelected(page.id)}
+            />
+          ))
+        ) : (
+          <PortalKnowledgeTree
+            nodes={tree}
+            selectedId={current?.id ?? ""}
+            expanded={expanded}
+            onToggle={toggleFolder}
+            onSelect={setSelected}
           />
-        ))}
+        )}
       </aside>
       <section className="knowledge-page">
         {current ? (
           <>
             <header>
-              <span className="page-kind">
-                {current.sourceType === "vault" ? "vault file" : current.kind}
-              </span>
+              <div className="knowledge-page-actions">
+                <span className="page-kind">
+                  {current.sourceType === "vault" ? "vault file" : current.kind}
+                </span>
+                {current.sourceType === "portal" &&
+                  current.access === "write" && (
+                    <button
+                      type="button"
+                      className="quiet-button compact"
+                      onClick={() =>
+                        setEditingPageId((value) =>
+                          value === current.id ? "" : current.id,
+                        )
+                      }
+                    >
+                      {editingPageId === current.id ? "Close editor" : "Edit note"}
+                    </button>
+                  )}
+              </div>
               <h2>{current.title}</h2>
               <div>
                 <time>Updated {relative(current.updatedAt)}</time>
@@ -2306,16 +2511,80 @@ function KnowledgeSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                 {current.path && <code>{current.path}</code>}
               </div>
             )}
-            <div className="knowledge-prose">
-              {current.body.split(/\n{2,}/).map((paragraph, index) => (
-                <p key={index}>{paragraph}</p>
-              ))}
-            </div>
-            <footer className="tag-row">
-              {current.tags.map((tag) => (
-                <span key={tag}>#{tag}</span>
-              ))}
-            </footer>
+            {editingPageId === current.id ? (
+              <form
+                className="knowledge-editor"
+                key={current.id}
+                onSubmit={(event) => void savePage(event)}
+              >
+                <Field label="Title" required wide>
+                  <input
+                    name="title"
+                    defaultValue={current.title}
+                    required
+                  />
+                </Field>
+                <Field
+                  label="Folder"
+                  hint="Use / for nested folders, like Company/Runbooks."
+                  wide
+                >
+                  <input
+                    name="folder"
+                    defaultValue={folderFromKnowledgePath(current.path)}
+                    placeholder="Company/Operations"
+                  />
+                </Field>
+                <Field label="Kind">
+                  <select name="kind" defaultValue={current.kind}>
+                    <option value="note">Note</option>
+                    <option value="brief">Brief</option>
+                    <option value="runbook">Runbook</option>
+                    <option value="charter">Charter</option>
+                    <option value="research">Research</option>
+                  </select>
+                </Field>
+                <Field label="Tags">
+                  <input name="tags" defaultValue={current.tags.join(", ")} />
+                </Field>
+                <Field label="Body" wide>
+                  <textarea
+                    name="body"
+                    defaultValue={current.body}
+                    rows={16}
+                  />
+                </Field>
+                <footer>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => setEditingPageId("")}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={working}
+                  >
+                    {working ? "Saving…" : "Save note"}
+                  </button>
+                </footer>
+              </form>
+            ) : (
+              <>
+                <div className="knowledge-prose">
+                  {current.body.split(/\n{2,}/).map((paragraph, index) => (
+                    <p key={index}>{paragraph}</p>
+                  ))}
+                </div>
+                <footer className="tag-row">
+                  {current.tags.map((tag) => (
+                    <span key={tag}>#{tag}</span>
+                  ))}
+                </footer>
+              </>
+            )}
           </>
         ) : (
           <EmptyState
@@ -2326,6 +2595,25 @@ function KnowledgeSurface({ snapshot }: { snapshot: WorkspaceSnapshot }) {
         )}
       </section>
       <aside className="decision-rail">
+        <div className="surface-subhead">
+          <span>Linked mentions</span>
+          <small>{current?.backlinks.length ?? 0}</small>
+        </div>
+        <div className="knowledge-backlinks">
+          {current?.backlinks.map((backlink) => (
+            <button
+              type="button"
+              key={backlink.id}
+              onClick={() => setSelected(backlink.id)}
+            >
+              <strong>{backlink.title}</strong>
+              <small>{backlink.path || backlink.sourceLabel}</small>
+            </button>
+          ))}
+          {current && !current.backlinks.length && (
+            <div className="quiet-empty">No other visible note links here yet.</div>
+          )}
+        </div>
         <div className="surface-subhead">
           <span>Recent decisions</span>
           <small>{snapshot.decisions.length}</small>
@@ -2839,8 +3127,9 @@ function ConnectionsSurface({
             <span className="section-index">02</span>
             <h2>Cloud accounts</h2>
             <p>
-              Mail and calendars stay private to the person who connects them.
-              Social publishing accounts are shared with the workspace.
+              GitHub, mail, and calendars stay private to the person who
+              connects them. Social publishing accounts are shared with the
+              workspace.
             </p>
           </div>
           <span>OAuth + encrypted tokens</span>
@@ -3159,6 +3448,7 @@ function PortalDialog({
           {
             action: "create_knowledge",
             title: formValue(form, "title"),
+            folder: formValue(form, "folder"),
             body: formValue(form, "body"),
             kind: formValue(form, "kind"),
             tags: formValue(form, "tags"),
@@ -3466,6 +3756,13 @@ function DialogFields({
       <>
         <Field label="Page title" required wide>
           <input name="title" placeholder="Operating principles" autoFocus required />
+        </Field>
+        <Field
+          label="Folder"
+          hint="Use / for nested folders, like Company/Runbooks."
+          wide
+        >
+          <input name="folder" placeholder="Company/Operations" />
         </Field>
         <Field label="Kind">
           <select name="kind" defaultValue="note">

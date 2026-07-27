@@ -18,7 +18,7 @@ small shared control plane.
 │ shared content · job leases │
 └──────────────┬───────────────┘
                │ provider APIs
-       Google · Microsoft
+       GitHub · Google · Microsoft
        Instagram · TikTok
 ```
 
@@ -57,6 +57,12 @@ audit log.
 
 Operations marked `auto` apply immediately. Operations marked `propose` wait in
 the visible approval queue. External publishing is always `propose`.
+
+Every spawned harness receives explicit run, agent, channel, and project IDs.
+The blackboard also emits permission-filtered workspace Knowledge with preserved
+folder paths. Dedicated read-only tools search and return stable
+`knowledge:source:path` references without pretending the out-of-process MCP
+server can query SQLite live.
 
 Projects without a local checkout receive a private control directory in the
 application data folder. This lets general/non-code channels expose Spaces
