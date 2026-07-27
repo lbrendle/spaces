@@ -86,6 +86,8 @@ test("lists and approval-queues the social publishing tool", async () => {
 
   const responses = stdout.trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(responses[0].result.serverInfo.name, "hq");
+  assert.match(responses[0].result.instructions, /operating inside Spaces/);
+  assert.match(responses[0].result.instructions, /final assistant response is posted/);
   assert.equal(responses[1].result.tools[0].name, "spaces_publish_social");
   assert.match(responses[1].result.tools[0].description, /human to approve/i);
   assert.match(responses[2].result.content[0].text, /holding it for a human to approve/i);
@@ -329,7 +331,7 @@ test("lists and reads the canonical Content Studio snapshot", async () => {
   assert.match(responses[2].result.content[0].text, /Introduce the instrument/);
 });
 
-test("reads live content, documents, private mail, and calendars from the paired desktop", async () => {
+test("reads live messages, content, documents, private mail, and calendars from the paired desktop", async () => {
   const root = await mkdtemp(join(tmpdir(), "spaces-live-"));
   await mkdir(join(root, ".hq"));
   const dbPath = join(root, "spaces.db");
@@ -337,6 +339,11 @@ test("reads live content, documents, private mail, and calendars from the paired
   db.exec(`
     CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE agents (id TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE channels (id TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY, channel_id TEXT, author_type TEXT, author_name TEXT,
+      content TEXT, status TEXT, parent_id TEXT, created_at INTEGER
+    );
     CREATE TABLE content_items (
       id TEXT PRIMARY KEY, project_id TEXT, campaign TEXT, title TEXT, brief TEXT,
       copy TEXT, platform TEXT, connection_id TEXT, status TEXT, scheduled_at INTEGER,
@@ -365,6 +372,13 @@ test("reads live content, documents, private mail, and calendars from the paired
   db.exec(`
     INSERT INTO projects VALUES ('project-1', 'archii');
     INSERT INTO agents VALUES ('agent-1', 'Codex');
+    INSERT INTO channels VALUES ('channel-1', 'general');
+    INSERT INTO messages VALUES (
+      'message-1','channel-1','user','Lauren','Use the live board.','done','',80
+    );
+    INSERT INTO messages VALUES (
+      'message-2','channel-1','agent','Codex','The board is current.','done','message-1',81
+    );
     INSERT INTO content_items VALUES (
       'card-1','project-1','Reveal','Launch post','Introduce the instrument.',
       'Something is coming.','instagram','connection-1','review',0,'',
@@ -391,6 +405,7 @@ test("reads live content, documents, private mail, and calendars from the paired
   db.close();
 
   const toolNames = [
+    "spaces_list_messages",
     "spaces_list_content",
     "spaces_get_content",
     "spaces_list_documents",
@@ -419,6 +434,7 @@ test("reads live content, documents, private mail, and calendars from the paired
     env: {
       ...process.env,
       SPACES_PROJECT_ID: "project-1",
+      SPACES_CHANNEL_ID: "channel-1",
       SPACES_DB_PATH: dbPath,
     },
     stdio: ["pipe", "pipe", "pipe"],
@@ -428,6 +444,7 @@ test("reads live content, documents, private mail, and calendars from the paired
     stdout += chunk;
   });
   const calls = [
+    ["spaces_list_messages", {}],
     ["spaces_list_content", {}],
     ["spaces_get_content", { content: "content:card-1" }],
     ["spaces_list_documents", {}],
@@ -458,13 +475,53 @@ test("reads live content, documents, private mail, and calendars from the paired
   assert.equal(exitCode, 0);
   const responses = stdout.trim().split("\n").map((line) => JSON.parse(line));
   const bodies = responses.map((response) => response.result.content[0].text);
-  assert.match(bodies[0], /Launch post/);
-  assert.match(bodies[1], /Something is coming/);
-  assert.match(bodies[2], /Operating charter/);
-  assert.match(bodies[3], /Use the board/);
-  assert.match(bodies[4], /Launch approval/);
-  assert.match(bodies[5], /Please approve the launch/);
-  assert.match(bodies[6], /Launch review/);
-  assert.match(bodies[7], /instagram:archiiai/);
-  assert.match(bodies[7], /archii \(default\)/);
+  assert.match(bodies[0], /Use the live board/);
+  assert.match(bodies[0], /reply_to=message:message-1/);
+  assert.match(bodies[1], /Launch post/);
+  assert.match(bodies[2], /Something is coming/);
+  assert.match(bodies[3], /Operating charter/);
+  assert.match(bodies[4], /Use the board/);
+  assert.match(bodies[5], /Launch approval/);
+  assert.match(bodies[6], /Please approve the launch/);
+  assert.match(bodies[7], /Launch review/);
+  assert.match(bodies[8], /instagram:archiiai/);
+  assert.match(bodies[8], /archii \(default\)/);
+
+  const cli = spawn(
+    process.execPath,
+    [
+      server.pathname,
+      root,
+      "--call",
+      "spaces_list_messages",
+      JSON.stringify({ limit: 1 }),
+    ],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        SPACES_PROJECT_ID: "project-1",
+        SPACES_CHANNEL_ID: "channel-1",
+        SPACES_DB_PATH: dbPath,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let cliStdout = "";
+  let cliStderr = "";
+  cli.stdout.setEncoding("utf8").on("data", (chunk) => {
+    cliStdout += chunk;
+  });
+  cli.stderr.setEncoding("utf8").on("data", (chunk) => {
+    cliStderr += chunk;
+  });
+  const cliExit = await new Promise((resolve, reject) => {
+    cli.once("error", reject);
+    cli.once("close", resolve);
+  });
+  assert.equal(cliExit, 0, cliStderr);
+  const cliResult = JSON.parse(cliStdout);
+  assert.equal(cliResult.ok, true);
+  assert.equal(cliResult.tool, "spaces_list_messages");
+  assert.match(cliResult.output, /The board is current/);
 });

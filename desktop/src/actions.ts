@@ -43,7 +43,7 @@ export interface AgentActionRow {
   status: ActionStatus;
   /** The op's one-line message, or why it failed. */
   result: string;
-  /** Which transport it arrived through: "file" | "mcp". */
+  /** Which transport it arrived through: "file" | "mcp" | "cli". */
   source: string;
   created_at: number;
   decided_at: number;

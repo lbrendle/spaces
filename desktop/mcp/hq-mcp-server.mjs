@@ -118,6 +118,7 @@ const CALLER = {
   channel_id: (process.env.SPACES_CHANNEL_ID ?? "").trim(),
   project_id: (process.env.SPACES_PROJECT_ID ?? "").trim(),
 };
+const CALL_SOURCE = process.argv.includes("--call") ? "cli" : "mcp";
 
 /* ── JSON-RPC plumbing ────────────────────────────────────────── */
 
@@ -211,15 +212,16 @@ function initializeResult(params) {
     protocolVersion: PROTOCOL_VERSION,
     capabilities: { tools: { listChanged: false } },
     serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
-    // Surfaced to the model by most clients: the one thing it genuinely cannot
-    // infer from the tool list is that this transport is one-way.
+    // Surfaced to the model by clients such as Codex: routing and cross-tool
+    // workflow rules that no individual tool description can express.
     instructions:
-      "These tools act on Spaces, the workspace this project is coordinated in. They are one-way: a call " +
-      "is written to Spaces's action queue and applied by the app, so the tool result tells you the call " +
-      "was accepted, never what it produced. Additive operations apply on their own; anything that " +
-      "removes or reassigns existing work waits for a human. To see current state, read the generated " +
-      "markdown in .hq/ (CONTEXT.md, ROSTER.md, BOARD.md, LINKS.md, KNOWLEDGE.md). Use " +
-      "spaces_search_knowledge and spaces_read_knowledge for stable, citable Knowledge references.",
+      `You are operating inside Spaces. This tool process belongs to channel ${CALLER.channel_id || "(unspecified)"}, ` +
+      `project ${CALLER.project_id || "(unspecified)"}, and run ${CALLER.run_id || "(unspecified)"}; the current ` +
+      "[Spaces Context] event block is authoritative for reply routing. Use spaces_list_messages after a restart. " +
+      "Your final assistant response is posted to the current channel automatically; hq_post is only for another " +
+      "channel. Mutating calls enter Spaces's audited action queue. Additive operations apply automatically; " +
+      "destructive, access, reassignment, and publishing actions wait for human approval. Read generated .hq/ " +
+      "context and use spaces_search_knowledge/spaces_read_knowledge for citable Knowledge references.",
   };
 }
 
@@ -380,7 +382,7 @@ function queueAction(tool, args) {
   const action = {
     id: `mcp-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
     ts: Date.now(),
-    source: "mcp",
+    source: CALL_SOURCE,
     op: tool.name,
     args,
     ...CALLER,
@@ -444,6 +446,9 @@ function queueAction(tool, args) {
  * confidently acting on a task that was closed ten minutes ago.
  */
 function snapshotAnswer(tool, args) {
+  if (tool.name === "spaces_list_messages") {
+    return messageListAnswer(args);
+  }
   if (tool.name === "spaces_search_knowledge") {
     return knowledgeSearchAnswer(args);
   }
@@ -580,6 +585,98 @@ function rows(sql, params = []) {
       // read-only connection; process exit is still a safe final fallback
     }
   }
+}
+
+function messageListAnswer(args) {
+  const requested =
+    typeof args.channel === "string"
+      ? args.channel.replace(/^channel:/i, "").trim()
+      : "";
+  let channelId = requested || CALLER.channel_id;
+  let channelName = "";
+  if (requested) {
+    const found = rows(
+      `SELECT id, name
+         FROM channels
+        WHERE id = ? OR lower(name) = lower(?)
+        ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
+        LIMIT 2`,
+      [requested, requested, requested],
+    );
+    if (!found.ok) return text(found.problem, true);
+    if (found.rows.length !== 1) {
+      return text(
+        found.rows.length
+          ? `"${requested}" matches more than one channel. Use channel:<id>.`
+          : `No channel matches "${requested}".`,
+        true,
+      );
+    }
+    channelId = String(found.rows[0].id);
+    channelName = String(found.rows[0].name);
+  }
+  if (!channelId) {
+    return text(
+      "spaces_list_messages needs channel because this process has no SPACES_CHANNEL_ID.",
+      true,
+    );
+  }
+
+  const requestedLimit = Number(args.limit);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(100, Math.trunc(requestedLimit)))
+    : 30;
+  const since =
+    typeof args.since === "number"
+      ? args.since
+      : typeof args.since === "string" && args.since.trim()
+        ? Date.parse(args.since)
+        : 0;
+  const sinceAt = Number.isFinite(since) ? since : 0;
+  const thread =
+    typeof args.thread === "string"
+      ? args.thread.replace(/^message:/i, "").trim()
+      : "";
+  const loaded = rows(
+    `SELECT m.id, m.author_type AS authorType, m.author_name AS authorName,
+            m.content, m.status, m.parent_id AS parentId,
+            m.created_at AS createdAt, COALESCE(c.name, '') AS channelName
+       FROM messages m
+       LEFT JOIN channels c ON c.id = m.channel_id
+      WHERE m.channel_id = ?
+      ORDER BY m.created_at DESC
+      LIMIT 250`,
+    [channelId],
+  );
+  if (!loaded.ok) return text(loaded.problem, true);
+  const matches = loaded.rows
+    .filter((message) => Number(message.createdAt) >= sinceAt)
+    .filter(
+      (message) =>
+        !thread || String(message.id) === thread || String(message.parentId) === thread,
+    )
+    .slice(0, limit)
+    .reverse();
+  if (!matches.length) {
+    return text(`No messages match in #${channelName || channelId}.`);
+  }
+  return text(
+    matches
+      .map((message) => {
+        const route = message.parentId
+          ? ` · reply_to=message:${message.parentId}`
+          : "";
+        const body =
+          String(message.content).length > 4_000
+            ? `${String(message.content).slice(0, 4_000)}\n… truncated`
+            : String(message.content);
+        return (
+          `message:${message.id} · ${new Date(Number(message.createdAt)).toISOString()} · ` +
+          `${message.authorName} (${message.authorType}) [${message.status}]${route}\n${body}`
+        );
+      })
+      .join("\n\n"),
+  );
 }
 
 function documentListAnswer(args) {
@@ -1193,39 +1290,101 @@ function describe(e) {
   return e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
 }
 
-/* ── stdin loop ───────────────────────────────────────────────── */
+/* ── CLI + stdin loop ─────────────────────────────────────────── */
 
-let buffer = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  buffer += chunk;
-  if (buffer.length > MAX_INPUT_BYTES) {
-    log(`dropped ${buffer.length} bytes with no newline in them — the client is not speaking ndjson`);
-    buffer = "";
-    return;
+function runCliCall(index) {
+  const name = (process.argv[index + 1] ?? "").trim();
+  if (!name) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        error:
+          "usage: node $SPACES_CLI $SPACES_PROJECT_ROOT --call <tool> '<json-arguments>'",
+      })}\n`,
+    );
+    process.exit(1);
   }
-  let nl;
-  while ((nl = buffer.indexOf("\n")) >= 0) {
-    const line = buffer.slice(0, nl).replace(/\r$/, "");
-    buffer = buffer.slice(nl + 1);
-    if (!line.trim()) continue;
-    let msg;
+  let args = {};
+  const raw = (process.argv[index + 2] ?? "").trim();
+  if (raw) {
     try {
-      msg = JSON.parse(line);
+      args = JSON.parse(raw);
     } catch (e) {
-      // id null is the only honest answer: we could not read one.
-      replyError(null, -32700, `could not parse message as JSON: ${describe(e)}`);
-      continue;
-    }
-    try {
-      handleMessage(msg);
-    } catch (e) {
-      log(`unhandled error: ${describe(e)}`);
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          tool: name,
+          error: `arguments must be one JSON object (${describe(e)})`,
+        })}\n`,
+      );
+      process.exit(1);
     }
   }
-});
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        tool: name,
+        error: "arguments must be one JSON object",
+      })}\n`,
+    );
+    process.exit(1);
+  }
+  try {
+    const result = toolsCall({ name, arguments: args });
+    const output = Array.isArray(result.content)
+      ? result.content
+          .filter((part) => part?.type === "text")
+          .map((part) => String(part.text ?? ""))
+          .join("\n")
+      : "";
+    const ok = result.isError !== true;
+    process.stdout.write(`${JSON.stringify({ ok, tool: name, output })}\n`);
+    process.exit(ok ? 0 : 4);
+  } catch (e) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, tool: name, error: describe(e) })}\n`,
+    );
+    process.exit(4);
+  }
+}
 
-// Closing stdin is how an MCP client shuts a stdio server down.
-process.stdin.on("end", () => process.exit(0));
-// The harness died mid-write; nothing left to serve.
-process.stdout.on("error", () => process.exit(0));
+const cliCallIndex = process.argv.indexOf("--call");
+if (cliCallIndex >= 0) {
+  runCliCall(cliCallIndex);
+} else {
+  let buffer = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    buffer += chunk;
+    if (buffer.length > MAX_INPUT_BYTES) {
+      log(`dropped ${buffer.length} bytes with no newline in them — the client is not speaking ndjson`);
+      buffer = "";
+      return;
+    }
+    let nl;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).replace(/\r$/, "");
+      buffer = buffer.slice(nl + 1);
+      if (!line.trim()) continue;
+      let msg;
+      try {
+        msg = JSON.parse(line);
+      } catch (e) {
+        // id null is the only honest answer: we could not read one.
+        replyError(null, -32700, `could not parse message as JSON: ${describe(e)}`);
+        continue;
+      }
+      try {
+        handleMessage(msg);
+      } catch (e) {
+        log(`unhandled error: ${describe(e)}`);
+      }
+    }
+  });
+
+  // Closing stdin is how an MCP client shuts a stdio server down.
+  process.stdin.on("end", () => process.exit(0));
+  // The harness died mid-write; nothing left to serve.
+  process.stdout.on("error", () => process.exit(0));
+}

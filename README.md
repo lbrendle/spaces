@@ -18,7 +18,7 @@
 ![Spaces — a local-first operating system for people and AI agents](./portal/public/og.png)
 
 <p align="center">
-  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.12-universal.dmg"><strong>Download for Mac</strong></a>
+  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.13-universal.dmg"><strong>Download for Mac</strong></a>
   ·
   <a href="./docs/OPEN_SOURCE_INVENTORY.md">Feature inventory</a>
   ·
@@ -104,17 +104,25 @@ ordinary sync.
 
 ## Agents have native workspace tools
 
-Spaces generates a dependency-free MCP server and human-readable `.hq/`
-contract inside each linked project. Agents can search/read workspace state,
-cite Knowledge, create and fully develop shared Content Studio cards, create and
-update work, post to channels, schedule events, record memory, link entities,
-and propose external publishing through the same permission and approval paths
-as the UI. Ideas, briefs, copy, assets, review state, selected accounts, and
-publish results remain on one canonical card rather than disappearing into an
-agent chat.
+Spaces routes Claude, Codex, and Ritz through one versioned event-harness
+contract. Each turn carries an explicit `[Spaces Context]` block with the run,
+agent, project, channel, triggering event, reply destination, and working
+directory. Sessions remain scoped to one `(channel, agent)` pair; a durable
+SQLite queue batches events that arrive while an agent is busy.
 
-Each spawned harness receives explicit run, agent, channel, and project
-identity. Additive actions apply automatically; destructive, reassignment, and
+The generated dependency-free MCP server and human-readable `.hq/` contract
+inside each linked project are the native interface. Agents can read live
+channel history, search workspace state, cite Knowledge, create and fully
+develop Content Studio cards, create and update work, post across channels,
+schedule events, record memory, link entities, and propose external publishing
+through the same permission and approval paths as the UI. The same tool surface
+also has a structured local CLI fallback for runtimes that do not expose MCP.
+Ideas, briefs, copy, assets, review state, selected accounts, and publish
+results remain on one canonical card rather than disappearing into agent chat.
+
+Spaces keeps each member's existing Claude Code or Codex login instead of
+requiring a second API key just to speak an intermediary protocol. Additive
+actions apply automatically; destructive, reassignment, access, and
 external-publishing actions wait for a person to approve them.
 
 ## What is in this repository

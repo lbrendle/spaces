@@ -8,10 +8,10 @@ repository. A release build receives them only through the build environment:
 
 ```sh
 npm run release:manifest -- \
-  --version 0.1.12 \
+  --version 0.1.13 \
   --bundle "src-tauri/target/universal-apple-darwin/release/bundle/macos/Spaces.app.tar.gz" \
   --signature "src-tauri/target/universal-apple-darwin/release/bundle/macos/Spaces.app.tar.gz.sig" \
-  --installer "src-tauri/target/universal-apple-darwin/release/bundle/dmg/Spaces_0.1.12_universal.dmg"
+  --installer "src-tauri/target/universal-apple-darwin/release/bundle/dmg/Spaces_0.1.13_universal.dmg"
 ```
 
 Deploy `release/wrangler.jsonc` only after the signed bundle, signature,

@@ -2,18 +2,27 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("agent harnesses receive stable run, agent, channel, and project identity", async () => {
-  const [rust, agents, blackboard, operations] = await Promise.all([
+test("agent harnesses receive a stable platform contract and event identity", async () => {
+  const [rust, agents, blackboard, operations, contract] = await Promise.all([
     readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
     readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/blackboard.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/hqops.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/runtimeContract.ts", import.meta.url), "utf8"),
   ]);
   for (const key of [
     "SPACES_RUN_ID",
     "SPACES_AGENT_ID",
     "SPACES_CHANNEL_ID",
     "SPACES_PROJECT_ID",
+    "SPACES_TRIGGER_ID",
+    "SPACES_REPLY_TO",
+    "SPACES_PROJECT_ROOT",
+    "SPACES_CONTEXT_DIR",
+    "SPACES_MCP_SERVER",
+    "SPACES_CLI",
+    "SPACES_RUNTIME",
+    "SPACES_HARNESS_PROTOCOL",
   ]) {
     assert.match(rust, new RegExp(`env\\("${key}"`));
   }
@@ -22,7 +31,17 @@ test("agent harnesses receive stable run, agent, channel, and project identity",
   assert.match(agents, /projectId: project\?\.id/);
   assert.match(blackboard, /KNOWLEDGE\.md/);
   assert.match(blackboard, /knowledge:source:path/);
+  assert.match(contract, /spaces-event-v1/);
+  assert.match(contract, /\[Spaces Context\]/);
+  assert.match(contract, /current.*block is authoritative/i);
+  assert.match(contract, /final assistant response is published automatically/i);
+  assert.match(agents, /SPACES_BASE_PROMPT/);
+  assert.match(agents, /SPACES_RESUME_PROMPT/);
+  assert.match(agents, /--append-system-prompt-file/);
+  assert.match(agents, /ensureRuntimeContract/);
+  assert.match(agents, /parentId \|\| "channel-top-level"/);
   for (const tool of [
+    "spaces_list_messages",
     "spaces_search_knowledge",
     "spaces_read_knowledge",
     "spaces_list_documents",

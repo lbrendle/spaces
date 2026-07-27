@@ -29,6 +29,13 @@ struct AgentRunRequest {
     agent_id: String,
     channel_id: String,
     project_id: String,
+    trigger_id: String,
+    reply_to: String,
+    project_root: String,
+    context_dir: String,
+    mcp_server: String,
+    runtime: String,
+    harness_protocol: String,
     program: String,
     args: Vec<String>,
     cwd: Option<String>,
@@ -936,6 +943,13 @@ async fn start_agent_run(
         agent_id,
         channel_id,
         project_id,
+        trigger_id,
+        reply_to,
+        project_root,
+        context_dir,
+        mcp_server,
+        runtime,
+        harness_protocol,
         program,
         args,
         cwd,
@@ -949,6 +963,14 @@ async fn start_agent_run(
         .env("SPACES_AGENT_ID", agent_id)
         .env("SPACES_CHANNEL_ID", channel_id)
         .env("SPACES_PROJECT_ID", project_id)
+        .env("SPACES_TRIGGER_ID", trigger_id)
+        .env("SPACES_REPLY_TO", reply_to)
+        .env("SPACES_PROJECT_ROOT", project_root)
+        .env("SPACES_CONTEXT_DIR", context_dir)
+        .env("SPACES_MCP_SERVER", &mcp_server)
+        .env("SPACES_CLI", mcp_server)
+        .env("SPACES_RUNTIME", runtime)
+        .env("SPACES_HARNESS_PROTOCOL", harness_protocol)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

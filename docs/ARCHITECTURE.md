@@ -50,9 +50,43 @@ The token encryption key itself is a deployment secret and is never committed.
 
 ## Agent action path
 
+```text
+channel event
+    │
+    ▼
+durable router/queue ── one lane per (channel, agent)
+    │
+    ├─ versioned Spaces base contract
+    ├─ explicit [Spaces Context] event envelope
+    └─ current project/team/channel instructions
+             │
+             ▼
+     Claude · Codex · Ritz
+             │
+      MCP or local CLI fallback
+             ▼
+      one operation registry
+```
+
+Spaces keeps its native Claude Code and Codex CLI adapters so members can use
+the account already authenticated on their Mac. The harness contract above is
+runtime-neutral: it gives every adapter the same routing identity and tool
+surface without requiring a provider API key or moving the session into the
+portal.
+
+The orchestrator persists inbound events in SQLite when a target is busy,
+coalesces queued events in order, and maintains one resumable runtime session
+per `(channel, agent)`. Fresh and resumed turns both receive an authoritative
+event envelope with the current channel, trigger, reply destination, project
+root, and working directory. The Rust process boundary mirrors those values as
+`SPACES_*` environment variables for tools and child processes.
+
 Spaces generates one MCP manifest from `desktop/src/hqops.ts`. Claude and Codex
-discover the same tools through a dependency-free stdio server. Calls append an
-idempotent JSON line to `.hq/actions.jsonl`; the desktop drains it into a local
+discover the same tools through a dependency-free stdio server. The same server
+can execute one structured CLI call with
+`node "$SPACES_CLI" "$SPACES_PROJECT_ROOT" --call <tool> '<json>'`; runtimes
+without either transport retain the `.hq/actions.jsonl` fallback. Calls append
+an idempotent JSON line to that queue, and the desktop drains it into a local
 audit log.
 
 Operations marked `auto` apply immediately. Operations marked `propose` wait in
@@ -67,12 +101,13 @@ selection, and publish results remain attached to one card across members.
 Agent tools read and mutate those same mirrored rows, and a publishing proposal
 prefers an existing `content:<id>` instead of inventing a second audit row.
 
-Every spawned harness receives explicit run, agent, channel, project, and local
+Every spawned harness receives explicit run, agent, channel, project, trigger,
+reply destination, runtime, project-root, context-directory, MCP/CLI, and local
 database identity. On a paired agent host, read-only tools query the same local
-SQLite mirrors used by the UI for documents, private mail, calendars, Content
-Studio, social-account routing, and Git context. The blackboard also emits
-permission-filtered workspace Knowledge, `CONTENT.md`, and preserved folder
-paths as bounded fallbacks. Knowledge reads return stable
+SQLite mirrors used by the UI for channel history, documents, private mail,
+calendars, Content Studio, social-account routing, and Git context. The
+blackboard also emits permission-filtered workspace Knowledge, `CONTENT.md`,
+and preserved folder paths as bounded fallbacks. Knowledge reads return stable
 `knowledge:source:path` references.
 
 Projects without a local checkout receive a private control directory in the

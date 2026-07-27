@@ -448,6 +448,102 @@ export const OPERATIONS: Operation[] = [
   },
 
   {
+    name: "spaces_list_messages",
+    describe:
+      "Read recent live messages from the current Spaces channel or another named channel. Use this after a session restart or when the event says earlier channel context may matter.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "channel",
+        type: "string",
+        describe: "Optional channel name, channel:<id>, or id. Defaults to the current channel.",
+      },
+      {
+        name: "thread",
+        type: "string",
+        describe: "Optional root message id. Returns the root and its replies.",
+      },
+      {
+        name: "since",
+        type: "number",
+        describe: "Optional Unix milliseconds or ISO timestamp. Only newer messages are returned.",
+      },
+      {
+        name: "limit",
+        type: "number",
+        describe: "Maximum messages, from 1 to 100. Defaults to 30.",
+      },
+    ],
+    async run(args, ctx) {
+      const state = useStore.getState();
+      const requested = str(args, "channel").replace(/^channel:/i, "");
+      const channel =
+        state.channels.find(
+          (candidate) =>
+            candidate.id === requested ||
+            candidate.name.toLowerCase() === requested.toLowerCase(),
+        ) ??
+        state.channels.find((candidate) => candidate.id === ctx.channelId);
+      if (!channel) return { ok: false, message: "Current channel not found." };
+
+      const since = num(args, "since") ?? 0;
+      const thread = str(args, "thread").replace(/^message:/i, "");
+      const requestedLimit = num(args, "limit") ?? 30;
+      const limit = Math.max(1, Math.min(100, Math.trunc(requestedLimit)));
+      const db = await getDb();
+      const rows = await db.select<
+        Array<{
+          id: string;
+          author_type: string;
+          author_name: string;
+          content: string;
+          status: string;
+          parent_id: string;
+          created_at: number;
+        }>
+      >(
+        `SELECT id, author_type, author_name, content, status,
+                parent_id, created_at
+           FROM messages
+          WHERE channel_id = $1
+          ORDER BY created_at DESC
+          LIMIT 250`,
+        [channel.id],
+      );
+      const matches = rows
+        .filter((message) => message.created_at >= since)
+        .filter(
+          (message) =>
+            !thread || message.id === thread || message.parent_id === thread,
+        )
+        .slice(0, limit)
+        .reverse();
+      if (!matches.length) {
+        return { ok: true, message: `No messages match in #${channel.name}.` };
+      }
+      return {
+        ok: true,
+        message: matches
+          .map((message) => {
+            const route = message.parent_id
+              ? ` · reply_to=message:${message.parent_id}`
+              : "";
+            const body =
+              message.content.length > 4_000
+                ? `${message.content.slice(0, 4_000)}\n… truncated`
+                : message.content;
+            return (
+              `message:${message.id} · ${new Date(message.created_at).toISOString()} · ` +
+              `${message.author_name} (${message.author_type}) [${message.status}]${route}\n${body}`
+            );
+          })
+          .join("\n\n"),
+      };
+    },
+  },
+
+  {
     name: "spaces_search_knowledge",
     describe:
       "Search workspace-visible vault notes and documents by title, folder path, or content. Returns stable knowledge:source:path references for citations and follow-up reads.",

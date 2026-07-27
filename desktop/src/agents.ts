@@ -10,7 +10,12 @@ import type { EntityRef } from "./types";
 import { sharedContext } from "./links";
 import { drainActions, ensureActionsFile } from "./actions";
 import { scheduleBlackboardSync } from "./blackboard";
-import { mcpCodexArgs, setupControlMcp } from "./mcpsetup";
+import {
+  ensureRuntimeContract,
+  mcpCodexArgs,
+  mcpServerPath,
+  setupControlMcp,
+} from "./mcpsetup";
 import type {
   ActivityEvent, Agent, AgentKind, Channel, ChannelMode, Message, Project,
 } from "./types";
@@ -46,6 +51,12 @@ import {
   remoteJobUpdates,
   type RemoteAgentJob,
 } from "./portalJobs";
+import {
+  SPACES_BASE_PROMPT,
+  SPACES_HARNESS_PROTOCOL,
+  SPACES_RESUME_PROMPT,
+  spacesContextEnvelope,
+} from "./runtimeContract";
 
 /** What caused an agent run: a user message or (via chaining) another agent's reply. */
 export interface Trigger {
@@ -174,7 +185,7 @@ export interface AgentAdapter {
   program: string;
   /** The prompt itself is delivered via stdin (see start_agent_run in Rust) —
    *  argv would hit ARG_MAX with big contexts. Codex needs an explicit "-". */
-  buildArgs(agent: Agent, resumeSession: string): string[];
+  buildArgs(agent: Agent, resumeSession: string, runtimeContractPath: string): string[];
   /** Session/thread id carried by this event, '' when it carries none. */
   extractSessionId(obj: any): string;
   /** Fold one already-parsed stream event into the run's state. The JSON parse
@@ -186,11 +197,14 @@ const claudeAdapter: AgentAdapter = {
   id: "claude",
   program: "claude",
 
-  buildArgs(agent, resumeSession) {
+  buildArgs(agent, resumeSession, runtimeContractPath) {
     const extra = parseArgs(agent.cli_args ?? "");
     const args = ["-p", "--output-format", "stream-json", "--verbose"];
     if (resumeSession) args.push("--resume", resumeSession);
     if (agent.model) args.push("--model", agent.model);
+    if (runtimeContractPath) {
+      args.push("--append-system-prompt-file", runtimeContractPath);
+    }
     return [...args, ...extra];
   },
 
@@ -781,12 +795,48 @@ function handoffRule(channel: Channel, agent: Agent, members: Agent[], others: A
   return `You may mention a teammate (e.g. @${slug(others[0].name)}) in your reply to hand work off or request a review — mentioning them triggers them.`;
 }
 
-function buildFreshPrompt(
+function projectRoot(project: Project | undefined, cwd: string): string {
+  return (project?.local_path || cwd).replace(/\/+$/, "");
+}
+
+function contextEnvelope(
+  runId: string,
   agent: Agent,
   channel: Channel,
   project: Project | undefined,
   trigger: Trigger,
   cwd: string,
+  replyTo: string,
+  sessionMode: "new" | "resume",
+): string {
+  return spacesContextEnvelope({
+    runId,
+    agentId: agent.id,
+    agentName: agent.name,
+    projectId: project?.id ?? "",
+    projectName: project?.name ?? "Spaces",
+    projectRoot: projectRoot(project, cwd),
+    workingDirectory: cwd,
+    channelId: channel.id,
+    channelName: channel.name,
+    eventId: trigger.msgId,
+    replyTo,
+    authorId: trigger.authorId,
+    authorName: trigger.authorName,
+    authorType: trigger.authorType,
+    taskId: trigger.taskId ?? "",
+    sessionMode,
+  });
+}
+
+function buildFreshPrompt(
+  runId: string,
+  agent: Agent,
+  channel: Channel,
+  project: Project | undefined,
+  trigger: Trigger,
+  cwd: string,
+  replyTo: string,
   isolated: boolean,
   note: string,
   collab: string
@@ -794,18 +844,12 @@ function buildFreshPrompt(
   const s = useStore.getState();
   const lines: string[] = [];
   lines.push(
-    `You are "${agent.name}", an AI teammate in the #${channel.name} channel of the project "${project?.name ?? "Spaces"}" inside the user's Spaces app. Humans and other AI agents read and write in this channel.`
+    SPACES_BASE_PROMPT,
+    "",
+    contextEnvelope(runId, agent, channel, project, trigger, cwd, replyTo, "new"),
+    "",
+    `You are "${agent.name}", an AI teammate in #${channel.name}. Humans and other AI agents read and write here.`
   );
-  if (project) {
-    lines.push(
-      "\n## Spaces context and tools",
-      "Before acting, orient from the generated `.hq/` workspace files in the project checkout: " +
-        "`CONTEXT.md`, `ROSTER.md`, `BOARD.md`, `LINKS.md`, `KNOWLEDGE.md`, `CONTENT.md`, and the current channel file.",
-      "Use the Spaces MCP tools when they are available. If this harness does not expose MCP, follow `.hq/ACTIONS.md` and append the same operation to `.hq/actions.jsonl`.",
-      "For social or marketing work, call `spaces_list_content` and `spaces_list_social_accounts` first, then update the canonical `content:<id>` card; do not leave the final brief, copy, media, account, or schedule only in chat.",
-      "Connected-account credentials are never in the repo. Use the Spaces mail, calendar, social, document, browser, and Git tools instead of asking for raw tokens.",
-    );
-  }
 
   // Layered standing context, widest scope first: project → team → channel → you.
   if (project?.instructions.trim()) {
@@ -874,20 +918,21 @@ function buildFreshPrompt(
     for (const m of msgs) lines.push(`[${label(m)}]: ${m.content.slice(0, 1500)}`);
   }
 
-  lines.push(
-    `\n## Instructions\nReply as a chat message from ${agent.name}. Be concise and useful; markdown is supported. If you change code, say exactly what you changed and where. Do not repeat the conversation back.`
-  );
+  lines.push(`\n## Event`);
   if (note.trim()) lines.push(`\n## This turn\n${note.trim()}`);
   lines.push(`\n[${speaker(trigger)}]: ${trigger.content}`);
   return lines.join("\n");
 }
 
 function buildResumePrompt(
+  runId: string,
   agent: Agent,
   channel: Channel,
   project: Project | undefined,
   trigger: Trigger,
-  note: string
+  cwd: string,
+  replyTo: string,
+  note: string,
 ): string {
   const s = useStore.getState();
   const msgs = s.messages[channel.id] ?? [];
@@ -905,13 +950,12 @@ function buildResumePrompt(
       m.author_id !== agent.id
   ).slice(-20);
 
-  const lines: string[] = [];
-  if (project) {
-    lines.push(
-      "Spaces refresh: the current shared state is in `.hq/CONTEXT.md`, `ROSTER.md`, `BOARD.md`, `LINKS.md`, `KNOWLEDGE.md`, and `CONTENT.md`. Read the relevant file before relying on session memory; use `spaces_list_content` and `spaces_list_social_accounts` before social work.",
-      "",
-    );
-  }
+  const lines: string[] = [
+    SPACES_RESUME_PROMPT,
+    "",
+    contextEnvelope(runId, agent, channel, project, trigger, cwd, replyTo, "resume"),
+    "",
+  ];
 
   // A resumed session carries the memory as it looked when the session started;
   // re-state anything the user has edited since this agent's last turn.
@@ -935,7 +979,7 @@ function buildResumePrompt(
     lines.push(note.trim());
     lines.push("");
   }
-  lines.push(`[${speaker(trigger)}]: ${trigger.content}`);
+  lines.push("## Event", "", `[${speaker(trigger)}]: ${trigger.content}`);
   return lines.join("\n");
 }
 
@@ -1529,23 +1573,36 @@ export async function runAgent(
     opts.prebuiltPrompt ??
     (remote
       ? buildFreshPrompt(
+          msgId,
           agent,
           channel,
           project,
           trigger,
           "",
+          parentId || "channel-top-level",
           false,
           note,
           "",
         )
       : session
-        ? buildResumePrompt(agent, channel, project, trigger, note) + shared
+        ? buildResumePrompt(
+            msgId,
+            agent,
+            channel,
+            project,
+            trigger,
+            cwd,
+            parentId || "channel-top-level",
+            note,
+          ) + shared
         : buildFreshPrompt(
+            msgId,
             agent,
             channel,
             project,
             trigger,
             project?.local_path ? cwd : "",
+            parentId || "channel-top-level",
             isolated,
             note,
             shared,
@@ -1588,13 +1645,20 @@ export async function runAgent(
   if (trigger.taskId) void store.updateTask(trigger.taskId, { last_run_id: msgId });
 
   const adapter = adapterFor(agent);
+  const runtimeContract = !remote && mcpProject
+    ? await ensureRuntimeContract(mcpProject).catch(() => ({
+        path: "",
+        written: false,
+        error: "could not write the runtime contract",
+      }))
+    : { path: "", written: false, error: "" };
   // Codex takes its MCP config as spawn arguments; Claude reads .mcp.json from
   // the project, which blackboard.ts writes. Ritz has neither and reaches the
   // same operations through .hq/actions.jsonl — the transport every kind can
   // use, and the reason MCP is an accelerant here rather than a requirement.
   const adapterArgs = [
     ...(agent.kind === "codex" && mcpProject ? mcpCodexArgs(mcpProject) : []),
-    ...adapter.buildArgs(agent, session),
+    ...adapter.buildArgs(agent, session, runtimeContract.error ? "" : runtimeContract.path),
   ];
 
   await store.insertRun({
@@ -1671,6 +1735,15 @@ export async function runAgent(
           agentId: agent.id,
           channelId,
           projectId: project?.id ?? "",
+          triggerId: trigger.msgId,
+          replyTo: parentId || "channel-top-level",
+          projectRoot: projectRoot(project, cwd),
+          contextDir: projectRoot(project, cwd)
+            ? `${projectRoot(project, cwd)}/.hq`
+            : "",
+          mcpServer: mcpProject ? mcpServerPath(mcpProject) : "",
+          runtime: agent.kind,
+          harnessProtocol: SPACES_HARNESS_PROTOCOL,
           program: adapter.program,
           args: adapterArgs,
           cwd: cwd || null,
