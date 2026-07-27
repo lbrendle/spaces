@@ -47,6 +47,21 @@ export const RUNTIME_CONTRACT_REL = `${SPACES_DIR}/RUNTIME.md`;
 export const MCP_CONFIG_REL = ".mcp.json";
 /** Our key inside `mcpServers`. Anything else in there is someone else's. */
 export const MCP_SERVER_KEY = "hq";
+const MCP_RUNTIME_ENV_VARS = [
+  "SPACES_RUN_ID",
+  "SPACES_AGENT_ID",
+  "SPACES_CHANNEL_ID",
+  "SPACES_PROJECT_ID",
+  "SPACES_TRIGGER_ID",
+  "SPACES_REPLY_TO",
+  "SPACES_PROJECT_ROOT",
+  "SPACES_CONTEXT_DIR",
+  "SPACES_MCP_SERVER",
+  "SPACES_CLI",
+  "SPACES_RUNTIME",
+  "SPACES_HARNESS_PROTOCOL",
+  "SPACES_DB_PATH",
+];
 
 /* ── shapes the UI renders ────────────────────────────────────── */
 
@@ -361,6 +376,11 @@ export function mcpCodexArgs(project: Project): string[] {
   return [
     "-c", `mcp_servers.${MCP_SERVER_KEY}.command="node"`,
     "-c", `mcp_servers.${MCP_SERVER_KEY}.args=["${server}","${base(root)}"]`,
+    "-c", `mcp_servers.${MCP_SERVER_KEY}.env_vars=${JSON.stringify(MCP_RUNTIME_ENV_VARS)}`,
+    // Spaces owns the operation-level approval queue. Avoid a second,
+    // noninteractive Codex approval prompt that cannot be answered inside a
+    // channel run; proposed/destructive operations still wait in Spaces.
+    "-c", `mcp_servers.${MCP_SERVER_KEY}.default_tools_approval_mode="approve"`,
   ];
 }
 

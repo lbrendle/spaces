@@ -33,6 +33,17 @@ test("lists and approval-queues the social publishing tool", async () => {
             additionalProperties: false,
           },
         },
+        {
+          name: "spaces_list_messages",
+          description: "Read channel history.",
+          effect: "auto",
+          readOnly: true,
+          inputSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+        },
       ],
     }, null, 2)}\n`,
   );
@@ -90,6 +101,10 @@ test("lists and approval-queues the social publishing tool", async () => {
   assert.match(responses[0].result.instructions, /final assistant response is posted/);
   assert.equal(responses[1].result.tools[0].name, "spaces_publish_social");
   assert.match(responses[1].result.tools[0].description, /human to approve/i);
+  assert.equal(responses[1].result.tools[0].annotations.readOnlyHint, false);
+  assert.equal(responses[1].result.tools[0].annotations.destructiveHint, true);
+  assert.equal(responses[1].result.tools[1].annotations.readOnlyHint, true);
+  assert.equal(responses[1].result.tools[1].annotations.destructiveHint, false);
   assert.match(responses[2].result.content[0].text, /holding it for a human to approve/i);
 
   const queued = JSON.parse(

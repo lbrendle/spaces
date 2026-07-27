@@ -300,7 +300,7 @@ function normalizeTool(entry) {
  */
 function expectation(tool) {
   if (tool.readOnly) {
-    return "Answered from Spaces's generated markdown in .hq/, which is a snapshot a few seconds behind the app — this server cannot query Spaces live.";
+    return "Answered from Spaces's live paired-host database when available, with generated .hq/ snapshots as a bounded fallback.";
   }
   return tool.effect === "auto"
     ? "Queued to Spaces and applied automatically, normally within a second or two. The result is not returned here."
@@ -320,6 +320,12 @@ function toolsList() {
       name: t.name,
       description: `${t.description} ${expectation(t)}`.trim(),
       inputSchema: t.inputSchema,
+      annotations: {
+        readOnlyHint: t.readOnly,
+        destructiveHint: !t.readOnly && t.effect !== "auto",
+        idempotentHint: t.readOnly,
+        openWorldHint: false,
+      },
     })),
   };
 }
@@ -620,6 +626,11 @@ function messageListAnswer(args) {
       "spaces_list_messages needs channel because this process has no SPACES_CHANNEL_ID.",
       true,
     );
+  }
+  if (!channelName) {
+    const current = rows("SELECT name FROM channels WHERE id = ? LIMIT 1", [channelId]);
+    if (!current.ok) return text(current.problem, true);
+    channelName = current.rows.length ? String(current.rows[0].name) : "";
   }
 
   const requestedLimit = Number(args.limit);

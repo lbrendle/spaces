@@ -40,6 +40,15 @@ test("agent harnesses receive a stable platform contract and event identity", as
   assert.match(agents, /--append-system-prompt-file/);
   assert.match(agents, /ensureRuntimeContract/);
   assert.match(agents, /parentId \|\| "channel-top-level"/);
+  assert.match(agents, /mcpCodexArgs/);
+  assert.match(
+    await readFile(new URL("../src/mcpsetup.ts", import.meta.url), "utf8"),
+    /default_tools_approval_mode="approve"/,
+  );
+  assert.match(
+    await readFile(new URL("../src/mcpsetup.ts", import.meta.url), "utf8"),
+    /SPACES_CHANNEL_ID[\s\S]*SPACES_DB_PATH[\s\S]*env_vars=/,
+  );
   for (const tool of [
     "spaces_list_messages",
     "spaces_search_knowledge",
