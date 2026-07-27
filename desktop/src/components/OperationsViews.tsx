@@ -2882,8 +2882,11 @@ export function ContentStudioView() {
   const editSeq = useRef(0);
 
   useEffect(() => {
-    void listContentItems().then(setItems);
+    const refreshContent = () => void listContentItems().then(setItems);
+    refreshContent();
     void listIntegrationAccounts().then(setAccounts);
+    window.addEventListener("hq:content-change", refreshContent);
+    return () => window.removeEventListener("hq:content-change", refreshContent);
   }, []);
 
   useEffect(() => {

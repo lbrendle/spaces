@@ -11,6 +11,8 @@ import {
 } from "react";
 import type {
   AgentProfile,
+  ContentItem,
+  ContentStatus,
   InboxItem,
   Issue,
   IssueStatus,
@@ -46,6 +48,7 @@ type Surface =
   | "messages"
   | "work"
   | "inbox"
+  | "content"
   | "knowledge"
   | "calendar"
   | "people"
@@ -96,6 +99,7 @@ const WORKSPACE_NAV: typeof NAV = [
   { id: "inbox", label: "Inbox", hint: "Mail and requests", glyph: "04" },
   { id: "calendar", label: "Calendar", hint: "Team and individual time", glyph: "05" },
   { id: "knowledge", label: "Knowledge", hint: "Vaults, notes, and backlinks", glyph: "06" },
+  { id: "content", label: "Content Studio", hint: "Ideas, drafts, review, and publishing", glyph: "07" },
 ];
 
 const NAV_GROUPS = [
@@ -172,6 +176,13 @@ const SURFACE_META: Record<
     action: "Capture item",
     dialog: "inbox",
   },
+  content: {
+    eyebrow: "Content operations",
+    title: "Content Studio",
+    detail: "One shared board for every human and agent idea, draft, review, asset, and published post.",
+    action: "",
+    dialog: null,
+  },
   knowledge: {
     eyebrow: "Company memory",
     title: "Knowledge",
@@ -212,6 +223,18 @@ const STATUS_COLUMNS: Array<{
   { id: "in_progress", label: "In progress", short: "IP" },
   { id: "review", label: "Review", short: "RV" },
   { id: "done", label: "Done", short: "DN" },
+];
+
+const CONTENT_COLUMNS: Array<{
+  id: ContentStatus;
+  label: string;
+  short: string;
+}> = [
+  { id: "idea", label: "Idea", short: "ID" },
+  { id: "drafting", label: "Drafting", short: "DR" },
+  { id: "review", label: "Review", short: "RV" },
+  { id: "scheduled", label: "Scheduled", short: "SC" },
+  { id: "published", label: "Published", short: "PB" },
 ];
 
 const SOURCE_CATALOG = [
@@ -391,6 +414,7 @@ export function PortalApp() {
           "messages",
           "work",
           "inbox",
+          "content",
           "calendar",
           "knowledge",
           "people",
@@ -542,6 +566,19 @@ export function PortalApp() {
     for (const device of snapshot.devices) {
       if (`${device.name} ${device.status}`.toLowerCase().includes(needle)) {
         matches.push({ surface: "devices", label: device.name, detail: device.status });
+      }
+    }
+    for (const item of snapshot.contentItems) {
+      if (
+        `${item.title} ${item.campaign} ${item.brief} ${item.copy} ${item.platform}`
+          .toLowerCase()
+          .includes(needle)
+      ) {
+        matches.push({
+          surface: "content",
+          label: item.title,
+          detail: `${titleCase(item.status)} · ${titleCase(item.platform)}`,
+        });
       }
     }
     return matches.slice(0, 10);
@@ -852,6 +889,9 @@ export function PortalApp() {
           )}
           {surface === "inbox" && (
             <InboxSurface snapshot={snapshot} mutate={mutate} />
+          )}
+          {surface === "content" && (
+            <ContentStudioSurface snapshot={snapshot} mutate={mutate} />
           )}
           {surface === "calendar" && (
             <CalendarSurface
@@ -2131,6 +2171,428 @@ function IssueCard({
         </div>
       </footer>
     </article>
+  );
+}
+
+function ContentStudioSurface({
+  snapshot,
+  mutate,
+}: {
+  snapshot: WorkspaceSnapshot;
+  mutate: (
+    input: Record<string, unknown>,
+    success: string,
+  ) => Promise<Record<string, unknown>>;
+}) {
+  const [projectId, setProjectId] = useState("all");
+  const [selectedId, setSelectedId] = useState("");
+  const [creating, setCreating] = useState(false);
+  const effectiveProjectId =
+    projectId === "all" ||
+    snapshot.projects.some((project) => project.id === projectId)
+      ? projectId
+      : "all";
+  const items =
+    effectiveProjectId === "all"
+      ? snapshot.contentItems
+      : snapshot.contentItems.filter(
+          (item) => item.projectId === effectiveProjectId,
+        );
+  const selected =
+    snapshot.contentItems.find((item) => item.id === selectedId) ?? null;
+  const editorOpen = creating || Boolean(selected);
+  const editorKey = creating ? "new" : selected?.id ?? "closed";
+
+  async function move(item: ContentItem, status: ContentStatus) {
+    if (status === item.status) return;
+    await mutate(
+      { action: "update_content", contentId: item.id, status },
+      `Moved “${item.title}” to ${titleCase(status)}.`,
+    );
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const scheduled = formValue(form, "scheduledAt");
+    const input: Record<string, unknown> = {
+      action: selected ? "update_content" : "create_content",
+      title: formValue(form, "title"),
+      campaign: formValue(form, "campaign"),
+      brief: String(form.get("brief") ?? ""),
+      copy: String(form.get("copy") ?? ""),
+      projectId: formValue(form, "projectId"),
+      platform: formValue(form, "platform"),
+      status: formValue(form, "status"),
+      connectionId: formValue(form, "connectionId"),
+      mediaUrl: formValue(form, "mediaUrl"),
+      agentId: formValue(form, "agentId"),
+      scheduledAt: scheduled ? Date.parse(scheduled) : 0,
+    };
+    if (selected) input.contentId = selected.id;
+    await mutate(
+      input,
+      selected ? "Content card updated." : "Idea added to Content Studio.",
+    );
+    setSelectedId("");
+    setCreating(false);
+  }
+
+  function openNew() {
+    setSelectedId("");
+    setCreating(true);
+  }
+
+  return (
+    <div className={`content-studio-surface ${editorOpen ? "editor-open" : ""}`}>
+      <div className="content-studio-main">
+        <div className="work-toolbar">
+          <div className="project-tabs">
+            <button
+              type="button"
+              className={effectiveProjectId === "all" ? "active" : ""}
+              onClick={() => setProjectId("all")}
+            >
+              All content
+            </button>
+            {snapshot.projects.map((project) => (
+              <button
+                type="button"
+                key={project.id}
+                className={effectiveProjectId === project.id ? "active" : ""}
+                onClick={() => setProjectId(project.id)}
+              >
+                {project.name}
+              </button>
+            ))}
+          </div>
+          <div className="content-toolbar-actions">
+            <span>
+              {items.length} {items.length === 1 ? "piece" : "pieces"}
+            </span>
+            <button className="primary-button compact" type="button" onClick={openNew}>
+              <span>+</span>
+              Add idea
+            </button>
+          </div>
+        </div>
+
+        <div className="issue-board content-board">
+          {CONTENT_COLUMNS.map((column) => {
+            const columnItems = items.filter((item) => item.status === column.id);
+            return (
+              <section
+                key={column.id}
+                className="issue-column content-column"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const itemId = event.dataTransfer.getData("text/spaces-content");
+                  const item = snapshot.contentItems.find(
+                    (candidate) => candidate.id === itemId,
+                  );
+                  if (item) void move(item, column.id);
+                }}
+              >
+                <header>
+                  <span>{column.short}</span>
+                  <strong>{column.label}</strong>
+                  <small>{columnItems.length}</small>
+                </header>
+                <div className="issue-stack">
+                  {columnItems.map((item) => {
+                    const project = snapshot.projects.find(
+                      (candidate) => candidate.id === item.projectId,
+                    );
+                    const agent = snapshot.agents.find(
+                      (candidate) => candidate.id === item.agentId,
+                    );
+                    const image =
+                      /^https:\/\//i.test(item.mediaUrl) &&
+                      /\.(png|jpe?g|gif|webp|avif)(?:[?#]|$)/i.test(item.mediaUrl);
+                    return (
+                      <article
+                        className={`issue-card content-card ${
+                          selected?.id === item.id ? "selected" : ""
+                        }`}
+                        key={item.id}
+                        draggable
+                        tabIndex={0}
+                        onClick={() => {
+                          setCreating(false);
+                          setSelectedId(item.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setCreating(false);
+                            setSelectedId(item.id);
+                          }
+                        }}
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData(
+                            "text/spaces-content",
+                            item.id,
+                          );
+                          event.dataTransfer.effectAllowed = "move";
+                        }}
+                      >
+                        {image && (
+                          <img
+                            className="content-card-media"
+                            src={item.mediaUrl}
+                            alt=""
+                            loading="lazy"
+                          />
+                        )}
+                        <div className="issue-card-top">
+                          <span className="content-platform">
+                            {titleCase(item.platform)}
+                          </span>
+                          <small>{project?.name || "No project"}</small>
+                          <time>{relative(item.updatedAt)}</time>
+                        </div>
+                        <h3>{item.title}</h3>
+                        {item.brief && <p>{item.brief}</p>}
+                        {item.copy && (
+                          <blockquote>{item.copy.slice(0, 180)}</blockquote>
+                        )}
+                        <footer>
+                          <span
+                            className="mini-avatar"
+                            title={agent?.name || "Unassigned"}
+                          >
+                            {agent ? initials(agent.name) : "—"}
+                          </span>
+                          {item.campaign && <small>{item.campaign}</small>}
+                          {item.publishError && (
+                            <span className="content-error">Needs attention</span>
+                          )}
+                        </footer>
+                      </article>
+                    );
+                  })}
+                  {!columnItems.length && (
+                    <button
+                      type="button"
+                      className="column-empty content-empty"
+                      onClick={openNew}
+                    >
+                      Add the first {column.label.toLowerCase()} piece
+                    </button>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+
+      {editorOpen && (
+        <aside className="content-editor">
+          <form key={editorKey} onSubmit={save}>
+            <header>
+              <div>
+                <span className="eyebrow">
+                  {creating ? "New shared card" : `content:${selected?.id}`}
+                </span>
+                <h2>{creating ? "Capture the whole idea" : "Develop this piece"}</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close content editor"
+                onClick={() => {
+                  setCreating(false);
+                  setSelectedId("");
+                }}
+              >
+                ×
+              </button>
+            </header>
+
+            <label>
+              <span>Title</span>
+              <input
+                name="title"
+                required
+                defaultValue={selected?.title ?? ""}
+                placeholder="A specific working title"
+              />
+            </label>
+            <div className="content-editor-grid">
+              <label>
+                <span>Project</span>
+                <select
+                  name="projectId"
+                  defaultValue={
+                    selected?.projectId ||
+                    (effectiveProjectId === "all" ? "" : effectiveProjectId)
+                  }
+                >
+                  <option value="">No project</option>
+                  {snapshot.projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Stage</span>
+                <select name="status" defaultValue={selected?.status ?? "idea"}>
+                  {CONTENT_COLUMNS.map((column) => (
+                    <option key={column.id} value={column.id}>
+                      {column.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Platform</span>
+                <select
+                  name="platform"
+                  defaultValue={selected?.platform ?? "multi"}
+                >
+                  {["multi", "instagram", "tiktok", "x", "linkedin", "youtube"].map(
+                    (platform) => (
+                      <option key={platform} value={platform}>
+                        {titleCase(platform)}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+              <label>
+                <span>Campaign</span>
+                <input
+                  name="campaign"
+                  defaultValue={selected?.campaign ?? ""}
+                  placeholder="Series or launch"
+                />
+              </label>
+            </div>
+            <label>
+              <span>Full brief</span>
+              <textarea
+                name="brief"
+                rows={6}
+                defaultValue={selected?.brief ?? ""}
+                placeholder="Angle, audience, goal, references, constraints, and what success means"
+              />
+            </label>
+            <label>
+              <span>Copy</span>
+              <textarea
+                name="copy"
+                rows={10}
+                defaultValue={selected?.copy ?? ""}
+                placeholder="The complete caption or script—not a link back to chat"
+              />
+            </label>
+            <label>
+              <span>Shared media URL</span>
+              <input
+                name="mediaUrl"
+                type="url"
+                defaultValue={selected?.mediaUrl ?? ""}
+                placeholder="https://…"
+              />
+            </label>
+            <div className="content-editor-grid">
+              <label>
+                <span>Publishing account</span>
+                <select
+                  name="connectionId"
+                  defaultValue={selected?.connectionId ?? ""}
+                >
+                  <option value="">Choose at publish time</option>
+                  {snapshot.connections
+                    .filter((connection) =>
+                      ["meta", "tiktok", "x"].includes(connection.kind),
+                    )
+                    .map((connection) => (
+                      <option key={connection.id} value={connection.id}>
+                        {connection.label}
+                        {connection.accountLabel
+                          ? ` · ${connection.accountLabel}`
+                          : ""}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                <span>Agent</span>
+                <select name="agentId" defaultValue={selected?.agentId ?? ""}>
+                  <option value="">Unassigned</option>
+                  {snapshot.agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label>
+              <span>Scheduled time</span>
+              <input
+                name="scheduledAt"
+                type="datetime-local"
+                defaultValue={
+                  selected?.scheduledAt
+                    ? new Date(
+                        selected.scheduledAt -
+                          new Date(selected.scheduledAt).getTimezoneOffset() *
+                            60_000,
+                      )
+                        .toISOString()
+                        .slice(0, 16)
+                    : ""
+                }
+              />
+            </label>
+            {selected?.publishedUrl && (
+              <a
+                className="content-published-link"
+                href={selected.publishedUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open published post ↗
+              </a>
+            )}
+            {selected?.publishError && (
+              <div className="content-editor-error">{selected.publishError}</div>
+            )}
+            <footer>
+              {selected && (
+                <button
+                  className="quiet-button danger-button"
+                  type="button"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Delete “${selected.title}” for everyone? This cannot be undone.`,
+                      )
+                    ) {
+                      void mutate(
+                        { action: "delete_content", contentId: selected.id },
+                        "Content card deleted.",
+                      ).then(() => setSelectedId(""));
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              )}
+              <button className="primary-button" type="submit">
+                {creating ? "Add to board" : "Save card"}
+              </button>
+            </footer>
+          </form>
+        </aside>
+      )}
+    </div>
   );
 }
 

@@ -56,7 +56,16 @@ idempotent JSON line to `.hq/actions.jsonl`; the desktop drains it into a local
 audit log.
 
 Operations marked `auto` apply immediately. Operations marked `propose` wait in
-the visible approval queue. External publishing is always `propose`.
+the visible approval queue. External publishing and shared-card deletion are
+always `propose`.
+
+Content Studio is one workspace data model rather than a UI-only queue. The
+portal D1 row is canonical; each paired desktop maintains a mapped SQLite
+mirror. Web edits and agent/desktop edits move through the same revision and
+tombstone stream, so full briefs, copy, media references, review stage, account
+selection, and publish results remain attached to one card across members.
+Agent tools read and mutate those same mirrored rows, and a publishing proposal
+prefers an existing `content:<id>` instead of inventing a second audit row.
 
 Every spawned harness receives explicit run, agent, channel, and project IDs.
 The blackboard also emits permission-filtered workspace Knowledge with preserved

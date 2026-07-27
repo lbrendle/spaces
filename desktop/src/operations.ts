@@ -92,6 +92,11 @@ export interface IntegrationAccount {
   updated_at: number;
 }
 
+function contentChanged(): void {
+  window.dispatchEvent(new CustomEvent("hq:content-change"));
+  window.dispatchEvent(new CustomEvent("hq:portal-local-change"));
+}
+
 interface AppleCalendarEvent {
   id: string;
   calendar: string;
@@ -272,6 +277,7 @@ export async function createDraft(input: {
       row.updated_at,
     ]
   );
+  contentChanged();
   return row;
 }
 
@@ -828,11 +834,13 @@ export async function patchContentItem(
       id,
     ]);
   }
+  if (Object.keys(patch).length) contentChanged();
 }
 
 export async function deleteContentItem(id: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM content_items WHERE id = $1", [id]);
+  contentChanged();
 }
 
 export async function publishContentItem(

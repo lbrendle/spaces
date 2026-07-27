@@ -26,6 +26,7 @@ test("admin shell keeps every workspace surface mounted", async () => {
     "inbox",
     "calendar",
     "knowledge",
+    "content",
   ]) {
     assert.match(app, new RegExp(`surface === "${surface}"`));
   }
@@ -162,6 +163,31 @@ test("workspace media uploads use authenticated R2 storage and public delivery",
   assert.match(media, /authorizeDevice/);
   assert.match(uploadRoute, /uploadDeviceMedia/);
   assert.match(deliveryRoute, /serveMedia/);
+});
+
+test("Content Studio is one shared board for people, devices, and agents", async () => {
+  const [schema, migration, shared, workspace, app] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../drizzle/0014_shared_content_board.sql", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../lib/shared-content.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/workspace.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(schema, /export const contentItems/);
+  assert.match(migration, /CREATE TABLE `content_items`/);
+  assert.match(migration, /content_items_source_idx/);
+  assert.match(shared, /syncContentItems/);
+  assert.match(shared, /"content_item"/);
+  assert.match(shared, /contentItems: shared\.contentItems/);
+  assert.match(workspace, /actionName === "create_content"/);
+  assert.match(workspace, /actionName === "update_content"/);
+  assert.match(workspace, /actionName === "delete_content"/);
+  assert.match(app, /function ContentStudioSurface/);
+  assert.match(app, /text\/spaces-content/);
+  assert.match(app, /The complete caption or script—not a link back to chat/);
 });
 
 test("social accounts are distinct, project-linked, and explicitly selectable", async () => {

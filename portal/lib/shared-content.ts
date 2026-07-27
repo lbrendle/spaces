@@ -1,5 +1,6 @@
 import { getD1 } from "../db";
 import type {
+  ContentItem,
   KnowledgePage,
   SharedCalendar,
   SharedCalendarEvent,
@@ -14,7 +15,13 @@ export interface DeviceIdentity {
 }
 
 export interface SharedSyncAck {
-  entity: "document" | "vault" | "vault_file" | "calendar" | "event";
+  entity:
+    | "document"
+    | "vault"
+    | "vault_file"
+    | "calendar"
+    | "event"
+    | "content_item";
   sourceId: string;
   remoteId: string;
   fingerprint: string;
@@ -28,7 +35,8 @@ export interface SharedTombstone {
     | "calendar"
     | "event"
     | "project"
-    | "project_source";
+    | "project_source"
+    | "content_item";
   entityId: string;
   revision: number;
 }
@@ -51,6 +59,10 @@ interface CalendarRow extends Omit<SharedCalendar, "access"> {
 
 interface EventRow extends Omit<SharedCalendarEvent, "attendees" | "access" | "redacted"> {
   attendeesJson: string;
+  revision: number;
+}
+
+interface ContentRow extends ContentItem {
   revision: number;
 }
 
@@ -975,6 +987,252 @@ async function syncCalendars(
   return acks;
 }
 
+async function syncContentItems(
+  device: DeviceIdentity,
+  raw: unknown,
+): Promise<SharedSyncAck[]> {
+  const acks: SharedSyncAck[] = [];
+  const records = Array.isArray(raw) ? raw.slice(0, 500) : [];
+  for (const value of records) {
+    if (!value || typeof value !== "object") continue;
+    const record = value as Record<string, unknown>;
+    const sourceId = text(record.sourceId, 220);
+    const remoteId = text(record.remoteId, 220);
+    const fingerprint = text(record.fingerprint, 2_000);
+    if (!sourceId) continue;
+
+    const existing = remoteId
+      ? await first<ContentRow>(
+          `SELECT id, workspace_id AS workspaceId, project_id AS projectId,
+                  campaign, title, brief, copy, platform,
+                  connection_id AS connectionId, status,
+                  scheduled_at AS scheduledAt, published_url AS publishedUrl,
+                  media_url AS mediaUrl, publish_error AS publishError,
+                  agent_id AS agentId, created_by AS createdBy,
+                  source_device_id AS sourceDeviceId,
+                  source_content_id AS sourceContentId,
+                  created_at AS createdAt, updated_at AS updatedAt, revision
+             FROM content_items
+            WHERE workspace_id = ? AND id = ?`,
+          device.workspaceId,
+          remoteId,
+        )
+      : await first<ContentRow>(
+          `SELECT id, workspace_id AS workspaceId, project_id AS projectId,
+                  campaign, title, brief, copy, platform,
+                  connection_id AS connectionId, status,
+                  scheduled_at AS scheduledAt, published_url AS publishedUrl,
+                  media_url AS mediaUrl, publish_error AS publishError,
+                  agent_id AS agentId, created_by AS createdBy,
+                  source_device_id AS sourceDeviceId,
+                  source_content_id AS sourceContentId,
+                  created_at AS createdAt, updated_at AS updatedAt, revision
+             FROM content_items
+            WHERE workspace_id = ? AND source_device_id = ?
+              AND source_content_id = ?`,
+          device.workspaceId,
+          device.id,
+          sourceId,
+        );
+
+    if (record.deleted === true) {
+      if (existing) {
+        await run(
+          "DELETE FROM content_items WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          existing.id,
+        );
+        await recordTombstone(
+          device.workspaceId,
+          device.id,
+          "content_item",
+          existing.id,
+        );
+      }
+      acks.push({
+        entity: "content_item",
+        sourceId,
+        remoteId: "",
+        fingerprint: "deleted",
+      });
+      continue;
+    }
+
+    const projectPortalId = text(record.projectPortalId, 220);
+    const projectSourceId = text(record.projectId, 220);
+    const project = projectPortalId
+      ? await first<{ id: string }>(
+          "SELECT id FROM projects WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          projectPortalId,
+        )
+      : projectSourceId
+        ? await first<{ id: string }>(
+            `SELECT p.id
+               FROM project_sources s
+               JOIN projects p ON p.id = s.project_id
+              WHERE s.workspace_id = ? AND s.device_id = ?
+                AND s.source_project_id = ?`,
+            device.workspaceId,
+            device.id,
+            projectSourceId,
+          )
+        : null;
+    const connectionCandidate = text(record.connectionId, 220);
+    const connection = connectionCandidate
+      ? await first<{ id: string }>(
+          `SELECT c.id
+             FROM connections c
+            WHERE c.workspace_id = ? AND c.id = ?
+              AND c.kind IN ('meta', 'tiktok', 'x')`,
+          device.workspaceId,
+          connectionCandidate,
+        )
+      : null;
+    const agentPortalId = text(record.agentPortalId, 220);
+    const sourceAgentId = text(record.agentId, 220);
+    const agent = agentPortalId
+      ? await first<{ id: string }>(
+          "SELECT id FROM agent_profiles WHERE workspace_id = ? AND id = ?",
+          device.workspaceId,
+          agentPortalId,
+        )
+      : sourceAgentId
+        ? await first<{ id: string }>(
+            `SELECT id FROM agent_profiles
+              WHERE workspace_id = ? AND host_device_id = ?
+                AND source_agent_id = ?`,
+            device.workspaceId,
+            device.id,
+            sourceAgentId,
+          )
+        : null;
+    const contentId = existing?.id ?? id("content");
+    const incomingUpdatedAt = new Date(
+      number(record.updatedAt, Date.now()),
+    ).toISOString();
+    const incomingCreatedAt = new Date(
+      number(record.createdAt, Date.now()),
+    ).toISOString();
+    const next = {
+      projectId: project?.id ?? "",
+      campaign: text(record.campaign, 240),
+      title: text(record.title, 300) || "Untitled",
+      brief: content(record.brief, 12_000),
+      copy: content(record.copy, 30_000),
+      platform: oneOf(
+        record.platform,
+        ["instagram", "tiktok", "x", "linkedin", "youtube", "multi"] as const,
+        "multi",
+      ),
+      connectionId: connection?.id ?? "",
+      status: oneOf(
+        record.status,
+        ["idea", "drafting", "review", "scheduled", "published"] as const,
+        "idea",
+      ),
+      scheduledAt: Math.max(0, number(record.scheduledAt)),
+      publishedUrl: text(record.publishedUrl, 2_000),
+      mediaUrl: text(record.mediaUrl, 2_000),
+      publishError: content(record.publishError, 4_000),
+      agentId: agent?.id ?? "",
+    };
+    const changed =
+      !existing ||
+      existing.projectId !== next.projectId ||
+      existing.campaign !== next.campaign ||
+      existing.title !== next.title ||
+      existing.brief !== next.brief ||
+      existing.copy !== next.copy ||
+      existing.platform !== next.platform ||
+      existing.connectionId !== next.connectionId ||
+      existing.status !== next.status ||
+      Number(existing.scheduledAt) !== next.scheduledAt ||
+      existing.publishedUrl !== next.publishedUrl ||
+      existing.mediaUrl !== next.mediaUrl ||
+      existing.publishError !== next.publishError ||
+      existing.agentId !== next.agentId ||
+      existing.updatedAt !== incomingUpdatedAt;
+
+    if (!existing) {
+      await run(
+        `INSERT INTO content_items
+          (id, workspace_id, project_id, campaign, title, brief, copy,
+           platform, connection_id, status, scheduled_at, published_url,
+           media_url, publish_error, agent_id, created_by, source_device_id,
+           source_content_id, created_at, updated_at, revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+        contentId,
+        device.workspaceId,
+        next.projectId || null,
+        next.campaign,
+        next.title,
+        next.brief,
+        next.copy,
+        next.platform,
+        next.connectionId,
+        next.status,
+        next.scheduledAt,
+        next.publishedUrl,
+        next.mediaUrl,
+        next.publishError,
+        next.agentId,
+        device.ownerUserId,
+        device.id,
+        sourceId,
+        incomingCreatedAt,
+        incomingUpdatedAt,
+      );
+    } else if (changed) {
+      await run(
+        `UPDATE content_items
+            SET project_id = ?, campaign = ?, title = ?, brief = ?, copy = ?,
+                platform = ?, connection_id = ?, status = ?,
+                scheduled_at = ?, published_url = ?, media_url = ?,
+                publish_error = ?, agent_id = ?, updated_at = ?
+          WHERE workspace_id = ? AND id = ?`,
+        next.projectId || null,
+        next.campaign,
+        next.title,
+        next.brief,
+        next.copy,
+        next.platform,
+        next.connectionId,
+        next.status,
+        next.scheduledAt,
+        next.publishedUrl,
+        next.mediaUrl,
+        next.publishError,
+        next.agentId,
+        incomingUpdatedAt,
+        device.workspaceId,
+        contentId,
+      );
+    }
+    if (changed) {
+      const revision = await markChanged(
+        device.workspaceId,
+        device.id,
+        "content.synced",
+        contentId,
+      );
+      await run(
+        "UPDATE content_items SET revision = ? WHERE workspace_id = ? AND id = ?",
+        revision,
+        device.workspaceId,
+        contentId,
+      );
+    }
+    acks.push({
+      entity: "content_item",
+      sourceId,
+      remoteId: contentId,
+      fingerprint,
+    });
+  }
+  return acks;
+}
+
 async function teamsForUser(workspaceId: string, userId: string): Promise<Set<string>> {
   const rows = await all<{ teamId: string }>(
     `SELECT ta.team_id AS teamId
@@ -1013,6 +1271,7 @@ export async function loadSharedWorkspace(
   knowledgePages: KnowledgePage[];
   calendars: SharedCalendar[];
   calendarEvents: SharedCalendarEvent[];
+  contentItems: ContentItem[];
   revision: number;
 }> {
   const [
@@ -1207,15 +1466,32 @@ export async function loadSharedWorkspace(
     });
   }
 
+  const contentItems = await all<ContentRow>(
+    `SELECT id, COALESCE(project_id, '') AS projectId, campaign, title, brief,
+            copy, platform, connection_id AS connectionId, status,
+            scheduled_at AS scheduledAt, published_url AS publishedUrl,
+            media_url AS mediaUrl, publish_error AS publishError,
+            agent_id AS agentId, created_by AS createdBy,
+            source_device_id AS sourceDeviceId,
+            source_content_id AS sourceContentId,
+            created_at AS createdAt, updated_at AS updatedAt, revision
+       FROM content_items
+      WHERE workspace_id = ?
+      ORDER BY updated_at DESC`,
+    workspaceId,
+  );
+
   const deliveredRevisions = [
     ...knowledgeRows.map((row) => Number(row.revision)),
     ...calendarRows.map((row) => Number(row.revision)),
     ...eventRows.map((row) => Number(row.revision)),
+    ...contentItems.map((row) => Number(row.revision)),
   ];
   return {
     knowledgePages,
     calendars,
     calendarEvents,
+    contentItems,
     revision: Math.max(0, ...deliveredRevisions),
   };
 }
@@ -1229,6 +1505,7 @@ export async function syncSharedContent(
   knowledgePages: KnowledgePage[];
   calendars: SharedCalendar[];
   calendarEvents: SharedCalendarEvent[];
+  contentItems: ContentItem[];
   contentRevision: number;
 }> {
   const cursor = Math.max(0, number(body.contentRevision));
@@ -1238,6 +1515,7 @@ export async function syncSharedContent(
     body.calendarRecords,
     body.calendarEventRecords,
   );
+  const contentAcks = await syncContentItems(device, body.contentItemRecords);
   const shared = await loadSharedWorkspace(device.workspaceId, device.ownerUserId);
   const tombstones = await all<SharedTombstone>(
     `SELECT entity, entity_id AS entityId, revision
@@ -1253,11 +1531,12 @@ export async function syncSharedContent(
     ...tombstones.map((row) => Number(row.revision)),
   );
   return {
-    acks: [...knowledge.acks, ...calendarAcks],
+    acks: [...knowledge.acks, ...calendarAcks, ...contentAcks],
     tombstones,
     knowledgePages: shared.knowledgePages,
     calendars: shared.calendars,
     calendarEvents: shared.calendarEvents,
+    contentItems: shared.contentItems,
     contentRevision,
   };
 }

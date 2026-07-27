@@ -31,11 +31,15 @@ import { ASSIGN_ROLES } from "./links";
 import {
   createDocument,
   createContentItem,
+  deleteContentItem,
+  listContentItems,
   listIntegrationAccounts,
+  patchContentItem,
   publishContentItem,
   saveDocument,
   sendCloudMail,
   uploadContentMedia,
+  type ContentItem,
   type IntegrationAccount,
 } from "./operations";
 import {
@@ -263,6 +267,87 @@ function socialAccount(
     };
   }
   return { account: candidates[0] };
+}
+
+async function contentItem(
+  raw: string,
+  ctx: OpContext,
+): Promise<{ item?: ContentItem; error?: string }> {
+  const needle = raw.trim().replace(/^content:/, "");
+  if (!needle) return { error: "content is required" };
+  const rows = await listContentItems();
+  const projectRows = ctx.projectId
+    ? rows.filter((row) => row.project_id === ctx.projectId)
+    : rows;
+  const exactId = rows.find((row) => row.id === needle);
+  if (exactId) return { item: exactId };
+  const exactTitle = projectRows.filter(
+    (row) => row.title.toLowerCase() === needle.toLowerCase(),
+  );
+  if (exactTitle.length === 1) return { item: exactTitle[0] };
+  if (exactTitle.length > 1) {
+    return {
+      error: `"${raw}" matches ${exactTitle.length} Content Studio cards. Use content:<id>.`,
+    };
+  }
+  return { error: `No Content Studio card matches "${raw}".` };
+}
+
+async function resolvedContentMedia(
+  args: Record<string, unknown>,
+  ctx: OpContext,
+  projectId: string,
+  fallback = "",
+): Promise<string> {
+  let mediaUrl = str(args, "media_url") || fallback;
+  const mediaPath = str(args, "media_path");
+  if (mediaPath) {
+    const state = useStore.getState();
+    const project = state.projects.find((row) => row.id === projectId);
+    if (!project?.local_path) {
+      throw new Error(
+        "media_path needs a project with a local folder. Link the project folder in Spaces or provide media_url.",
+      );
+    }
+    const agent = state.agents.find((row) => row.id === ctx.agentId);
+    const allowedRoots = [
+      ...(project.isolate && agent ? [worktreePath(project, agent)] : []),
+      project.local_path,
+    ];
+    const isAbsolute =
+      mediaPath.startsWith("/") ||
+      /^[a-zA-Z]:[\\/]/.test(mediaPath) ||
+      mediaPath.startsWith("\\\\");
+    const normalizePath = (value: string) =>
+      value.replace(/\\/g, "/").replace(/\/+$/, "");
+    const normalizedMedia = normalizePath(mediaPath);
+    const allowedRoot = isAbsolute
+      ? allowedRoots.find((root) => {
+          const normalizedRoot = normalizePath(root);
+          return (
+            normalizedMedia === normalizedRoot ||
+            normalizedMedia.startsWith(`${normalizedRoot}/`)
+          );
+        }) ?? project.local_path
+      : allowedRoots[0];
+    const absolute = isAbsolute
+      ? mediaPath
+      : `${allowedRoot.replace(/[\\/]$/, "")}${
+          allowedRoot.includes("\\") ? "\\" : "/"
+        }${mediaPath}`;
+    mediaUrl = await uploadContentMedia(absolute, projectId, allowedRoot);
+  }
+  if (!mediaUrl) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(mediaUrl);
+  } catch {
+    throw new Error("media_url must be a valid public HTTPS URL");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("media_url must use HTTPS");
+  }
+  return parsed.toString();
 }
 
 const REF_HELP = 'either "type:id" as printed in .hq/, or an exact title';
@@ -856,23 +941,355 @@ export const OPERATIONS: Operation[] = [
   },
 
   {
-    name: "spaces_publish_social",
+    name: "spaces_list_content",
     describe:
-      "Publish an approved post through a connected Instagram or TikTok account. This always waits for a human in Spaces to approve it before anything reaches the network.",
+      "List the canonical shared Content Studio board, including complete idea, draft, review, schedule, media, project, account, and publishing state. Use this before proposing social work so ideas stay on the board instead of only in chat.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "project",
+        type: "string",
+        describe: "Project name or id. Defaults to the current project; use all for the whole workspace.",
+      },
+      {
+        name: "status",
+        type: "enum",
+        choices: ["idea", "drafting", "review", "scheduled", "published"],
+        describe: "Optional board stage.",
+      },
+      {
+        name: "query",
+        type: "string",
+        describe: "Optional words to match in the title, campaign, brief, or copy.",
+      },
+    ],
+    async run(args, ctx) {
+      const rows = await listContentItems();
+      const requestedProject = str(args, "project");
+      const projectId =
+        requestedProject.toLowerCase() === "all"
+          ? ""
+          : requestedProject
+            ? projectOf(args, ctx)
+            : ctx.projectId;
+      const status = str(args, "status");
+      const query = str(args, "query").toLowerCase();
+      const matches = rows
+        .filter((row) => !projectId || row.project_id === projectId)
+        .filter((row) => !status || row.status === status)
+        .filter(
+          (row) =>
+            !query ||
+            `${row.title} ${row.campaign} ${row.brief} ${row.copy}`
+              .toLowerCase()
+              .includes(query),
+        )
+        .slice(0, 100);
+      if (!matches.length) {
+        return { ok: true, message: "No Content Studio cards match." };
+      }
+      const projects = useStore.getState().projects;
+      return {
+        ok: true,
+        message: matches
+          .map((row) => {
+            const project =
+              projects.find((candidate) => candidate.id === row.project_id)?.name ||
+              "No project";
+            return [
+              `content:${row.id} — ${row.title}`,
+              `stage=${row.status} · project=${project} · platform=${row.platform}` +
+                `${row.campaign ? ` · campaign=${row.campaign}` : ""}`,
+              row.brief ? `brief: ${row.brief}` : "",
+              row.copy ? `copy:\n${row.copy}` : "",
+              row.media_url ? `media: ${row.media_url}` : "",
+              row.scheduled_at
+                ? `scheduled: ${new Date(row.scheduled_at).toISOString()}`
+                : "",
+              row.published_url ? `published: ${row.published_url}` : "",
+              row.publish_error ? `publish error: ${row.publish_error}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n");
+          })
+          .join("\n\n"),
+      };
+    },
+  },
+
+  {
+    name: "spaces_get_content",
+    describe:
+      "Read one shared Content Studio card in full by content:<id> or exact title, including its complete brief, copy, media, owner, schedule, and publishing history.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      {
+        name: "content",
+        type: "string",
+        required: true,
+        describe: "content:<id> from spaces_list_content, or an exact card title.",
+      },
+    ],
+    async run(args, ctx) {
+      const resolved = await contentItem(str(args, "content"), ctx);
+      if (!resolved.item) {
+        return { ok: false, message: resolved.error ?? "Content item not found." };
+      }
+      const row = resolved.item;
+      const state = useStore.getState();
+      const project = state.projects.find((candidate) => candidate.id === row.project_id);
+      const agent = state.agents.find((candidate) => candidate.id === row.agent_id);
+      return {
+        ok: true,
+        message: [
+          `content:${row.id}`,
+          `# ${row.title}`,
+          `Stage: ${row.status}`,
+          `Project: ${project?.name || "No project"}`,
+          `Campaign: ${row.campaign || "—"}`,
+          `Platform: ${row.platform}`,
+          `Agent: ${agent?.name || "Unassigned"}`,
+          `Connection: ${row.connection_id || "Not selected"}`,
+          `Scheduled: ${
+            row.scheduled_at ? new Date(row.scheduled_at).toISOString() : "Not scheduled"
+          }`,
+          `Media: ${row.media_url || "None"}`,
+          `Published: ${row.published_url || "Not published"}`,
+          row.publish_error ? `Publish error: ${row.publish_error}` : "",
+          `\n## Brief\n${row.brief || "No brief yet."}`,
+          `\n## Copy\n${row.copy || "No copy yet."}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    },
+  },
+
+  {
+    name: "spaces_create_content",
+    describe:
+      "Add a complete idea or draft to the canonical shared Content Studio board. Put social ideas here with their full brief and copy instead of leaving them only in chat; teammates and other agents see the same card.",
+    effect: "auto",
+    params: [
+      { name: "title", type: "string", required: true, describe: "A specific working title." },
+      { name: "brief", type: "string", describe: "The full creative brief, angle, audience, goal, and constraints." },
+      { name: "copy", type: "string", describe: "Draft caption or post copy in full." },
+      { name: "campaign", type: "string", describe: "Campaign or series name." },
+      {
+        name: "platform",
+        type: "enum",
+        choices: ["instagram", "tiktok", "x", "linkedin", "youtube", "multi"],
+        describe: "Intended network; defaults to multi.",
+      },
+      {
+        name: "status",
+        type: "enum",
+        choices: ["idea", "drafting", "review"],
+        describe: "Board stage; defaults to idea.",
+      },
+      { name: "project", type: "string", describe: "Project name or id; defaults to the current project." },
+      { name: "media_url", type: "string", describe: "Existing public HTTPS media URL." },
+      {
+        name: "media_path",
+        type: "string",
+        describe: "Local media inside the project. Spaces uploads it to shared workspace storage and attaches it to the card.",
+      },
+    ],
+    async run(args, ctx) {
+      const title = str(args, "title");
+      if (!title) return { ok: false, message: "title is required" };
+      const projectId = projectOf(args, ctx);
+      let mediaUrl = "";
+      try {
+        mediaUrl = await resolvedContentMedia(args, ctx, projectId);
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : "Could not attach media.",
+        };
+      }
+      const status = str(args, "status");
+      const item = await createContentItem({
+        project_id: projectId,
+        campaign: str(args, "campaign"),
+        title,
+        brief: str(args, "brief"),
+        copy: str(args, "copy"),
+        platform: str(args, "platform") || "multi",
+        connection_id: "",
+        status:
+          status === "drafting" || status === "review" ? status : "idea",
+        scheduled_at: 0,
+        agent_id: ctx.agentId,
+        media_url: mediaUrl,
+      });
+      return {
+        ok: true,
+        message: `Added content:${item.id} — ${item.title} to ${item.status}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_update_content",
+    describe:
+      "Develop an existing shared Content Studio card: expand the brief, write or revise full copy, attach media, assign its project or platform, and move it through idea, drafting, review, or scheduled.",
+    effect: "auto",
+    params: [
+      {
+        name: "content",
+        type: "string",
+        required: true,
+        describe: "content:<id> from spaces_list_content, or an exact card title.",
+      },
+      { name: "title", type: "string", describe: "Replacement working title." },
+      { name: "brief", type: "string", describe: "Replacement full creative brief." },
+      { name: "copy", type: "string", describe: "Replacement caption or post copy in full." },
+      { name: "campaign", type: "string", describe: "Replacement campaign or series name." },
+      {
+        name: "platform",
+        type: "enum",
+        choices: ["instagram", "tiktok", "x", "linkedin", "youtube", "multi"],
+        describe: "Intended network.",
+      },
+      {
+        name: "status",
+        type: "enum",
+        choices: ["idea", "drafting", "review", "scheduled"],
+        describe: "Board stage. Published is set only by a confirmed publish.",
+      },
+      { name: "project", type: "string", describe: "Replacement project name or id." },
+      { name: "media_url", type: "string", describe: "Replacement public HTTPS media URL." },
+      {
+        name: "media_path",
+        type: "string",
+        describe: "Local media inside the project. Spaces uploads and attaches it.",
+      },
+      {
+        name: "scheduled_at",
+        type: "string",
+        describe: "ISO 8601 scheduled time, or an empty value to clear it.",
+      },
+    ],
+    async run(args, ctx) {
+      const resolved = await contentItem(str(args, "content"), ctx);
+      if (!resolved.item) {
+        return { ok: false, message: resolved.error ?? "Content item not found." };
+      }
+      const item = resolved.item;
+      const has = (key: string) => Object.prototype.hasOwnProperty.call(args, key);
+      const patch: Partial<
+        Pick<
+          ContentItem,
+          | "project_id"
+          | "campaign"
+          | "title"
+          | "brief"
+          | "copy"
+          | "platform"
+          | "status"
+          | "scheduled_at"
+          | "media_url"
+          | "agent_id"
+        >
+      > = {};
+      if (has("project")) patch.project_id = projectOf(args, ctx);
+      if (has("campaign")) patch.campaign = str(args, "campaign");
+      if (has("title")) patch.title = str(args, "title") || "Untitled";
+      if (has("brief")) patch.brief = str(args, "brief");
+      if (has("copy")) patch.copy = str(args, "copy");
+      if (has("platform")) patch.platform = str(args, "platform");
+      if (has("status")) {
+        const status = str(args, "status");
+        if (!["idea", "drafting", "review", "scheduled"].includes(status)) {
+          return { ok: false, message: "status must be idea, drafting, review, or scheduled" };
+        }
+        patch.status = status as ContentItem["status"];
+      }
+      if (has("scheduled_at")) {
+        const raw = str(args, "scheduled_at");
+        if (!raw) {
+          patch.scheduled_at = 0;
+        } else {
+          const stamp = Date.parse(raw);
+          if (!Number.isFinite(stamp)) {
+            return { ok: false, message: "scheduled_at must be a valid ISO 8601 timestamp" };
+          }
+          patch.scheduled_at = stamp;
+        }
+      }
+      if (has("media_url") || has("media_path")) {
+        try {
+          patch.media_url = await resolvedContentMedia(
+            args,
+            ctx,
+            patch.project_id ?? item.project_id,
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            message: error instanceof Error ? error.message : "Could not attach media.",
+          };
+        }
+      }
+      patch.agent_id = ctx.agentId || item.agent_id;
+      await patchContentItem(item.id, patch);
+      return {
+        ok: true,
+        message: `Updated content:${item.id} — ${patch.title ?? item.title}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_delete_content",
+    describe:
+      "Remove a duplicate or unwanted card from the shared Content Studio board. This waits for human approval because the brief, copy, media reference, and publish history are removed for everyone.",
     effect: "propose",
     params: [
+      {
+        name: "content",
+        type: "string",
+        required: true,
+        describe: "content:<id> from spaces_list_content, or an exact card title.",
+      },
+    ],
+    async run(args, ctx) {
+      const resolved = await contentItem(str(args, "content"), ctx);
+      if (!resolved.item) {
+        return { ok: false, message: resolved.error ?? "Content item not found." };
+      }
+      await deleteContentItem(resolved.item.id);
+      return {
+        ok: true,
+        message: `Deleted content:${resolved.item.id} — ${resolved.item.title}.`,
+      };
+    },
+  },
+
+  {
+    name: "spaces_publish_social",
+    describe:
+      "Publish an approved shared Content Studio card through a connected Instagram or TikTok account. Pass content:<id> whenever the work already exists on the board. This always waits for a human in Spaces before anything reaches the network.",
+    effect: "propose",
+    params: [
+      {
+        name: "content",
+        type: "string",
+        describe: "Existing content:<id> or exact title. Preferred over recreating board work inline.",
+      },
       {
         name: "platform",
         type: "enum",
         choices: ["instagram", "tiktok"],
-        required: true,
-        describe: "The network to publish to.",
+        describe: "The network to publish to; defaults to the existing card.",
       },
       {
         name: "copy",
         type: "string",
-        required: true,
-        describe: "The final caption or post copy.",
+        describe: "Final caption or post copy; defaults to the existing card.",
       },
       {
         name: "media_url",
@@ -903,108 +1320,93 @@ export const OPERATIONS: Operation[] = [
       },
     ],
     async run(args, ctx) {
-      const platform = str(args, "platform") as "instagram" | "tiktok";
+      const existingRef = str(args, "content");
+      const existing = existingRef
+        ? await contentItem(existingRef, ctx)
+        : { item: undefined, error: undefined };
+      if (existingRef && !existing.item) {
+        return { ok: false, message: existing.error ?? "Content item not found." };
+      }
+      const platform = (str(args, "platform") ||
+        existing.item?.platform ||
+        "") as "instagram" | "tiktok";
       if (platform !== "instagram" && platform !== "tiktok") {
         return { ok: false, message: "platform must be instagram or tiktok" };
       }
-      const copy = str(args, "copy");
-      let mediaUrl = str(args, "media_url");
-      const mediaPath = str(args, "media_path");
-      if (!copy || (!mediaUrl && !mediaPath)) {
-        return { ok: false, message: "copy and either media_url or media_path are required" };
-      }
-      const projectId = projectOf(args, ctx);
-      if (mediaPath && !mediaUrl) {
-        const state = useStore.getState();
-        const project = state.projects.find((row) => row.id === projectId);
-        if (!project?.local_path) {
-          return {
-            ok: false,
-            message:
-              "media_path needs a project with a local folder. Link the project folder in Spaces or provide media_url.",
-          };
-        }
-        const agent = state.agents.find((row) => row.id === ctx.agentId);
-        const allowedRoots = [
-          ...(project.isolate && agent ? [worktreePath(project, agent)] : []),
-          project.local_path,
-        ];
-        const isAbsolute =
-          mediaPath.startsWith("/") ||
-          /^[a-zA-Z]:[\\/]/.test(mediaPath) ||
-          mediaPath.startsWith("\\\\");
-        const normalizePath = (value: string) =>
-          value.replace(/\\/g, "/").replace(/\/+$/, "");
-        const normalizedMedia = normalizePath(mediaPath);
-        const allowedRoot = isAbsolute
-          ? allowedRoots.find((root) => {
-              const normalizedRoot = normalizePath(root);
-              return (
-                normalizedMedia === normalizedRoot ||
-                normalizedMedia.startsWith(`${normalizedRoot}/`)
-              );
-            }) ?? project.local_path
-          : allowedRoots[0];
-        const absolute =
-          isAbsolute
-            ? mediaPath
-            : `${allowedRoot.replace(/[\\/]$/, "")}${
-                allowedRoot.includes("\\") ? "\\" : "/"
-              }${mediaPath}`;
-        try {
-          mediaUrl = await uploadContentMedia(
-            absolute,
-            projectId,
-            allowedRoot,
-          );
-        } catch (error) {
-          return {
-            ok: false,
-            message:
-              error instanceof Error ? error.message : "Spaces could not upload the media file.",
-          };
-        }
-      }
-      let parsedMedia: URL;
+      const copy = str(args, "copy") || existing.item?.copy || "";
+      const projectId = str(args, "project")
+        ? projectOf(args, ctx)
+        : existing.item?.project_id || ctx.projectId;
+      let mediaUrl = "";
       try {
-        parsedMedia = new URL(mediaUrl);
-      } catch {
-        return { ok: false, message: "media_url must be a valid public HTTPS URL" };
+        mediaUrl = await resolvedContentMedia(
+          args,
+          ctx,
+          projectId,
+          existing.item?.media_url || "",
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : "Spaces could not attach the media file.",
+        };
       }
-      if (parsedMedia.protocol !== "https:") {
-        return { ok: false, message: "media_url must use HTTPS" };
+      if (!copy || !mediaUrl) {
+        return { ok: false, message: "copy and either media_url or media_path are required" };
       }
 
       const selected = socialAccount(
         await listIntegrationAccounts(),
         platform,
         projectId,
-        str(args, "account"),
+        str(args, "account") || existing.item?.connection_id || "",
       );
       if (!selected.account) {
         return { ok: false, message: selected.error ?? "No publishing account is available." };
       }
 
-      const item = await createContentItem({
-        project_id: projectId,
-        campaign: "",
-        title: str(args, "title") || copy.split("\n")[0].slice(0, 120) || `${platform} post`,
-        brief: `Proposed by ${useStore.getState().agents.find((agent) => agent.id === ctx.agentId)?.name ?? "an agent"}`,
-        copy,
-        platform,
-        connection_id: socialConnectionId(selected.account),
-        status: "review",
-        scheduled_at: 0,
-        agent_id: ctx.agentId,
-        media_url: parsedMedia.toString(),
-      });
+      let item: ContentItem;
+      const nextTitle =
+        str(args, "title") ||
+        existing.item?.title ||
+        copy.split("\n")[0].slice(0, 120) ||
+        `${platform} post`;
+      if (existing.item) {
+        const patch = {
+          project_id: projectId,
+          title: nextTitle,
+          copy,
+          platform,
+          connection_id: socialConnectionId(selected.account),
+          status: "review" as const,
+          agent_id: ctx.agentId || existing.item.agent_id,
+          media_url: mediaUrl,
+          publish_error: "",
+        };
+        await patchContentItem(existing.item.id, patch);
+        item = { ...existing.item, ...patch, updated_at: Date.now() };
+      } else {
+        item = await createContentItem({
+          project_id: projectId,
+          campaign: "",
+          title: nextTitle,
+          brief: `Proposed by ${useStore.getState().agents.find((agent) => agent.id === ctx.agentId)?.name ?? "an agent"}`,
+          copy,
+          platform,
+          connection_id: socialConnectionId(selected.account),
+          status: "review",
+          scheduled_at: 0,
+          agent_id: ctx.agentId,
+          media_url: mediaUrl,
+        });
+      }
       const result = await publishContentItem(item);
       return {
         ok: true,
         message:
           result.state === "published"
-            ? `Published ${item.title}${result.url ? ` — ${result.url}` : ""}`
-            : `${platform} accepted ${item.title} and is processing it (${result.externalId})`,
+            ? `Published content:${item.id} — ${item.title}${result.url ? ` — ${result.url}` : ""}`
+            : `${platform} accepted content:${item.id} — ${item.title} and is processing it (${result.externalId})`,
       };
     },
   },

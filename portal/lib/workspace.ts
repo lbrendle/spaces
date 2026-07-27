@@ -21,6 +21,7 @@ import type {
   AgentProfile,
   Channel,
   Connection,
+  ContentItem,
   Decision,
   DesktopSnapshot,
   Device,
@@ -666,6 +667,7 @@ async function loadWorkspaceSnapshotForContext(
     knowledgePages: sharedContent.knowledgePages,
     calendars: sharedContent.calendars,
     calendarEvents: sharedContent.calendarEvents,
+    contentItems: sharedContent.contentItems,
     inbox,
     projects: projects.map((project) => ({
       ...project,
@@ -930,6 +932,261 @@ export async function mutateWorkspace(
       "issue.moved",
       `Moved “${issue.title}” to ${status.replace("_", " ")}`,
       issueId,
+    );
+    return { ok: true };
+  }
+
+  if (actionName === "create_content") {
+    await requireRole(context, ["owner", "admin", "member"]);
+    const title = text(input.title, 300) || "Untitled";
+    const projectId = text(input.projectId, 180);
+    if (
+      projectId &&
+      !(await first(
+        "SELECT 1 AS ok FROM projects WHERE workspace_id = ? AND id = ?",
+        context.workspace.id,
+        projectId,
+      ))
+    ) {
+      throw new Error("Choose a project in this workspace.");
+    }
+    const connectionId = text(input.connectionId, 180);
+    if (
+      connectionId &&
+      !(await first(
+        `SELECT 1 AS ok FROM connections
+          WHERE workspace_id = ? AND id = ?
+            AND kind IN ('meta', 'tiktok', 'x')`,
+        context.workspace.id,
+        connectionId,
+      ))
+    ) {
+      throw new Error("Choose a connected social account in this workspace.");
+    }
+    const agentId = text(input.agentId, 180);
+    if (
+      agentId &&
+      !(await first(
+        "SELECT 1 AS ok FROM agent_profiles WHERE workspace_id = ? AND id = ?",
+        context.workspace.id,
+        agentId,
+      ))
+    ) {
+      throw new Error("Choose an agent in this workspace.");
+    }
+    const contentId = id("content");
+    await run(
+      `INSERT INTO content_items
+        (id, workspace_id, project_id, campaign, title, brief, copy, platform,
+         connection_id, status, scheduled_at, published_url, media_url,
+         publish_error, agent_id, created_by, source_device_id,
+         source_content_id, created_at, updated_at, revision)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, ?, 0)`,
+      contentId,
+      context.workspace.id,
+      projectId || null,
+      text(input.campaign, 240),
+      title,
+      typeof input.brief === "string" ? input.brief.slice(0, 12_000) : "",
+      typeof input.copy === "string" ? input.copy.slice(0, 30_000) : "",
+      oneOf(
+        input.platform,
+        ["instagram", "tiktok", "x", "linkedin", "youtube", "multi"] as const,
+        "multi",
+      ),
+      connectionId,
+      oneOf(
+        input.status,
+        ["idea", "drafting", "review", "scheduled", "published"] as const,
+        "idea",
+      ),
+      Math.max(0, Number(input.scheduledAt) || 0),
+      text(input.publishedUrl, 2_000),
+      text(input.mediaUrl, 2_000),
+      agentId,
+      context.user.id,
+      contentId,
+      createdAt,
+      createdAt,
+    );
+    await activity(
+      context.workspace.id,
+      context.user.id,
+      "content.created",
+      `Added “${title}” to Content Studio`,
+      contentId,
+    );
+    await run(
+      "UPDATE content_items SET revision = ? WHERE id = ? AND workspace_id = ?",
+      await workspaceRevision(context.workspace.id),
+      contentId,
+      context.workspace.id,
+    );
+    return { ok: true };
+  }
+
+  if (actionName === "update_content") {
+    await requireRole(context, ["owner", "admin", "member"]);
+    const contentId = text(input.contentId, 180);
+    const existing = await first<ContentItem>(
+      `SELECT id, COALESCE(project_id, '') AS projectId, campaign, title, brief,
+              copy, platform, connection_id AS connectionId, status,
+              scheduled_at AS scheduledAt, published_url AS publishedUrl,
+              media_url AS mediaUrl, publish_error AS publishError,
+              agent_id AS agentId, created_by AS createdBy,
+              source_device_id AS sourceDeviceId,
+              source_content_id AS sourceContentId,
+              created_at AS createdAt, updated_at AS updatedAt, revision
+         FROM content_items
+        WHERE workspace_id = ? AND id = ?`,
+      context.workspace.id,
+      contentId,
+    );
+    if (!existing) throw new Error("Content item not found.");
+    const has = (key: string) =>
+      Object.prototype.hasOwnProperty.call(input, key);
+    const projectId = has("projectId")
+      ? text(input.projectId, 180)
+      : existing.projectId;
+    if (
+      projectId &&
+      !(await first(
+        "SELECT 1 AS ok FROM projects WHERE workspace_id = ? AND id = ?",
+        context.workspace.id,
+        projectId,
+      ))
+    ) {
+      throw new Error("Choose a project in this workspace.");
+    }
+    const connectionId = has("connectionId")
+      ? text(input.connectionId, 180)
+      : existing.connectionId;
+    if (
+      connectionId &&
+      !(await first(
+        `SELECT 1 AS ok FROM connections
+          WHERE workspace_id = ? AND id = ?
+            AND kind IN ('meta', 'tiktok', 'x')`,
+        context.workspace.id,
+        connectionId,
+      ))
+    ) {
+      throw new Error("Choose a connected social account in this workspace.");
+    }
+    const agentId = has("agentId")
+      ? text(input.agentId, 180)
+      : existing.agentId;
+    if (
+      agentId &&
+      !(await first(
+        "SELECT 1 AS ok FROM agent_profiles WHERE workspace_id = ? AND id = ?",
+        context.workspace.id,
+        agentId,
+      ))
+    ) {
+      throw new Error("Choose an agent in this workspace.");
+    }
+    const title = has("title")
+      ? text(input.title, 300) || "Untitled"
+      : existing.title;
+    await run(
+      `UPDATE content_items
+          SET project_id = ?, campaign = ?, title = ?, brief = ?, copy = ?,
+              platform = ?, connection_id = ?, status = ?, scheduled_at = ?,
+              published_url = ?, media_url = ?, publish_error = ?,
+              agent_id = ?, updated_at = ?
+        WHERE workspace_id = ? AND id = ?`,
+      projectId || null,
+      has("campaign") ? text(input.campaign, 240) : existing.campaign,
+      title,
+      has("brief") && typeof input.brief === "string"
+        ? input.brief.slice(0, 12_000)
+        : existing.brief,
+      has("copy") && typeof input.copy === "string"
+        ? input.copy.slice(0, 30_000)
+        : existing.copy,
+      has("platform")
+        ? oneOf(
+            input.platform,
+            ["instagram", "tiktok", "x", "linkedin", "youtube", "multi"] as const,
+            existing.platform,
+          )
+        : existing.platform,
+      connectionId,
+      has("status")
+        ? oneOf(
+            input.status,
+            ["idea", "drafting", "review", "scheduled", "published"] as const,
+            existing.status,
+          )
+        : existing.status,
+      has("scheduledAt")
+        ? Math.max(0, Number(input.scheduledAt) || 0)
+        : existing.scheduledAt,
+      has("publishedUrl")
+        ? text(input.publishedUrl, 2_000)
+        : existing.publishedUrl,
+      has("mediaUrl") ? text(input.mediaUrl, 2_000) : existing.mediaUrl,
+      has("publishError") && typeof input.publishError === "string"
+        ? input.publishError.slice(0, 4_000)
+        : existing.publishError,
+      agentId,
+      createdAt,
+      context.workspace.id,
+      contentId,
+    );
+    await activity(
+      context.workspace.id,
+      context.user.id,
+      "content.updated",
+      `Updated “${title}”`,
+      contentId,
+    );
+    await run(
+      "UPDATE content_items SET revision = ? WHERE id = ? AND workspace_id = ?",
+      await workspaceRevision(context.workspace.id),
+      contentId,
+      context.workspace.id,
+    );
+    return { ok: true };
+  }
+
+  if (actionName === "delete_content") {
+    await requireRole(context, ["owner", "admin", "member"]);
+    const contentId = text(input.contentId, 180);
+    const item = await first<{ title: string }>(
+      "SELECT title FROM content_items WHERE workspace_id = ? AND id = ?",
+      context.workspace.id,
+      contentId,
+    );
+    if (!item) throw new Error("Content item not found.");
+    await run(
+      "DELETE FROM content_items WHERE workspace_id = ? AND id = ?",
+      context.workspace.id,
+      contentId,
+    );
+    await activity(
+      context.workspace.id,
+      context.user.id,
+      "content.deleted",
+      `Deleted “${item.title}”`,
+      contentId,
+    );
+    const revision = await workspaceRevision(context.workspace.id);
+    await run(
+      `INSERT INTO content_tombstones
+        (id, workspace_id, entity, entity_id, created_by, revision, created_at)
+       VALUES (?, ?, 'content_item', ?, ?, ?, ?)
+       ON CONFLICT(workspace_id, entity, entity_id) DO UPDATE SET
+         created_by = excluded.created_by,
+         revision = excluded.revision,
+         created_at = excluded.created_at`,
+      id("tomb"),
+      context.workspace.id,
+      contentId,
+      context.user.id,
+      revision,
+      createdAt,
     );
     return { ok: true };
   }
@@ -1207,6 +1464,11 @@ export async function mutateWorkspace(
       db()
         .prepare("DELETE FROM project_connections WHERE workspace_id = ? AND project_id = ?")
         .bind(context.workspace.id, projectId),
+      db()
+        .prepare(
+          "UPDATE content_items SET project_id = NULL, updated_at = ? WHERE workspace_id = ? AND project_id = ?",
+        )
+        .bind(createdAt, context.workspace.id, projectId),
       db()
         .prepare("DELETE FROM project_sources WHERE workspace_id = ? AND project_id = ?")
         .bind(context.workspace.id, projectId),
@@ -3636,6 +3898,7 @@ export async function syncDevice(token: string, payload: unknown) {
     knowledgePages: sharedContent.knowledgePages,
     calendars: sharedContent.calendars,
     calendarEvents: sharedContent.calendarEvents,
+    contentItems: sharedContent.contentItems,
     contentRevision: sharedContent.contentRevision,
     connections: visibleConnections(
       connections,

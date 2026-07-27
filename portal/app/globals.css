@@ -1839,6 +1839,204 @@ kbd {
   line-height: 1.35;
 }
 
+.content-studio-surface {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.content-studio-surface.editor-open {
+  grid-template-columns: minmax(680px, 1fr) minmax(320px, 390px);
+}
+
+.content-studio-main {
+  min-width: 0;
+}
+
+.content-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.content-board {
+  grid-template-columns: repeat(5, minmax(230px, 1fr));
+}
+
+.content-column {
+  min-width: 230px;
+}
+
+.content-card {
+  overflow: hidden;
+  outline: none;
+}
+
+.content-card:hover,
+.content-card:focus-visible,
+.content-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.content-card-media {
+  width: calc(100% + 22px);
+  height: 132px;
+  margin: -11px -11px 10px;
+  display: block;
+  object-fit: cover;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.content-platform {
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  font-weight: 720;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.content-card blockquote {
+  max-height: 76px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.content-card footer small {
+  min-width: 0;
+  margin-left: 7px;
+  overflow: hidden;
+  color: var(--ink-4);
+  font-family: var(--mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-error {
+  margin-left: auto;
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.content-empty {
+  width: 100%;
+  border: 0;
+  cursor: pointer;
+}
+
+.content-empty:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.content-editor {
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 118px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.content-editor form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 17px;
+}
+
+.content-editor form > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.content-editor h2 {
+  margin: 3px 0 0;
+  font-size: 17px;
+  letter-spacing: -0.025em;
+}
+
+.content-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.content-editor label > span {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.content-editor input,
+.content-editor select,
+.content-editor textarea {
+  width: 100%;
+}
+
+.content-editor textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.content-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.content-editor form > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.content-editor form > footer .danger-button {
+  margin-right: auto;
+}
+
+.content-editor-error {
+  padding: 10px;
+  border: 1px solid var(--red);
+  border-radius: 9px;
+  color: var(--red);
+  background: var(--red-soft);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.content-published-link {
+  color: var(--accent);
+  font-size: 10px;
+}
+
 .issue-card p {
   display: -webkit-box;
   margin: 0;
@@ -4037,6 +4235,17 @@ kbd {
 }
 
 @media (max-width: 1100px) {
+  .content-studio-surface.editor-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .content-editor {
+    position: relative;
+    top: auto;
+    max-height: none;
+    grid-row: 1;
+  }
+
   .today-grid {
     grid-template-columns: 1fr;
   }

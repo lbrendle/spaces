@@ -14,6 +14,7 @@ import {
   buildSharedPortalPayload,
   type RemoteCalendar,
   type RemoteCalendarEvent,
+  type RemoteContentItem,
   type RemoteKnowledgePage,
   type RemoteTombstone,
   type SharedSyncAck,
@@ -670,6 +671,7 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       knowledgePages?: RemoteKnowledgePage[];
       calendars?: RemoteCalendar[];
       calendarEvents?: RemoteCalendarEvent[];
+      contentItems?: RemoteContentItem[];
       contentRevision?: number;
       memberAcks?: Array<{
         portalUserId: string;
@@ -1076,6 +1078,7 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       body.knowledgePages ?? [],
       body.calendars ?? [],
       body.calendarEvents ?? [],
+      body.contentItems ?? [],
       body.contentRevision ?? connection.content_revision ?? 0,
     );
     await deliverCalendarCommands(connection);

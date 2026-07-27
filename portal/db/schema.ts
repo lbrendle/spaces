@@ -526,6 +526,48 @@ export const mediaAssets = sqliteTable(
   ],
 );
 
+export const contentItems = sqliteTable(
+  "content_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    projectId: text("project_id"),
+    campaign: text("campaign").notNull().default(""),
+    title: text("title").notNull(),
+    brief: text("brief").notNull().default(""),
+    copy: text("copy").notNull().default(""),
+    platform: text("platform").notNull().default("multi"),
+    connectionId: text("connection_id").notNull().default(""),
+    status: text("status").notNull().default("idea"),
+    scheduledAt: integer("scheduled_at").notNull().default(0),
+    publishedUrl: text("published_url").notNull().default(""),
+    mediaUrl: text("media_url").notNull().default(""),
+    publishError: text("publish_error").notNull().default(""),
+    agentId: text("agent_id").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    sourceDeviceId: text("source_device_id").notNull().default(""),
+    sourceContentId: text("source_content_id").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    revision: integer("revision").notNull().default(0),
+  },
+  (table) => [
+    index("content_items_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("content_items_project_idx").on(
+      table.workspaceId,
+      table.projectId,
+      table.updatedAt,
+    ),
+    uniqueIndex("content_items_source_idx")
+      .on(table.workspaceId, table.sourceDeviceId, table.sourceContentId)
+      .where(sql`${table.sourceContentId} <> ''`),
+  ],
+);
+
 export const cycles = sqliteTable(
   "cycles",
   {

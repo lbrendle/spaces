@@ -144,6 +144,36 @@ export interface SharedCalendarEvent {
   updatedAt: string;
 }
 
+export type ContentStatus =
+  | "idea"
+  | "drafting"
+  | "review"
+  | "scheduled"
+  | "published";
+
+export interface ContentItem {
+  id: string;
+  projectId: string;
+  campaign: string;
+  title: string;
+  brief: string;
+  copy: string;
+  platform: string;
+  connectionId: string;
+  status: ContentStatus;
+  scheduledAt: number;
+  publishedUrl: string;
+  mediaUrl: string;
+  publishError: string;
+  agentId: string;
+  createdBy: string;
+  sourceDeviceId: string;
+  sourceContentId: string;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+}
+
 export interface InboxItem {
   id: string;
   subject: string;
@@ -266,6 +296,7 @@ export interface WorkspaceSnapshot {
   knowledgePages: KnowledgePage[];
   calendars: SharedCalendar[];
   calendarEvents: SharedCalendarEvent[];
+  contentItems: ContentItem[];
   inbox: InboxItem[];
   projects: Project[];
   agents: AgentProfile[];

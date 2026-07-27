@@ -18,7 +18,7 @@
 ![Spaces — a local-first operating system for people and AI agents](./portal/public/og.png)
 
 <p align="center">
-  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.8-universal.dmg"><strong>Download for Mac</strong></a>
+  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.9-universal.dmg"><strong>Download for Mac</strong></a>
   ·
   <a href="./docs/OPEN_SOURCE_INVENTORY.md">Feature inventory</a>
   ·
@@ -96,18 +96,22 @@ member's Mac                         shared control plane
 ```
 
 Shared projects, channels, issues, workspace-visible Knowledge, team calendars,
-agent profiles, device presence, and bounded remote jobs persist in D1 and
-reconcile across paired devices. Repositories, live terminal streams, browser
-history, full transcripts, local GitHub credentials, and private notes do not
-cross the control plane during ordinary sync.
+Content Studio cards and media references, agent profiles, device presence, and
+bounded remote jobs persist in D1 and reconcile across paired devices.
+Repositories, live terminal streams, browser history, full transcripts, local
+GitHub credentials, and private notes do not cross the control plane during
+ordinary sync.
 
 ## Agents have native workspace tools
 
 Spaces generates a dependency-free MCP server and human-readable `.hq/`
 contract inside each linked project. Agents can search/read workspace state,
-cite Knowledge, create and update work, post to channels, schedule events,
-record memory, link entities, and propose external publishing through the same
-permission and approval paths as the UI.
+cite Knowledge, create and fully develop shared Content Studio cards, create and
+update work, post to channels, schedule events, record memory, link entities,
+and propose external publishing through the same permission and approval paths
+as the UI. Ideas, briefs, copy, assets, review state, selected accounts, and
+publish results remain on one canonical card rather than disappearing into an
+agent chat.
 
 Each spawned harness receives explicit run, agent, channel, and project
 identity. Additive actions apply automatically; destructive, reassignment, and

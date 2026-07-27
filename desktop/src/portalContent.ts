@@ -11,7 +11,7 @@ import type {
   Vault,
   VaultFile,
 } from "./types";
-import type { DocumentRecord } from "./operations";
+import type { ContentItem, DocumentRecord } from "./operations";
 
 interface ConnectionIdentity {
   device_id: string;
@@ -27,7 +27,13 @@ interface SyncStateRow {
 }
 
 export interface SharedSyncAck {
-  entity: "document" | "vault" | "vault_file" | "calendar" | "event";
+  entity:
+    | "document"
+    | "vault"
+    | "vault_file"
+    | "calendar"
+    | "event"
+    | "content_item";
   sourceId: string;
   remoteId: string;
   fingerprint: string;
@@ -93,6 +99,29 @@ export interface RemoteCalendarEvent {
   updatedAt: string;
 }
 
+export interface RemoteContentItem {
+  id: string;
+  projectId: string;
+  campaign: string;
+  title: string;
+  brief: string;
+  copy: string;
+  platform: string;
+  connectionId: string;
+  status: ContentItem["status"];
+  scheduledAt: number;
+  publishedUrl: string;
+  mediaUrl: string;
+  publishError: string;
+  agentId: string;
+  createdBy: string;
+  sourceDeviceId: string;
+  sourceContentId: string;
+  createdAt: string;
+  updatedAt: string;
+  revision: number;
+}
+
 export interface RemoteTombstone {
   entity:
     | "document"
@@ -103,7 +132,8 @@ export interface RemoteTombstone {
     | "project"
     | "project_source"
     | "channel"
-    | "task";
+    | "task"
+    | "content_item";
   entityId: string;
   revision: number;
 }
@@ -164,6 +194,30 @@ interface EventRecord {
   updatedAt?: number;
 }
 
+interface ContentItemRecord {
+  sourceId: string;
+  remoteId: string;
+  fingerprint: string;
+  deleted?: boolean;
+  projectId?: string;
+  projectPortalId?: string;
+  campaign?: string;
+  title?: string;
+  brief?: string;
+  copy?: string;
+  platform?: string;
+  connectionId?: string;
+  status?: ContentItem["status"];
+  scheduledAt?: number;
+  publishedUrl?: string;
+  mediaUrl?: string;
+  publishError?: string;
+  agentId?: string;
+  agentPortalId?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 interface SharedAccess {
   subjectType: "member" | "team" | "agent";
   subjectId: string;
@@ -182,6 +236,7 @@ export interface SharedPortalPayload {
   knowledgeRecords: KnowledgeRecord[];
   calendarRecords: CalendarRecord[];
   calendarEventRecords: EventRecord[];
+  contentItemRecords: ContentItemRecord[];
 }
 
 const MIRROR_TABLE = {
@@ -190,6 +245,7 @@ const MIRROR_TABLE = {
   vault_file: "vault_files",
   calendar: "calendars",
   event: "events",
+  content_item: "content_items",
 } as const;
 
 function syncKey(entity: string, localId: string): string {
@@ -227,7 +283,7 @@ function parseTags(value: string): string[] {
 }
 
 async function remoteIdFor(
-  entity: "agent" | "team",
+  entity: "agent" | "team" | "project" | "content_item",
   localId: string,
 ): Promise<string> {
   const db = await getDb();
@@ -307,6 +363,7 @@ export async function buildSharedPortalPayload(
     teamMembers,
     mirrorRows,
     accounts,
+    contentItems,
   ] = await Promise.all([
     db.select<SyncStateRow[]>("SELECT * FROM portal_sync_state"),
     db.select<DocumentRecord[]>("SELECT * FROM documents ORDER BY updated_at DESC"),
@@ -328,10 +385,13 @@ export async function buildSharedPortalPayload(
     db.select<Team[]>("SELECT * FROM teams"),
     db.select<TeamMember[]>("SELECT * FROM team_members"),
     db.select<Array<{ entity: string; local_id: string }>>(
-      "SELECT entity, local_id FROM portal_links WHERE entity IN ('team','document','vault','vault_file','calendar','event')",
+      "SELECT entity, local_id FROM portal_links WHERE entity IN ('team','document','vault','vault_file','calendar','event','content_item')",
     ),
     db.select<Array<{ id: string; provider: string }>>(
       "SELECT id, provider FROM calendar_accounts",
+    ),
+    db.select<ContentItem[]>(
+      "SELECT * FROM content_items ORDER BY updated_at DESC",
     ),
   ]);
   const states = new Map(stateRows.map((row) => [syncKey(row.entity, row.local_id), row]));
@@ -562,12 +622,60 @@ export async function buildSharedPortalPayload(
     });
   }
 
+  const contentItemRecords: ContentItemRecord[] = [];
+  const aliveContent = new Set<string>();
+  for (const item of contentItems) {
+    aliveContent.add(item.id);
+    const recordBase = {
+      projectId: item.project_id,
+      projectPortalId: item.project_id
+        ? await remoteIdFor("project", item.project_id)
+        : "",
+      campaign: item.campaign,
+      title: item.title,
+      brief: item.brief,
+      copy: item.copy,
+      platform: item.platform,
+      connectionId: item.connection_id,
+      status: item.status,
+      scheduledAt: item.scheduled_at,
+      publishedUrl: item.published_url,
+      mediaUrl: item.media_url,
+      publishError: item.publish_error,
+      agentId: item.agent_id,
+      agentPortalId: item.agent_id
+        ? await remoteIdFor("agent", item.agent_id)
+        : "",
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    };
+    const fingerprint = stable(recordBase);
+    if (!changed(states, "content_item", item.id, fingerprint)) continue;
+    contentItemRecords.push({
+      sourceId: item.id,
+      remoteId: await remoteIdFor("content_item", item.id),
+      fingerprint,
+      ...recordBase,
+    });
+  }
+  for (const state of stateRows) {
+    if (state.entity !== "content_item") continue;
+    if (aliveContent.has(state.local_id) || state.fingerprint === "deleted") continue;
+    contentItemRecords.push({
+      sourceId: state.local_id,
+      remoteId: state.remote_id,
+      fingerprint: "deleted",
+      deleted: true,
+    });
+  }
+
   return {
     contentRevision: connection.content_revision ?? 0,
     teamProfiles,
     knowledgeRecords: knowledgeRecords.slice(0, 250),
     calendarRecords: calendarRecords.slice(0, 100),
     calendarEventRecords: calendarEventRecords.slice(0, 500),
+    contentItemRecords: contentItemRecords.slice(0, 500),
   };
 }
 
@@ -790,6 +898,12 @@ async function removeRemoteMirror(tombstone: RemoteTombstone): Promise<void> {
       [localId],
     );
     await db.execute("DELETE FROM tasks WHERE id = $1", [localId]);
+  } else if (tombstone.entity === "content_item") {
+    await db.execute("DELETE FROM content_items WHERE id = $1", [localId]);
+    await db.execute(
+      "DELETE FROM portal_sync_state WHERE entity = 'content_item' AND local_id = $1",
+      [localId],
+    );
   }
 
   // A tombstone is authoritative server state, not a user deleting a mirror
@@ -810,6 +924,7 @@ export async function applySharedPortalResponse(
   pages: RemoteKnowledgePage[],
   calendars: RemoteCalendar[],
   events: RemoteCalendarEvent[],
+  contentItems: RemoteContentItem[],
   contentRevision: number,
 ): Promise<void> {
   const db = await getDb();
@@ -1036,8 +1151,101 @@ export async function applySharedPortalResponse(
     );
   }
 
+  for (const item of contentItems) {
+    const contentId = await resolveMirror("content_item", item.id);
+    if (!contentId) continue;
+    const project = item.projectId
+      ? await db.select<Array<{ local_id: string }>>(
+          "SELECT local_id FROM portal_links WHERE entity = 'project' AND remote_id = $1 LIMIT 1",
+          [item.projectId],
+        )
+      : [];
+    const agent = item.agentId
+      ? await db.select<Array<{ local_id: string }>>(
+          "SELECT local_id FROM portal_links WHERE entity = 'agent' AND remote_id = $1 LIMIT 1",
+          [item.agentId],
+        )
+      : [];
+    const createdAt = Number.isFinite(Date.parse(item.createdAt))
+      ? Date.parse(item.createdAt)
+      : now();
+    const updatedAt = Number.isFinite(Date.parse(item.updatedAt))
+      ? Date.parse(item.updatedAt)
+      : now();
+    await db.execute(
+      `INSERT INTO content_items
+        (id, project_id, campaign, title, brief, copy, platform, status,
+         connection_id, scheduled_at, published_url, agent_id, media_url,
+         publish_error, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+       ON CONFLICT(id) DO UPDATE SET
+         project_id=excluded.project_id,
+         campaign=excluded.campaign,
+         title=excluded.title,
+         brief=excluded.brief,
+         copy=excluded.copy,
+         platform=excluded.platform,
+         status=excluded.status,
+         connection_id=excluded.connection_id,
+         scheduled_at=excluded.scheduled_at,
+         published_url=excluded.published_url,
+         agent_id=excluded.agent_id,
+         media_url=excluded.media_url,
+         publish_error=excluded.publish_error,
+         updated_at=excluded.updated_at`,
+      [
+        contentId,
+        project[0]?.local_id ?? "",
+        item.campaign,
+        item.title,
+        item.brief,
+        item.copy,
+        item.platform,
+        item.status,
+        item.connectionId,
+        Number(item.scheduledAt) || 0,
+        item.publishedUrl,
+        agent[0]?.local_id ?? "",
+        item.mediaUrl,
+        item.publishError,
+        createdAt,
+        updatedAt,
+      ],
+    );
+    const fingerprint = stable({
+      projectId: project[0]?.local_id ?? "",
+      projectPortalId: item.projectId,
+      campaign: item.campaign,
+      title: item.title,
+      brief: item.brief,
+      copy: item.copy,
+      platform: item.platform,
+      connectionId: item.connectionId,
+      status: item.status,
+      scheduledAt: Number(item.scheduledAt) || 0,
+      publishedUrl: item.publishedUrl,
+      mediaUrl: item.mediaUrl,
+      publishError: item.publishError,
+      agentId: agent[0]?.local_id ?? "",
+      agentPortalId: item.agentId,
+      createdAt,
+      updatedAt,
+    });
+    await db.execute(
+      `INSERT INTO portal_sync_state
+        (entity, local_id, remote_id, fingerprint, synced_at)
+       VALUES ('content_item',$1,$2,$3,$4)
+       ON CONFLICT(entity, local_id) DO UPDATE SET
+         remote_id=excluded.remote_id,
+         fingerprint=excluded.fingerprint,
+         synced_at=excluded.synced_at`,
+      [contentId, item.id, fingerprint, now()],
+    );
+  }
+
   await db.execute(
     "UPDATE portal_connection SET content_revision = $1 WHERE id = 1",
     [contentRevision],
   );
+  window.dispatchEvent(new CustomEvent("hq:content-change"));
 }
