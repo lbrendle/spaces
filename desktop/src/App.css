@@ -1381,8 +1381,22 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 /* The composer box IS the field — the textarea inside it keeps no chrome of
    its own, so it keeps no recess either. */
 .composer textarea {
-  border: none; background: none; padding: var(--space-1) var(--space-2);
+  border: none; background: none;
+  /*
+   * No horizontal inset: the box around this IS the field, which is why the
+   * textarea carries no border and no fill. Keeping 8px of its own padding put
+   * the sentence you type 50px in from the composer's edge while the emoji
+   * button beside it sat on that edge — the same fault the dashboard launcher
+   * had, in the control it was copied from.
+   */
+  padding: var(--space-1) 0;
   --field-recess: none;
+  /*
+   * The composer grows with its content; a native grabber here drew a stray
+   * diagonal artifact inside the field and let the box be dragged to a height
+   * the layout does not survive.
+   */
+  resize: none;
 }
 .composer textarea:focus-visible { outline: none; }
 /* Both of these belong to the composer, not to the pane, so they follow it onto
