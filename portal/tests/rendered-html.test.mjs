@@ -155,7 +155,7 @@ test("starter preview is removed and product metadata is present", async () => {
   assert.match(page, /requireChatGPTUser/);
   assert.match(layout, /your company in one place/i);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.match(app, /Spaces-0\.1\.18-universal\.dmg/);
+  assert.match(app, /Spaces-0\.1\.19-universal\.dmg/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
 

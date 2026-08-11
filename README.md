@@ -18,7 +18,7 @@
 ![Spaces — a local-first operating system for people and AI agents](./portal/public/og.png)
 
 <p align="center">
-  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.18-universal.dmg"><strong>Download for Mac</strong></a>
+  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.19-universal.dmg"><strong>Download for Mac</strong></a>
   ·
   <a href="./docs/OPEN_SOURCE_INVENTORY.md">Feature inventory</a>
   ·
