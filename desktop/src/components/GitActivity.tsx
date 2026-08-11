@@ -793,10 +793,10 @@ export function GitActivity() {
       <div className="pane-header">
         <div>
           <div className="pane-title">Git activity</div>
-          <div className="pane-sub">
-            What changed, who changed it, and whether it has landed. Read-only; commit, push and
-            merge live in Workspaces.
-          </div>
+          {/* The first clause described the table directly beneath it, column
+            * by column. What is left is the part the table cannot say: that
+            * nothing here acts, and where the actions are. */}
+          <div className="pane-sub">Read-only — commit, push and merge live in Workspaces.</div>
         </div>
         <button className="btn" onClick={() => setTick((t) => t + 1)}>
           <IconRefresh /> Refresh
@@ -1310,9 +1310,12 @@ function LandedStrip({ data, agents }: { data: ProjectGit; agents: Agent[] }) {
           </tbody>
         </table>
       )}
+      {/* The cap only matters once something hits it, and when it does the “+”
+        * in the cell says so on the spot. It does not need announcing under
+        * every table that has not reached it. */}
       <div className="ga-hint ga-branch-note">
-        Agent worktrees are measured against {integration || "HEAD"}; the main checkout against its
-        upstream. Worktree counts stop at {PER_CHECKOUT} — a “+” means there are more.
+        Worktrees are measured against {integration || "HEAD"}, the main checkout against its
+        upstream.
       </div>
     </div>
   );
