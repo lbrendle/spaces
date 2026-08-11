@@ -192,6 +192,12 @@ An agent doing a design pass should be able to answer yes to all of these:
     the target without the height from the `::before` overlay in `App.css` —
     which only works if no ancestor clips. Where one does, the control has to
     earn the height honestly (`.run-mark`, `.db-repo-tag`).
+    Audit this by hit-testing, not by `getBoundingClientRect`: the overlay is
+    an absolutely-positioned child, so a box-based check reports every one of
+    these as a failure and is wrong every time.
+    The one deliberate exception is `.ga-day`, the commit sparkline: thirty
+    columns across ~480px is ~16px each, so a 24px target would overlap its
+    neighbours, and a target that hits the wrong day is worse than a small one.
 16. Does anything clip on one axis using `overflow: hidden`? Setting one axis
     to `hidden` promotes the other to `auto`, quietly turning the element into
     a scroll container. `overflow-x: clip` + `overflow-y: visible` is the pair
