@@ -13,6 +13,7 @@ import { useStore, channelAgents } from "../store";
 import {
   triggerAgents, userTrigger, cancelRun, resolveTargets, leadAgent, rosterAgents,
 } from "../agents";
+import type { Trigger } from "../agents";
 import { getQueueSnapshot, queueDepth, subscribeQueue } from "../orchestrator";
 import { getDb, uid } from "../db";
 import { slug, colorFor, refKey } from "../types";
@@ -55,6 +56,32 @@ const MODES: { id: ChannelMode; label: string; blurb: string }[] = [
 ];
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "👀", "✅", "🚀", "🧠"];
+const MAX_UPA_ATTACHMENTS = 8;
+const MAX_UPA_ATTACHMENT_BYTES = 20_000_000;
+const MAX_UPA_ATTACHMENT_TOTAL_BYTES = 40_000_000;
+
+type TriggerAttachment = NonNullable<Trigger["attachments"]>[number];
+
+function attachmentSize(bytes: number): string {
+  if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1_000))} KB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+async function encodeAttachment(file: File): Promise<TriggerAttachment> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
+  return {
+    name: file.name || "attachment",
+    mime_type: file.type || "application/octet-stream",
+    data_base64: btoa(binary),
+    sha256: [...digest].map((value) => value.toString(16).padStart(2, "0")).join(""),
+  };
+}
 
 /** dispatch() treats an unset mode as broadcast — the UI must say the same. */
 function modeOf(mode: ChannelMode | undefined): ChannelMode {
@@ -1334,13 +1361,20 @@ function Composer({
   const [mentionSel, setMentionSel] = useState(0);
   const [showEmoji, setShowEmoji] = useState(false);
   const [noTargets, setNoTargets] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [encodingFiles, setEncodingFiles] = useState(false);
   const [commands, setCommands] = useState<SlashCommand[]>(SPACES_COMMANDS);
   /** Escape dismisses the command hints; the next keystroke brings them back. */
   const [slashOff, setSlashOff] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const hintTimer = useRef<number | undefined>(undefined);
   const listId = useId();
   const agents = channelAgents(store, channelId);
+  const attachmentCapable =
+    agents.length === 1 &&
+    agents[0].kind === "ritz" &&
+    /(?:^|\s)protocol=spaces-compatible-http(?:\s|$)/.test(agents[0].cli_args || "");
   const composerChannelName = store.channels.find((c) => c.id === channelId)?.name ?? "";
 
   // Adjusting state during render is React's own answer to "the props moved":
@@ -1515,10 +1549,53 @@ function Composer({
     setNoTargets(false);
   }
 
+  function addFiles(selected: FileList | null) {
+    if (!selected?.length) return;
+    const next = [...pendingFiles, ...Array.from(selected)];
+    if (next.length > MAX_UPA_ATTACHMENTS) {
+      toast.error(
+        "Too many attachments",
+        `${agents[0]?.name || "This agent"} accepts up to ${MAX_UPA_ATTACHMENTS} files in one turn.`,
+      );
+      return;
+    }
+    const tooLarge = next.find((file) => file.size > MAX_UPA_ATTACHMENT_BYTES);
+    if (tooLarge) {
+      toast.error("Attachment is too large", `${tooLarge.name} is over the 20 MB per-file limit.`);
+      return;
+    }
+    if (next.reduce((total, file) => total + file.size, 0) > MAX_UPA_ATTACHMENT_TOTAL_BYTES) {
+      toast.error("Attachments are too large together", "Keep one turn at or below 40 MB.");
+      return;
+    }
+    setPendingFiles(next);
+  }
+
   async function send() {
-    const content = text.trim();
-    if (!content) return;
+    const typed = text.trim();
+    if (!typed && !pendingFiles.length) return;
+    if (pendingFiles.length && parseSlash(typed)) {
+      toast.error("Attachments need an ordinary message", "Remove the files or replace the slash command with a normal request.");
+      return;
+    }
+    const files = pendingFiles;
+    let attachments: TriggerAttachment[] = [];
+    if (files.length) {
+      setEncodingFiles(true);
+      try {
+        attachments = await Promise.all(files.map(encodeAttachment));
+      } catch (error) {
+        toast.error("Spaces could not read that attachment", error);
+        return;
+      } finally {
+        setEncodingFiles(false);
+      }
+    }
+    const request = typed || "understand what i shared, preserve it with provenance, and tell me what matters";
+    const labels = files.map((file) => `📎 ${file.name} (${attachmentSize(file.size)})`);
+    const content = [request, ...labels].join("\n\n");
     setText("");
+    setPendingFiles([]);
     setMentionQuery(null);
 
     // A command Spaces owns runs here and posts its answer; anything else — a
@@ -1563,7 +1640,7 @@ function Composer({
       meta: "",
       parent_id: parentId,
     });
-    void triggerAgents(channelId, userTrigger(msg));
+    void triggerAgents(channelId, { ...userTrigger(msg), attachments });
     // `[[Title]]` and `owner/name#123` become real edges on the message, which
     // is what puts them in the agents' standing context and on the graph.
     void autoLinkMessage(msg.id, channelId, content);
@@ -1638,6 +1715,25 @@ function Composer({
         </div>
       )}
       <div className="composer">
+        {pendingFiles.length > 0 && (
+          <div className="composer-attachments" aria-label="Attachments ready to send">
+            {pendingFiles.map((file, index) => (
+              <span className="composer-attachment" key={`${file.name}:${file.size}:${index}`}>
+                <IconDocument size={12} />
+                <span>{file.name}</span>
+                <span className="composer-attachment-size">{attachmentSize(file.size)}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  title={`Remove ${file.name}`}
+                  onClick={() => setPendingFiles((current) => current.filter((_, at) => at !== index))}
+                >
+                  <IconX size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <div className="composer-main">
           <textarea
           ref={taRef}
@@ -1692,6 +1788,32 @@ function Composer({
             }
           }}
           />
+          {attachmentCapable && (
+            <>
+              <input
+                ref={fileRef}
+                className="composer-file-input"
+                type="file"
+                multiple
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(event) => {
+                  addFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="icon-btn attachment-trigger"
+                title={`Attach files to ${agents[0]?.name || "this agent"}`}
+                aria-label={`Attach files to ${agents[0]?.name || "this agent"}`}
+                onClick={() => fileRef.current?.click()}
+                disabled={encodingFiles}
+              >
+                <IconDocument size={15} />
+              </button>
+            </>
+          )}
           <div className="composer-emoji">
             <button
               className="icon-btn emoji-trigger"
@@ -1712,7 +1834,13 @@ function Composer({
               </div>
             )}
           </div>
-          <button className="btn primary" onClick={send} disabled={!text.trim()}>Send</button>
+          <button
+            className="btn primary"
+            onClick={send}
+            disabled={encodingFiles || (!text.trim() && !pendingFiles.length)}
+          >
+            {encodingFiles ? "Attaching…" : "Send"}
+          </button>
         </div>
         <div className="composer-foot">
           {!inThread && agents.length === 1 && (

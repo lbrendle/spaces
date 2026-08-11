@@ -345,7 +345,7 @@ export function SettingsView() {
               />
             </label>
             <label>
-              <span>Local HTTP engine URL</span>
+              <span>Default Local HTTP engine URL</span>
               <input
                 value={runtimeConfig.localAiUrl}
                 onChange={(event) => setRuntimeConfig((value) => ({ ...value, localAiUrl: event.target.value }))}
@@ -353,6 +353,7 @@ export function SettingsView() {
                 type="url"
                 required
               />
+              <small>This global default is inherited only when an HTTP agent has no endpoint of its own.</small>
             </label>
             <label className="runtime-wide">
               <span>Documentation URL</span>

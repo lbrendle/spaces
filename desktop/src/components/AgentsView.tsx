@@ -46,12 +46,16 @@ import {
   commandPreview,
   defaultsFor,
   fetchRitzModels,
+  checkRitzRuntime,
   groupedOptions,
   harnessFor,
   parseArgs,
   riskNotes,
   serializeArgs,
   RITZ_BASE,
+  ritzBase,
+  ritzHealthRoute,
+  ritzAuthHeaders,
 } from "../capabilities";
 import type { HarnessKind, HarnessOption, OptionValue, OptionValues, RitzModel } from "../capabilities";
 import "./agents.css";
@@ -76,32 +80,58 @@ const RITZ_TIMEOUT = 2500;
  * answers on its port right now or does not. Ritz is only asked when somebody
  * actually has a Ritz agent — an idle workspace shouldn't poll a local port.
  */
-function useRuntimes(needRitz: boolean, customPrograms: string[] = []): Runtimes {
+type HttpRuntime = { base: string; healthRoute: string; authentication: string };
+
+function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] = []): Runtimes {
   const tools = useStore((s) => s.tools);
-  const [ritz, setRitz] = useState<Availability>("unknown");
+  const [ritz, setRitz] = useState<Record<string, Availability>>({});
   const [checking, setChecking] = useState(false);
   const [custom, setCustom] = useState<Record<string, boolean>>({});
   const [nonce, setNonce] = useState(0);
   const customKey = [...new Set(customPrograms.map((p) => p.trim()).filter(Boolean))].sort().join("\n");
+  const ritzKey = [...new Map(
+    httpRuntimes
+      .filter((runtime) => runtime.base.trim())
+      .map((runtime) => [
+        runtime.base.trim(),
+        `${runtime.base.trim()}\t${runtime.healthRoute.trim()}\t${runtime.authentication.trim()}`,
+      ])
+  ).values()].sort().join("\n");
 
   useEffect(() => {
-    if (!needRitz) return;
+    const runtimes = ritzKey
+      ? ritzKey.split("\n").map((line) => {
+          const [base, healthRoute = "/health", authentication = "trusted-local-origin"] = line.split("\t", 3);
+          return { base, healthRoute, authentication };
+        })
+      : [];
+    if (!runtimes.length) {
+      setRitz({});
+      return;
+    }
     let live = true;
     const ac = new AbortController();
     // A dead port refuses instantly; the timeout is for the other case —
     // something else holding 8765 and never answering.
     const timer = window.setTimeout(() => ac.abort(), RITZ_TIMEOUT);
-    setRitz("unknown");
-    fetchRitzModels(ac.signal).then(
-      () => live && setRitz("ready"),
-      () => live && setRitz("unavailable")
-    );
+    setRitz(Object.fromEntries(runtimes.map(({ base }) => [base, "unknown"])));
+    void Promise.all(runtimes.map(async ({ base, healthRoute, authentication }) => {
+      try {
+        const headers = await ritzAuthHeaders({ authentication });
+        await checkRitzRuntime(ac.signal, base, healthRoute, headers);
+        return [base, "ready"] as const;
+      } catch {
+        return [base, "unavailable"] as const;
+      }
+    })).then((pairs) => {
+      if (live) setRitz(Object.fromEntries(pairs));
+    });
     return () => {
       live = false;
       clearTimeout(timer);
       ac.abort();
     };
-  }, [needRitz, nonce]);
+  }, [ritzKey, nonce]);
 
   useEffect(() => {
     const programs = customKey ? customKey.split("\n") : [];
@@ -134,7 +164,10 @@ function useRuntimes(needRitz: boolean, customPrograms: string[] = []): Runtimes
   return useMemo(
     () => ({
       of: (kind: string, program = ""): Availability => {
-        if (kind === "ritz") return ritz;
+        if (kind === "ritz") {
+          const key = (program || RITZ_BASE).trim();
+          return ritz[key] ?? "unknown";
+        }
         if (kind === "custom") {
           const key = program.trim();
           if (!key) return "unavailable";
@@ -151,10 +184,11 @@ function useRuntimes(needRitz: boolean, customPrograms: string[] = []): Runtimes
 }
 
 /** Why an agent can't run from this machine — never phrased as a fault. */
-function unavailableNote(kind: string, name: string): string {
+function unavailableNote(kind: string, name: string, runtime = ""): string {
   const handle = `@${slug(name)}`;
   if (kind === "ritz") {
-    return `${config().localAiName} isn't answering on ${RITZ_BASE.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
+    const endpoint = runtime || RITZ_BASE;
+    return `${config().localAiName} isn't answering on ${endpoint.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
   }
   if (kind === "custom") {
     return `That custom executable isn't available on this machine, so ${handle} can't run here. Configure its command or host it on a teammate's device.`;
@@ -331,7 +365,14 @@ export function AgentsView() {
   const seq = useRef(0);
 
   const runtimes = useRuntimes(
-    agents.some((a) => a.kind === "ritz"),
+    agents.filter((a) => a.kind === "ritz").map((a) => {
+      const values = parseArgs("ritz", a.cli_args);
+      return {
+        base: ritzBase(values),
+        healthRoute: ritzHealthRoute(values),
+        authentication: String(values.authentication || "trusted-local-origin"),
+      };
+    }),
     agents.filter((a) => a.kind === "custom").map((a) => a.model)
   );
 
@@ -402,7 +443,10 @@ export function AgentsView() {
       return {
         agent,
         handle: slug(agent.name),
-        availability: runtimes.of(agent.kind, agent.model),
+        availability: runtimes.of(
+          agent.kind,
+          agent.kind === "ritz" ? ritzBase(parseArgs("ritz", agent.cli_args)) : agent.model
+        ),
         running,
         lastActive: lastActiveOf(agent.id, sessions, runs),
         workload,
@@ -483,7 +527,10 @@ export function AgentsView() {
         members,
         workload: workloadOf({ type: "team", id: team.id }).sort(byRole),
         channels: channels.filter((c) => channelIds.has(c.id)),
-        ready: members.filter((m) => runtimes.of(m.kind, m.model) === "ready").length,
+        ready: members.filter((m) => runtimes.of(
+          m.kind,
+          m.kind === "ritz" ? ritzBase(parseArgs("ritz", m.cli_args)) : m.model
+        ) === "ready").length,
         memberLoad: members.reduce((n, m) => n + (loadById.get(m.id) ?? 0), 0),
         lastActive: members.reduce((t, m) => Math.max(t, lastActiveOf(m.id, sessions, runs)), 0),
         haystack: [team.name, slug(team.name), team.description, team.charter,
@@ -1187,7 +1234,11 @@ function AvailabilityNote({ row }: { row: AgentRow }) {
             row.lastActive ? ` Last active ${timeAgo(row.lastActive)}.` : " Never run yet."
           }`
         : state === "unavailable"
-          ? unavailableNote(agent.kind, agent.name)
+          ? unavailableNote(
+              agent.kind,
+              agent.name,
+              agent.kind === "ritz" ? ritzBase(parseArgs("ritz", agent.cli_args)) : agent.model
+            )
           : "Still checking what this machine can run.";
 
   return <p className={"ag-note ag-note-" + state}>{note}</p>;
@@ -2036,8 +2087,16 @@ function AgentEditor({
   const risks = riskNotes(kind, values);
   const serialized = serializeArgs(kind, values);
   const customProgram = String(values.model ?? "");
-  const runtimes = useRuntimes(kind === "ritz", kind === "custom" ? [customProgram] : []);
-  const availability = runtimes.of(kind, customProgram);
+  const currentRitzBase = ritzBase(values);
+  const runtimes = useRuntimes(
+    kind === "ritz" ? [{
+      base: currentRitzBase,
+      healthRoute: ritzHealthRoute(values),
+      authentication: String(values.authentication || "trusted-local-origin"),
+    }] : [],
+    kind === "custom" ? [customProgram] : []
+  );
+  const availability = runtimes.of(kind, kind === "ritz" ? currentRitzBase : customProgram);
 
   const handle = slug(name);
   // Mentions resolve by handle, so two agents sharing one is a real ambiguity.
@@ -2365,6 +2424,16 @@ function AgentEditor({
               ? `${meta.label} isn't on this machine — the agent is still perfectly real, and anyone whose machine has it can run it. No API key is involved either way.`
               : "Checking whether this machine has that runtime…"}
         </p>
+        {kind === "ritz" && (
+          <button
+            type="button"
+            className="btn tiny ag-recheck"
+            onClick={runtimes.recheck}
+            disabled={runtimes.checking}
+          >
+            {runtimes.checking ? "Testing…" : "Test connection"}
+          </button>
+        )}
       </section>
 
       {groups.map((g) => (
@@ -2379,6 +2448,8 @@ function AgentEditor({
               opt={opt}
               kind={kind}
               value={values[opt.key]}
+              ritzEndpoint={currentRitzBase}
+              ritzAuthentication={String(values.authentication || "trusted-local-origin")}
               onChange={(v) => update(opt.key, v)}
             />
           ))}
@@ -2727,11 +2798,15 @@ function OptionControl({
   opt,
   kind,
   value,
+  ritzEndpoint,
+  ritzAuthentication,
   onChange,
 }: {
   opt: HarnessOption;
   kind: HarnessKind;
   value: OptionValue | undefined;
+  ritzEndpoint?: string;
+  ritzAuthentication?: string;
   onChange: (v: OptionValue) => void;
 }) {
   const text = typeof value === "string" ? value : "";
@@ -2820,7 +2895,16 @@ function OptionControl({
   }
 
   if (opt.dynamic === "ritz-models") {
-    return <RitzModelPicker opt={opt} value={text} onChange={onChange} active={kind === "ritz"} />;
+    return (
+      <RitzModelPicker
+        opt={opt}
+        value={text}
+        onChange={onChange}
+        active={kind === "ritz"}
+        endpoint={ritzEndpoint || RITZ_BASE}
+        authentication={ritzAuthentication || "trusted-local-origin"}
+      />
+    );
   }
 
   return (
@@ -2868,11 +2952,15 @@ function RitzModelPicker({
   value,
   onChange,
   active,
+  endpoint,
+  authentication,
 }: {
   opt: HarnessOption;
   value: string;
   onChange: (v: OptionValue) => void;
   active: boolean;
+  endpoint: string;
+  authentication: string;
 }) {
   const [models, setModels] = useState<RitzModel[] | null>(null);
   const [engineDefault, setEngineDefault] = useState("");
@@ -2884,7 +2972,8 @@ function RitzModelPicker({
     let live = true;
     const ac = new AbortController();
     setError("");
-    fetchRitzModels(ac.signal)
+    ritzAuthHeaders({ authentication })
+      .then((headers) => fetchRitzModels(ac.signal, endpoint, headers))
       .then((list) => {
         if (!live) return;
         setModels(list.models);
@@ -2899,7 +2988,7 @@ function RitzModelPicker({
       live = false;
       ac.abort();
     };
-  }, [active]);
+  }, [active, endpoint, authentication]);
 
   const known = models ?? [];
   const inList = known.some((m) => m.key === value);

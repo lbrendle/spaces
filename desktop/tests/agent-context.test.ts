@@ -118,14 +118,16 @@ test("failed approvals become durable channel context for agent retries", async 
 });
 
 test("forks can configure and import arbitrary local agent harnesses", async () => {
-  const [types, config, capabilities, agents, settings, rust, portal] = await Promise.all([
+  const [types, config, capabilities, agents, settings, rust, desktopPortal, portal, chat] = await Promise.all([
     readFile(new URL("../src/types.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/config.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
+    readFile(new URL("../src/portal.ts", import.meta.url), "utf8"),
     readFile(new URL("../../portal/lib/workspace.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/ChatView.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(types, /AgentKind = [^;]*"custom"/);
@@ -133,10 +135,40 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
   assert.match(config, /VITE_SPACES_LOCAL_AI_URL/);
   assert.match(capabilities, /label: "Custom CLI"/);
   assert.match(capabilities, /label: "Executable"[\s\S]*storage: "model"/);
+  assert.match(capabilities, /label: "Endpoint"[\s\S]*transportOnly: true/);
+  assert.match(capabilities, /label: "Health route"[\s\S]*transportOnly: true/);
+  assert.match(capabilities, /function ritzBase/);
+  assert.match(capabilities, /function checkRitzRuntime/);
+  assert.match(capabilities, /function ritzAuthHeaders/);
+  assert.match(capabilities, /read_upa_spaces_token/);
+  assert.match(capabilities, /if \(opt\.transportOnly\) continue/);
+  assert.match(agents, /fetch\(`\$\{baseUrl\}\/chat`/);
+  assert.match(agents, /principalActorId:[\s\S]*"local-user"/);
+  assert.match(agents, /attachments: opts\.trigger\.attachments/);
+  assert.match(capabilities, /body\.attachments = runtime\.attachments/);
+  assert.match(chat, /Attach files to \$\{agents\[0\]\?\.name/);
+  assert.match(chat, /MAX_UPA_ATTACHMENTS = 8/);
+  assert.match(chat, /MAX_UPA_ATTACHMENT_TOTAL_BYTES = 40_000_000/);
+  assert.match(chat, /file\.arrayBuffer\(\)/);
+  assert.match(desktopPortal, /author_id: `portal:\$\{receipt\.author_id/);
+  assert.match(desktopPortal, /const privateThreadIds = new Set<string>/);
+  assert.match(desktopPortal, /const privateOnlyChannelIds = new Set/);
+  assert.match(desktopPortal, /privateOnlyChannelIds\.has\(channel\.id\)/);
+  assert.match(desktopPortal, /privateAgentIds\.has\(message\.author_id\)/);
+  assert.match(desktopPortal, /addressesPrivateAgent/);
+  assert.match(desktopPortal, /agents\.host_device_id=\$13[\s\S]*agents\.cli_args/);
+  assert.match(desktopPortal, /agents\.host_device_id=\$13[\s\S]*agents\.visibility/);
+  assert.match(
+    desktopPortal,
+    /remote\.visibility,[\s\S]*now\(\),[\s\S]*thisDevice,[\s\S]*\]\s*\)/,
+  );
+  assert.match(settings, /global default/i);
   assert.match(agents, /program: agent\.model\.trim\(\)/);
   assert.match(agents, /Choose an executable for this Custom CLI agent/);
   assert.match(settings, /Open-source runtime/);
   assert.match(rust, /async fn check_program/);
+  assert.match(rust, /async fn read_upa_spaces_token/);
+  assert.match(rust, /ai\.personalagent\.upa\.spaces/);
   assert.match(rust, /async fn discover_agent_profiles/);
   assert.match(rust, /\.claude\/agents/);
   assert.match(rust, /\.codex\/agents/);

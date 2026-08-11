@@ -330,6 +330,46 @@
 .emoji-pop button:focus-visible { background: var(--bg-active); }
 .composer-emoji-pop { right: 0; bottom: calc(100% + var(--space-3)); }
 .composer-emoji { align-self: flex-end; margin-bottom: 0; }
+.attachment-trigger {
+  width: 30px; height: 30px;
+  align-self: flex-end;
+  color: var(--text-faint);
+}
+.attachment-trigger:hover { color: var(--text); background: var(--bg-active); }
+.composer-file-input { display: none; }
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+.composer-attachment {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+.composer-attachment > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-attachment-size { color: var(--text-faint); white-space: nowrap; }
+.composer-attachment button {
+  display: inline-flex;
+  color: var(--text-faint);
+  padding: 0;
+}
+.composer-attachment button:hover { color: var(--text); }
 .emoji-trigger {
   width: 30px; height: 30px;
   color: var(--text-faint); font-size: var(--fs-lg);

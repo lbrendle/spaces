@@ -195,6 +195,7 @@ function coalesce(jobs: Job[]): Job {
       msgId: last.trigger.msgId,
       chain: [...new Set(jobs.flatMap((j) => j.trigger.chain ?? []))],
       taskId: [...jobs].reverse().find((j) => j.trigger.taskId)?.trigger.taskId,
+      attachments: jobs.flatMap((j) => j.trigger.attachments ?? []).slice(0, 8),
     },
     opts: {
       parentId: last.opts.parentId,

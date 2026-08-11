@@ -520,6 +520,40 @@ async fn check_program(program: String) -> bool {
     .unwrap_or(false)
 }
 
+/// Read only the bearer credential created by Universal Personal Agent.
+/// The value is resolved at request time and is never persisted in Spaces.
+#[tauri::command]
+async fn read_upa_spaces_token() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let output = Command::new("/usr/bin/security")
+            .args([
+                "find-generic-password",
+                "-s",
+                "ai.personalagent.upa.spaces",
+                "-a",
+                "localhost-bearer",
+                "-w",
+            ])
+            .output()
+            .map_err(|error| format!("could not read Universal Personal Agent token: {error}"))?;
+        if !output.status.success() {
+            return Err(
+                "Universal Personal Agent token is unavailable in Mac Keychain".to_string(),
+            );
+        }
+        let token = String::from_utf8(output.stdout)
+            .map_err(|_| "Universal Personal Agent token is not valid UTF-8".to_string())?
+            .trim()
+            .to_string();
+        if token.len() < 32 {
+            return Err("Universal Personal Agent token is invalid".to_string());
+        }
+        Ok(token)
+    })
+    .await
+    .map_err(|error| format!("Keychain task failed: {error}"))?
+}
+
 fn unquote_frontmatter(value: &str) -> String {
     let value = value.trim();
     if value.len() >= 2
@@ -1989,6 +2023,7 @@ pub fn run() {
             run_git_ex,
             check_tools,
             check_program,
+            read_upa_spaces_token,
             discover_agent_profiles,
             apple_calendar_snapshot,
             apple_calendar_create,

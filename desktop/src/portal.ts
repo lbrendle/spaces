@@ -442,6 +442,7 @@ interface PortalMessageDispatch {
   channel_id: string;
   agent_id: string;
   author_name: string;
+  author_id: string;
   content: string;
   parent_id: string;
   created_at: number;
@@ -465,7 +466,7 @@ async function drainPortalMessageDispatches(): Promise<void> {
   );
   const pending = await db.select<PortalMessageDispatch[]>(
     `SELECT d.message_id, d.channel_id, d.agent_id,
-            m.author_name, m.content, m.parent_id, m.created_at
+            m.author_name, m.author_id, m.content, m.parent_id, m.created_at
        FROM portal_message_dispatches d
        JOIN messages m ON m.id = d.message_id
       WHERE d.status = 'pending'
@@ -492,7 +493,9 @@ async function drainPortalMessageDispatches(): Promise<void> {
         id: receipt.message_id,
         channel_id: receipt.channel_id,
         author_type: "user",
-        author_id: "user",
+        // A synced web message must never be mistaken for a locally typed
+        // principal message by a private localhost agent endpoint.
+        author_id: `portal:${receipt.author_id || "unknown"}`,
         author_name: receipt.author_name,
         content:
           !hasMention && preferred
@@ -634,11 +637,49 @@ export async function syncPortal(): Promise<PortalConnection | null> {
   );
   let messageBudget = 460_000;
   const messageProfiles: Array<Record<string, unknown>> = [];
+  const privateAgentIds = new Set(
+    state.agents.filter((agent) => agent.visibility === "private").map((agent) => agent.id),
+  );
+  const privateHandles = state.agents
+    .filter((agent) => agent.visibility === "private")
+    .map((agent) => slug(agent.name));
+  const privateOnlyChannelIds = new Set(
+    state.channels
+      .filter((channel) => {
+        const members = state.channelMembers.filter((member) => member.channel_id === channel.id);
+        if (!members.length) return false;
+        return members.every((member) => {
+          if (member.member_type === "agent") return privateAgentIds.has(member.member_id);
+          const teamAgentIds = state.teamMembers
+            .filter((teamMember) => teamMember.team_id === member.member_id)
+            .map((teamMember) => teamMember.agent_id);
+          return teamAgentIds.length > 0 && teamAgentIds.every((id) => privateAgentIds.has(id));
+        });
+      })
+      .map((channel) => channel.id),
+  );
+  const privateThreadIds = new Set<string>();
   for (const message of localMessages) {
     const channel = state.channels.find(
       (candidate) => candidate.id === message.channel_id,
     );
     if (!channel || !projectIds.has(channel.project_id)) continue;
+    if (privateOnlyChannelIds.has(channel.id)) continue;
+    const rootId = message.parent_id || message.id;
+    const addressesPrivateAgent =
+      message.author_type === "user" &&
+      privateHandles.some((handle) =>
+        new RegExp(`(^|[^\\w@./-])@${handle}(?=$|[^\\w-])`, "i").test(message.content)
+      );
+    const belongsToPrivateThread = privateThreadIds.has(rootId);
+    if (
+      (message.author_type === "agent" && privateAgentIds.has(message.author_id)) ||
+      addressesPrivateAgent ||
+      belongsToPrivateThread
+    ) {
+      privateThreadIds.add(rootId);
+      continue;
+    }
     const profile = {
       id: message.id,
       portalId: remoteId("message", message.id),
@@ -1070,16 +1111,16 @@ export async function syncPortal(): Promise<PortalConnection | null> {
           owner_member_id, host_device_id, visibility, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'',$9,$10,$11,$12)
          ON CONFLICT(id) DO UPDATE SET
-           name=excluded.name,
-           kind=excluded.kind,
-           model=excluded.model,
-           persona=excluded.persona,
-           cli_args=excluded.cli_args,
-           role=excluded.role,
-           owns=excluded.owns,
-           owner_member_id=excluded.owner_member_id,
-           host_device_id=excluded.host_device_id,
-           visibility=excluded.visibility`,
+           name=CASE WHEN agents.host_device_id=$13 THEN agents.name ELSE excluded.name END,
+           kind=CASE WHEN agents.host_device_id=$13 THEN agents.kind ELSE excluded.kind END,
+           model=CASE WHEN agents.host_device_id=$13 THEN agents.model ELSE excluded.model END,
+           persona=CASE WHEN agents.host_device_id=$13 THEN agents.persona ELSE excluded.persona END,
+           cli_args=CASE WHEN agents.host_device_id=$13 THEN agents.cli_args ELSE excluded.cli_args END,
+           role=CASE WHEN agents.host_device_id=$13 THEN agents.role ELSE excluded.role END,
+           owns=CASE WHEN agents.host_device_id=$13 THEN agents.owns ELSE excluded.owns END,
+           owner_member_id=CASE WHEN agents.host_device_id=$13 THEN agents.owner_member_id ELSE excluded.owner_member_id END,
+           host_device_id=CASE WHEN agents.host_device_id=$13 THEN agents.host_device_id ELSE excluded.host_device_id END,
+           visibility=CASE WHEN agents.host_device_id=$13 THEN agents.visibility ELSE excluded.visibility END`,
         [
           agent.localId,
           remote.name,
@@ -1093,6 +1134,12 @@ export async function syncPortal(): Promise<PortalConnection | null> {
           remote.hostDeviceId ?? "",
           remote.visibility,
           now(),
+          // Use the identity captured for this sync transaction. It falls
+          // back to the durable paired-device row when WebView localStorage
+          // is briefly unavailable during a cold launch. Re-reading only
+          // localStorage here could let an older portal profile overwrite a
+          // locally hosted agent's runtime, persona, or privacy settings.
+          thisDevice,
         ]
       );
     }

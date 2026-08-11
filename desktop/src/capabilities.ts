@@ -26,6 +26,7 @@
  * machine — do not "tidy" them.
  */
 import { config } from "./config";
+import { invoke } from "@tauri-apps/api/core";
 
 export type HarnessKind = "claude" | "codex" | "ritz" | "custom";
 
@@ -69,6 +70,8 @@ export interface HarnessOption {
   dynamic?: "ritz-models";
   /** Summarised as a chip on the agent card. */
   chip?: boolean;
+  /** Connection metadata stored with the agent but never sent in the request body. */
+  transportOnly?: boolean;
   /** Numeric bounds (control: "number"). */
   step?: string;
   min?: string;
@@ -118,8 +121,23 @@ export interface RitzModelList {
  * {data:[…]}, and entries that are plain strings. Throws if unreachable —
  * callers fall back to free text.
  */
-export async function fetchRitzModels(signal?: AbortSignal): Promise<RitzModelList> {
-  const res = await fetch(RITZ_MODELS_URL, { signal });
+export function ritzBase(values?: OptionValues): string {
+  const configured = typeof values?.endpoint === "string" ? values.endpoint.trim() : "";
+  return (configured || RITZ_BASE).replace(/\/+$/, "");
+}
+
+export function ritzHealthRoute(values?: OptionValues): string {
+  const configured = typeof values?.health_route === "string" ? values.health_route.trim() : "";
+  if (!configured) return "/health";
+  return configured.startsWith("/") ? configured : `/${configured}`;
+}
+
+export async function fetchRitzModels(
+  signal?: AbortSignal,
+  baseUrl: string = RITZ_BASE,
+  headers: Record<string, string> = {}
+): Promise<RitzModelList> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, { signal, headers });
   if (!res.ok) throw new Error(`${config().localAiName} returned ${res.status}`);
   const raw: unknown = await res.json();
   const box = (raw ?? {}) as Record<string, unknown>;
@@ -139,6 +157,30 @@ export async function fetchRitzModels(signal?: AbortSignal): Promise<RitzModelLi
   return { default: typeof box.default === "string" ? box.default : "", models };
 }
 
+/** Verify both the configured liveness route and the HTTP agent contract. */
+export async function checkRitzRuntime(
+  signal: AbortSignal | undefined,
+  baseUrl: string,
+  healthRoute: string,
+  headers: Record<string, string> = {}
+): Promise<void> {
+  const base = baseUrl.replace(/\/+$/, "");
+  const route = healthRoute.trim();
+  if (route) {
+    const health = await fetch(`${base}${route.startsWith("/") ? route : `/${route}`}`, { signal, headers });
+    if (!health.ok) throw new Error(`${config().localAiName} health check returned ${health.status}`);
+  }
+  await fetchRitzModels(signal, base, headers);
+}
+
+/** Resolve HTTP credentials at request time; secret material never enters agent configuration. */
+export async function ritzAuthHeaders(values?: OptionValues): Promise<Record<string, string>> {
+  if (values?.authentication !== "upa-keychain-bearer") return {};
+  const token = await invoke<string>("read_upa_spaces_token");
+  if (!token) throw new Error("Universal Personal Agent bearer token is unavailable in Mac Keychain");
+  return { Authorization: `Bearer ${token}` };
+}
+
 /**
  * The JSON body Spaces posts to /chat. `values` supplies the configured fields;
  * `runtime` supplies the per-run ones. Empty options are omitted so the
@@ -146,7 +188,20 @@ export async function fetchRitzModels(signal?: AbortSignal): Promise<RitzModelLi
  */
 export function ritzBody(
   values: OptionValues,
-  runtime?: { conversationId?: string; message?: string; workspace?: string; systemPrompt?: string }
+  runtime?: {
+    conversationId?: string;
+    message?: string;
+    workspace?: string;
+    systemPrompt?: string;
+    principalActorId?: string;
+    triggerOrigin?: string;
+    attachments?: Array<{
+      name: string;
+      mime_type: string;
+      data_base64: string;
+      sha256?: string;
+    }>;
+  }
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     conversation_id: runtime?.conversationId ?? "<channel>:<agent>",
@@ -154,7 +209,11 @@ export function ritzBody(
   };
   if (runtime?.workspace !== undefined) body.workspace = runtime.workspace;
   if (runtime?.systemPrompt) body.system_prompt = runtime.systemPrompt;
+  if (runtime?.principalActorId) body.principal_actor_id = runtime.principalActorId;
+  if (runtime?.triggerOrigin) body.trigger_origin = runtime.triggerOrigin;
+  if (runtime?.attachments?.length) body.attachments = runtime.attachments;
   for (const opt of RITZ_OPTIONS) {
+    if (opt.transportOnly) continue;
     const v = values[opt.key];
     if (opt.control === "boolean") {
       body[opt.key] = v === true;
@@ -379,6 +438,51 @@ const CODEX_OPTIONS: readonly HarnessOption[] = [
 ];
 
 const RITZ_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "protocol",
+    label: "Protocol preset",
+    help: "Spaces-compatible HTTP uses GET /models and streaming POST /chat.",
+    control: "enum",
+    kind: "json",
+    choices: ["spaces-compatible-http"],
+    default: "spaces-compatible-http",
+    group: "Connection",
+    transportOnly: true,
+    chip: true,
+  },
+  {
+    key: "endpoint",
+    label: "Endpoint",
+    help: `Blank inherits the installation default (${RITZ_BASE}); set this to give this agent its own engine.`,
+    control: "text",
+    kind: "json",
+    placeholder: RITZ_BASE,
+    group: "Connection",
+    transportOnly: true,
+    chip: true,
+  },
+  {
+    key: "health_route",
+    label: "Health route",
+    help: "A lightweight route used by connection checks before a run.",
+    control: "text",
+    kind: "json",
+    default: "/health",
+    placeholder: "/health",
+    group: "Connection",
+    transportOnly: true,
+  },
+  {
+    key: "authentication",
+    label: "Authentication",
+    help: "Trusted local origin works with a localhost-only engine; bearer credentials belong in the Mac Keychain, never this field.",
+    control: "enum",
+    kind: "json",
+    choices: ["trusted-local-origin", "upa-keychain-bearer", "none"],
+    default: "trusted-local-origin",
+    group: "Connection",
+    transportOnly: true,
+  },
   {
     key: "model",
     label: "Model",
@@ -820,7 +924,7 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
 export function commandPreview(kind: string, values: OptionValues): string {
   const meta = harnessFor(kind);
   if (meta.wire === "http") {
-    return `${meta.base}\n${JSON.stringify(ritzBody(values), null, 2)}`;
+    return `POST ${ritzBase(values)}/chat\n${JSON.stringify(ritzBody(values), null, 2)}`;
   }
   const k = norm(kind);
   const modelOpt = optionFor(k, "model");

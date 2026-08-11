@@ -28,6 +28,8 @@ import {
   tokenize,
   resumeArgs,
   ritzBody,
+  ritzBase,
+  ritzAuthHeaders,
   parseArgs as parseOptionValues,
 } from "./capabilities";
 import { registerCanceller, trackRun, untrackRun } from "./runbus";
@@ -73,6 +75,13 @@ export interface Trigger {
   chain: string[];
   /** Task this run was dispatched from, if any. */
   taskId?: string;
+  /** Bounded local files for a Spaces-compatible HTTP turn. Never synced in agent config. */
+  attachments?: Array<{
+    name: string;
+    mime_type: string;
+    data_base64: string;
+    sha256?: string;
+  }>;
 }
 
 /** Per-turn knobs the orchestrator sets when it drives a run. */
@@ -437,23 +446,39 @@ async function startRitzRun(opts: {
   conversationId: string;
   prompt: string;
   cwd: string;
+  trigger: Trigger;
 }): Promise<void> {
   const ctrl = new AbortController();
   ritzAborts.set(opts.runId, ctrl);
+  const values = {
+    ...parseOptionValues("ritz", opts.agent.cli_args ?? ""),
+    model: opts.agent.model ?? "",
+  };
+  const baseUrl = ritzBase(values);
+  const authHeaders = await ritzAuthHeaders(values);
 
-  const res = await fetch(`${RITZ_URL}/chat`, {
+  const res = await fetch(`${baseUrl}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     signal: ctrl.signal,
     body: JSON.stringify(
       ritzBody(
-        { ...parseOptionValues("ritz", opts.agent.cli_args ?? ""), model: opts.agent.model ?? "" },
+        values,
         {
           conversationId: opts.conversationId,
           message: opts.prompt,
           workspace: opts.cwd || undefined,
+          principalActorId:
+            opts.trigger.authorType === "user" && opts.trigger.authorId === "user"
+              ? "local-user"
+              : `${opts.trigger.authorType}:${opts.trigger.authorId}`,
+          triggerOrigin:
+            opts.trigger.authorType === "user" && opts.trigger.authorId === "user"
+              ? "local-composer"
+              : "shared-or-automated",
+          attachments: opts.trigger.attachments,
         }
-      )
+      ),
     ),
   });
   if (!res.ok || !res.body) {
@@ -1767,7 +1792,7 @@ export async function runAgent(
       remote
         ? `remote → ${agent.host_device_id}`
         : adapter.transport === "http"
-        ? `POST ${RITZ_URL}/chat`
+        ? `POST ${ritzBase(parseOptionValues("ritz", agent.cli_args ?? ""))}/chat`
         : displayCommand(adapter.program, adapterArgs),
     commit_before: commitBefore,
     commit_after: "",
@@ -1819,6 +1844,7 @@ export async function runAgent(
         conversationId: ritzConversationId(channelId, agent.id),
         prompt,
         cwd,
+        trigger,
       });
     } else {
       await invoke("start_agent_run", {
@@ -1873,7 +1899,7 @@ export function userTrigger(msg: Message, taskId?: string): Trigger {
   return {
     content: msg.content,
     authorType: "user",
-    authorId: "user",
+    authorId: msg.author_id || "user",
     authorName: msg.author_name,
     parentId: msg.parent_id,
     msgId: msg.id,

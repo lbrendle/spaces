@@ -1422,7 +1422,7 @@ function AddPersonPanel({ onClose }: { onClose: () => void }) {
 const VISIBILITY_HELP: Record<AgentVisibility, string> = {
   workspace: "Anyone here can mention it, assign it work and run it.",
   private:
-    "Recorded as its owner's own. This roster honours that and stops naming it to other people; no other surface filters on it yet, so read it as a stated intent rather than a lock.",
+    "Private to its owner. It is not offered to teammates, and threads addressed to it are withheld from desktop-to-web message sync.",
 };
 
 /**
