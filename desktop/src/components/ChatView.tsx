@@ -1342,6 +1342,7 @@ function Composer({
   const hintTimer = useRef<number | undefined>(undefined);
   const listId = useId();
   const agents = channelAgents(store, channelId);
+  const composerChannelName = store.channels.find((c) => c.id === channelId)?.name ?? "";
 
   // Adjusting state during render is React's own answer to "the props moved":
   // an effect would paint the previous channel's draft for one frame first.
@@ -1666,12 +1667,18 @@ function Composer({
           aria-expanded={options.length > 0}
           aria-controls={options.length > 0 ? listId : undefined}
           aria-activedescendant={mentionAt >= 0 ? `${listId}-m${mentionAt}` : undefined}
+          /*
+           * Just the channel. The old string was a template literal with
+           * nothing interpolated into it, so the "#…" was not a truncation —
+           * it was literally what shipped, and the channel you were writing to
+           * never appeared. Both variants then ran long enough to be cut
+           * mid-word ("@mention a") as soon as the command centre dock opened
+           * and took the column down to 620px. What they were explaining —
+           * how mentions route, that agents have to be added first — is what
+           * the empty state of a channel now says, where there is room.
+           */
           placeholder={
-            inThread
-              ? "Reply in thread…"
-              : agents.length
-                ? `Message #… — @mention a person, agent, or team`
-                : "Message… (add agents via the members button to get replies)"
+            inThread ? "Reply in thread…" : `Message #${composerChannelName}`
           }
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}

@@ -687,11 +687,16 @@ export function RunInspector({ runId, onClose }: { runId: string; onClose: () =>
             <span className="run-fact-value">{fmtDuration(durationMs)}{running ? "…" : ""}</span>
           </div>
           {run.meta && (
+            /* "Agent reported", not "Run usage": this string comes back from
+             * the CLI and carries its own seconds, which sit beside the
+             * Duration we time ourselves and disagree with it — 40s against
+             * 38s, unlabelled, side by side. Saying whose number it is makes
+             * the gap legible instead of looking like one of them is wrong. */
             <div className="run-fact">
-              <span className="run-fact-label">Run usage</span>
+              <span className="run-fact-label">Agent reported</span>
               <span
                 className="run-fact-value"
-                title="Usage reported by the agent CLI; dollar amounts are provider-reported estimates."
+                title="Reported by the agent CLI, not measured here; dollar amounts are provider estimates."
               >
                 {run.meta}
               </span>
