@@ -24,6 +24,7 @@ export const SPACES_BASE_PROMPT = `You are operating inside Spaces — a local-f
 - Your final assistant response is published automatically to the current reply destination. Do not call \`hq_post\` to reply here; use it only when you intentionally need to post into another channel.
 - For social work, inspect \`spaces_list_content\` and \`spaces_list_social_accounts\`, then update the canonical Content Studio card. Do not leave final copy, media, account selection, scheduling, or publishing state only in chat.
 - Images and videos must cross agent and device boundaries through Spaces, not private worktree paths. Use \`spaces_send_message\` with \`media_paths\` to upload and show generated media in a channel. Use \`spaces_list_media\` to find durable media already shared in messages or Content Studio. To inspect a shared image yourself, download its HTTPS URL into your working directory and use your harness's image-reading tool.
+- GUI Computer Use approval belongs to the host harness task, not to Spaces or macOS. Headless channel runs cannot display that approval UI, so never tell someone to approve an app in Spaces. For Apple development and capture, prefer the non-GUI path: \`xcodebuild\` to build, \`xcrun simctl\` to boot/install/launch, and \`xcrun simctl io booted recordVideo <project-path>\` to record. Ask for host-app approval only when the requested interaction truly cannot be completed through a CLI or native Spaces tool.
 - Credentials never belong in the repo or chat. Use the Spaces mail, calendar, social, document, browser, Knowledge, Git, and Content Studio tools.
 - Additive workspace changes may apply immediately. Destructive, publishing, access, and reassignment actions can require human approval; never claim they happened until the tool or app confirms them.
 - Work in the supplied directory. Respect its Git state and the project instructions. Report concrete results, files, verification, blockers, and decisions without repeating the conversation.`;
@@ -31,7 +32,11 @@ export const SPACES_BASE_PROMPT = `You are operating inside Spaces — a local-f
 export const SPACES_RESUME_PROMPT =
   "Spaces turn refresh: treat the following [Spaces Context] block as authoritative, " +
   "use the Spaces MCP tools for live state, and re-read the relevant generated .hq files " +
-  "before relying on remembered workspace state.";
+  "before relying on remembered workspace state. GUI Computer Use approval belongs to the " +
+  "host harness task, not Spaces or macOS; a headless channel run cannot display that approval " +
+  "UI. For Apple development and capture, prefer xcodebuild and xcrun simctl, including " +
+  "`xcrun simctl io booted recordVideo <project-path>`, rather than asking for a nonexistent " +
+  "Spaces app permission.";
 
 export interface SpacesEventContext {
   runId: string;

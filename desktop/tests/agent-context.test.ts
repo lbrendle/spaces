@@ -35,6 +35,10 @@ test("agent harnesses receive a stable platform contract and event identity", as
   assert.match(contract, /\[Spaces Context\]/);
   assert.match(contract, /current.*block is authoritative/i);
   assert.match(contract, /final assistant response is published automatically/i);
+  assert.match(contract, /GUI Computer Use approval belongs to the host harness task/i);
+  assert.match(contract, /never tell someone to approve an app in Spaces/i);
+  assert.match(contract, /xcrun simctl io booted recordVideo/);
+  assert.match(contract, /headless channel run cannot display that approval/i);
   assert.match(agents, /SPACES_BASE_PROMPT/);
   assert.match(agents, /SPACES_RESUME_PROMPT/);
   assert.match(agents, /--append-system-prompt-file/);

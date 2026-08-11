@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.1.17"
+version = "0.1.18"
 description = "Spaces — the local operating system for people and agents"
 authors = ["Spaces"]
 edition = "2021"
