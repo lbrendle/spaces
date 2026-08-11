@@ -61,7 +61,7 @@ durable router/queue ── one lane per (channel, agent)
     └─ current project/team/channel instructions
              │
              ▼
-     Claude · Codex · Ritz
+ Claude · Codex · Local HTTP · Custom CLI
              │
       MCP or local CLI fallback
              ▼

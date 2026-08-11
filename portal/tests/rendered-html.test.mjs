@@ -126,6 +126,21 @@ test("calendar creation reaches exact cloud calendars and queues native Apple de
   assert.match(app, /Event queued for Apple Calendar/);
 });
 
+test("revoked provider tokens become reconnectable account state", async () => {
+  const [integrations, actions, app] = await Promise.all([
+    readFile(new URL("../lib/integrations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/provider-actions.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/PortalApp.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(integrations, /IntegrationReconnectRequiredError/);
+  assert.match(integrations, /invalid_grant/);
+  assert.match(integrations, /SET status = 'error'/);
+  assert.match(actions, /markConnectionReconnectRequired/);
+  assert.match(app, /needs reconnection/);
+  assert.match(app, /"Reconnect"/);
+});
+
 test("device publishing accepts both local and shared project identities", async () => {
   const actions = await readFile(
     new URL("../lib/provider-actions.ts", import.meta.url),
@@ -155,7 +170,7 @@ test("starter preview is removed and product metadata is present", async () => {
   assert.match(page, /requireChatGPTUser/);
   assert.match(layout, /your company in one place/i);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  assert.match(app, /Spaces-0\.1\.19-universal\.dmg/);
+  assert.match(app, /Spaces-0\.1\.20-universal\.dmg/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });
 

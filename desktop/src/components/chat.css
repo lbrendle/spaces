@@ -328,8 +328,8 @@
 }
 .emoji-pop button:hover,
 .emoji-pop button:focus-visible { background: var(--bg-active); }
-.composer-emoji-pop { left: 0; bottom: calc(100% + var(--space-3)); }
-.composer-emoji { align-self: flex-end; margin-bottom: var(--space-2); }
+.composer-emoji-pop { right: 0; bottom: calc(100% + var(--space-3)); }
+.composer-emoji { align-self: flex-end; margin-bottom: 0; }
 .emoji-trigger {
   width: 30px; height: 30px;
   color: var(--text-faint); font-size: var(--fs-lg);
@@ -385,7 +385,7 @@
    SQLite. Without this the message just sits there unanswered.  */
 .queue-note {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-3) var(--msg-gutter);
 }
 .queue-chip {
   display: inline-flex; align-items: center; gap: var(--space-2);
@@ -855,7 +855,7 @@
    Answered before Send, because finding out afterwards costs the
    turn — and an agent whose host is offline cannot answer at all. */
 .compose-routing {
-  margin: var(--space-3) 0 0;
+  margin: var(--space-3) 0 0 var(--msg-gutter);
   color: var(--text-dim); font-size: var(--fs-sm);
 }
 .cr-line {
@@ -905,13 +905,20 @@
 
 /* ── Composer: the keys, and the single-agent note ────────── */
 .composer-foot {
-  display: flex; align-items: baseline; gap: var(--space-4);
-  flex-wrap: wrap; margin-top: var(--space-3);
+  display: flex; align-items: center; gap: var(--space-4);
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+  min-height: var(--space-4);
+  line-height: 1.25;
 }
-.composer-foot .composer-hint { margin-top: 0; }
+.composer-foot .composer-hint { margin: 0; padding-left: 0; }
 .composer-keys {
-  margin-left: auto; display: inline-flex; gap: var(--space-4);
+  display: inline-flex; gap: var(--space-4);
   color: var(--text-faint); font-size: var(--fs-micro);
+  white-space: nowrap;
 }
 .composer-keys kbd {
   font-family: var(--mono); font-size: var(--fs-micro);

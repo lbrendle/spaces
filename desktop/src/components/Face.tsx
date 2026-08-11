@@ -47,6 +47,7 @@ import { errorText, toast } from "../toast";
 import { colorFor } from "../types";
 import type { AgentKind, EntityRef, Member } from "../types";
 import { harnessFor } from "../capabilities";
+import { config } from "../config";
 import { Modal } from "./ui";
 import { IconImage } from "./icons";
 import "./face.css";
@@ -102,12 +103,13 @@ function metricsFor(size: FaceSize): Metrics {
 export const HARNESS_MARK_LABEL: Record<AgentKind, string> = {
   claude: "Claude",
   codex: "Codex",
-  ritz: "Ritz",
+  ritz: config().localAiName,
+  custom: "Custom CLI",
 };
 
 /** Unknown kinds run on Claude, which is also what capabilities.ts assumes. */
 export function harnessKind(kind: string): AgentKind {
-  return kind === "codex" || kind === "ritz" ? kind : "claude";
+  return kind === "codex" || kind === "ritz" || kind === "custom" ? kind : "claude";
 }
 
 /**
@@ -165,6 +167,14 @@ export function HarnessMark({
         <>
           <circle cx="12" cy="12" r="8.4" strokeWidth={2.6} />
           <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
+        </>
+      )}
+      {k === "custom" && (
+        // A terminal prompt: generic by design, because the executable is the
+        // user's rather than Spaces's.
+        <>
+          <path d="M5 7.5L9.5 12L5 16.5" strokeWidth={2.5} />
+          <path d="M11.5 17H19" strokeWidth={2.5} />
         </>
       )}
     </svg>

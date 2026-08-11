@@ -117,6 +117,32 @@ test("failed approvals become durable channel context for agent retries", async 
   assert.match(actions, /insertMessage/);
 });
 
+test("forks can configure and import arbitrary local agent harnesses", async () => {
+  const [types, config, capabilities, agents, settings, rust, portal] = await Promise.all([
+    readFile(new URL("../src/types.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
+    readFile(new URL("../../portal/lib/workspace.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(types, /AgentKind = [^;]*"custom"/);
+  assert.match(config, /localAiName/);
+  assert.match(config, /VITE_SPACES_LOCAL_AI_URL/);
+  assert.match(capabilities, /label: "Custom CLI"/);
+  assert.match(capabilities, /label: "Executable"[\s\S]*storage: "model"/);
+  assert.match(agents, /program: agent\.model\.trim\(\)/);
+  assert.match(agents, /Choose an executable for this Custom CLI agent/);
+  assert.match(settings, /Open-source runtime/);
+  assert.match(rust, /async fn check_program/);
+  assert.match(rust, /async fn discover_agent_profiles/);
+  assert.match(rust, /\.claude\/agents/);
+  assert.match(rust, /\.codex\/agents/);
+  assert.match(portal, /"claude", "codex", "ritz", "custom"/);
+});
+
 test("Knowledge references use shared sync identities and exclude private collections", async () => {
   const [blackboard, operations, refs] = await Promise.all([
     readFile(new URL("../src/blackboard.ts", import.meta.url), "utf8"),

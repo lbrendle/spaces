@@ -88,6 +88,7 @@ import {
 import { Pane } from "./Shell";
 import { Field, Modal, mdToHtml } from "./ui";
 import { confirmAction, toast } from "../toast";
+import { isProviderReconnectRequired } from "../portal";
 import { config } from "../config";
 import "./operations.css";
 
@@ -1965,7 +1966,29 @@ export function MailView() {
       setNotice(`Synced ${plural(next.length, "message")} into ${folder}.`);
       void countFolders();
     } catch (reason) {
-      toast.error("Could not sync mail", reason);
+      if (isProviderReconnectRequired(reason)) {
+        const message = reason instanceof Error ? reason.message : String(reason);
+        setAccounts(await listIntegrationAccounts());
+        setNotice(message);
+        toast.show({
+          kind: "error",
+          title: "Reconnect mail to keep syncing",
+          detail: message,
+          action: {
+            label: "Open Integrations",
+            run: () => {
+              try {
+                localStorage.setItem("spaces.settings.section", "integrations");
+              } catch {
+                // Settings still opens; locked-down storage only loses the tab hint.
+              }
+              setView({ type: "settings" });
+            },
+          },
+        });
+      } else {
+        toast.error("Could not sync mail", reason);
+      }
     } finally {
       setBusy(false);
     }

@@ -28,7 +28,7 @@ import { IconBolt } from "./icons";
 import { ptyKill, ptyResize, ptySpawn, ptyWrite, subscribe } from "../pty";
 import { useStore } from "../store";
 import type { Agent } from "../types";
-import { configuredEffort } from "../capabilities";
+import { configuredEffort, tokenize } from "../capabilities";
 import "./terminal.css";
 
 /* ── attributes ──────────────────────────────────────────────── */
@@ -606,6 +606,11 @@ export function interactiveCommand(
       args.push("-c", `model_reasoning_effort="${effort}"`);
     }
     return { program: "codex", args };
+  }
+  if (agent?.kind === "custom") {
+    return agent.model.trim()
+      ? { program: agent.model.trim(), args: tokenize(agent.cli_args ?? "") }
+      : { program: "zsh", args: ["-l", "-i"] };
   }
   if (agent?.kind === "ritz" || !agent) return { program: "zsh", args: ["-l", "-i"] };
   const args = model ? ["--model", model] : [];

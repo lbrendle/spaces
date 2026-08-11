@@ -111,8 +111,8 @@
    the word "TERMINAL" into the corner as though it were a number. */
 .cc-rail button > span:not(.cc-rail-label) {
   position: absolute;
-  right: var(--space-2);
-  top: var(--space-1);
+  right: 5px;
+  top: calc(50% - 14px);
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
@@ -131,8 +131,8 @@
 /* ── Collapsible dock ────────────────────────────────────────── */
 
 .cc-dock {
-  flex: 0 0 clamp(400px, 43%, 660px);
-  min-width: 400px;
+  flex: 0 0 clamp(420px, 45%, 700px);
+  min-width: 420px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -165,8 +165,8 @@
 }
 
 .cc-dock-head {
-  min-height: 38px;
-  padding: 0 7px 0 12px;
+  min-height: 40px;
+  padding: 0 8px 0 14px;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -246,7 +246,7 @@
 }
 
 .cc-terminal-tab {
-  height: 27px;
+  height: 29px;
   display: flex;
   align-items: center;
   border: 1px solid transparent;
@@ -264,7 +264,7 @@
 
 .cc-terminal-tab > button:first-child {
   height: 100%;
-  padding: 0 5px 0 9px;
+  padding: 0 6px 0 9px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -280,7 +280,8 @@
 
 .cc-terminal-close {
   height: 100%;
-  padding: 0 7px 0 3px;
+  min-width: 24px;
+  padding: 0 7px 0 4px;
   display: inline-flex;
   align-items: center;
   color: var(--text-faint);
@@ -291,8 +292,8 @@
 }
 
 .cc-add-tab {
-  width: 27px;
-  height: 27px;
+  width: 29px;
+  height: 29px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -314,7 +315,7 @@
 .cc-launcher {
   flex: 1;
   min-height: 0;
-  padding: 22px 18px;
+  padding: 22px 16px;
   overflow-y: auto;
   background: var(--bg);
 }
@@ -343,8 +344,8 @@
   max-width: 640px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150px;
-  gap: 8px;
-  margin: 0 0 10px;
+  gap: 10px;
+  margin: 0 0 12px;
 }
 
 .cc-session-config label {
@@ -379,12 +380,12 @@
 .cc-launch-card {
   width: 100%;
   min-width: 0;
-  min-height: 54px;
-  padding: 8px 11px;
+  min-height: 56px;
+  padding: 10px 12px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   text-align: left;
   border-bottom: 1px solid var(--border-soft);
   background: transparent;

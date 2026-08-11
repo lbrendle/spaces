@@ -25,6 +25,7 @@ import { getDb, now } from "../db";
 import { colorFor, slug } from "../types";
 import type { Agent, Calendar, Device, Member, MemberRole } from "../types";
 import { accessFor } from "../calendars";
+import { config } from "../config";
 import { workloadOf } from "../links";
 import type { AssignmentView } from "../links";
 import { confirmAction, toast } from "../toast";
@@ -64,7 +65,7 @@ type Ownership = Pick<Agent, "owner_member_id" | "host_device_id" | "visibility"
 
 const ABOUT_KEY = "spaces.people.about";
 
-const HARNESS_GLYPH: Record<string, string> = { claude: "✳", codex: "◈", ritz: "◉" };
+const HARNESS_GLYPH: Record<string, string> = { claude: "✳", codex: "◈", ritz: "◉", custom: "⌘" };
 
 /** What `check_tools` looks for, in the order a card should read them. */
 const KNOWN_TOOLS = ["claude", "codex", "gh"] as const;
@@ -1460,6 +1461,7 @@ function BringAgentPanel({
   const [visibility, setVisibility] = useState<AgentVisibility>(
     existing?.visibility === "private" ? "private" : "workspace"
   );
+  const [customProgram, setCustomProgram] = useState(existing?.kind === "custom" ? existing.model : "");
   const [busy, setBusy] = useState(false);
 
   const chosen = target === "new" ? null : agents.find((a) => a.id === target) ?? null;
@@ -1479,7 +1481,9 @@ function BringAgentPanel({
         )
       : undefined;
 
-  const canSave = target === "new" ? !!clean && !nameClash : !!chosen;
+  const canSave = target === "new"
+    ? !!clean && !nameClash && (kind !== "custom" || !!customProgram.trim())
+    : !!chosen;
   const agentLabel = target === "new" ? clean || "The agent" : chosen?.name ?? "The agent";
 
   async function save() {
@@ -1498,7 +1502,7 @@ function BringAgentPanel({
         const created = await store.addAgent({
           name: clean,
           kind,
-          model: String(values.model ?? "").trim(),
+          model: kind === "custom" ? customProgram.trim() : String(values.model ?? "").trim(),
           cli_args: serializeArgs(kind, values),
         });
         await store.updateAgent(created.id, ownership);
@@ -1612,6 +1616,16 @@ function BringAgentPanel({
               />
               <p className="pe-hint">{meta.blurb}</p>
             </div>
+            {kind === "custom" && (
+              <Field label="Executable">
+                <input
+                  value={customProgram}
+                  onChange={(event) => setCustomProgram(event.target.value)}
+                  placeholder="aider or /absolute/path/to/my-agent"
+                  spellCheck={false}
+                />
+              </Field>
+            )}
           </>
         ) : (
           <p className="pe-hint">
@@ -1694,7 +1708,7 @@ function BringAgentPanel({
             )}
             {hostDevice && effectiveKind === "ritz" && (
               <li>
-                Ritz answers on that machine's own port rather than from PATH, so a device's tool
+                {config().localAiName} answers on that machine's configured HTTP port rather than from PATH, so a device's tool
                 list says nothing either way about it.
               </li>
             )}

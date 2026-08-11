@@ -27,7 +27,7 @@ import {
 } from "../lib/knowledge-tree";
 
 const OFFICIAL_DESKTOP_DOWNLOAD =
-  "https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.19-universal.dmg";
+  "https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.20-universal.dmg";
 const CONFIGURED_DESKTOP_DOWNLOAD =
   process.env.NEXT_PUBLIC_SPACES_DESKTOP_DOWNLOAD_URL?.trim() ?? "";
 const DESKTOP_DOWNLOAD_URL =
@@ -258,7 +258,7 @@ const SOURCE_CATALOG = [
   {
     kind: "runtime",
     label: "Agent runtimes",
-    descriptor: "Claude, Codex, and Ritz configuration is administered here and executed by Spaces desktop",
+    descriptor: "Claude, Codex, local HTTP, and custom CLI configuration is administered here and executed by Spaces desktop",
     mode: "Admin policy",
   },
   {
@@ -3741,6 +3741,12 @@ function ConnectionsSurface({
             const connections = snapshot.connections.filter(
               (connection) => connection.kind === provider.id,
             );
+            const connectedConnections = connections.filter(
+              (connection) => connection.status === "connected",
+            );
+            const reconnectConnections = connections.filter(
+              (connection) => connection.status === "error",
+            );
             const shared = provider.audience === "workspace";
             const selectedProject =
               connectProjects[provider.id] ?? snapshot.projects[0]?.id ?? "";
@@ -3758,8 +3764,10 @@ function ConnectionsSurface({
                     <div>
                     <h3>{provider.label}</h3>
                     <p>
-                      {connections.length
-                        ? `${connections.length} ${connections.length === 1 ? "account" : "accounts"} connected`
+                      {reconnectConnections.length
+                        ? `${reconnectConnections.length} ${reconnectConnections.length === 1 ? "account needs" : "accounts need"} reconnection`
+                        : connectedConnections.length
+                          ? `${connectedConnections.length} ${connectedConnections.length === 1 ? "account" : "accounts"} connected`
                         : provider.ready
                           ? "Ready for account authorization."
                           : provider.reason}
@@ -3772,7 +3780,11 @@ function ConnectionsSurface({
                   </div>
                   </div>
                   {connections.length > 0 && (
-                    <span className="source-state connected">connected</span>
+                    <span
+                      className={`source-state ${reconnectConnections.length ? "error" : "connected"}`}
+                    >
+                      {reconnectConnections.length ? "reconnect" : "connected"}
+                    </span>
                   )}
                 </header>
 
@@ -3789,7 +3801,9 @@ function ConnectionsSurface({
                                 : "Ready to use"}
                             </small>
                           </div>
-                          <span>{connection.status}</span>
+                          <span className={connection.status === "error" ? "error" : ""}>
+                            {connection.status === "error" ? "needs reconnection" : connection.status}
+                          </span>
                         </header>
                         {shared && snapshot.projects.length > 0 && (
                           <div className="project-account-links">
@@ -3884,7 +3898,11 @@ function ConnectionsSurface({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      {connections.length ? "Add account" : "Connect"}
+                      {reconnectConnections.length
+                        ? "Reconnect"
+                        : connections.length
+                          ? "Add account"
+                          : "Connect"}
                     </a>
                   </div>
                 ) : provider.ready ? (
@@ -4477,7 +4495,8 @@ function DialogFields({
           <select name="backend" defaultValue="codex">
             <option value="claude">Claude Code</option>
             <option value="codex">Codex</option>
-            <option value="ritz">Ritz local</option>
+            <option value="ritz">Local HTTP</option>
+            <option value="custom">Custom CLI</option>
           </select>
         </Field>
         <Field label="Model" hint="Blank uses the harness default.">
@@ -4491,7 +4510,7 @@ function DialogFields({
             <option value="high">High</option>
             <option value="xhigh">Extra high</option>
             <option value="max">Maximum</option>
-            <option value="deep">Deep (Ritz)</option>
+            <option value="deep">Deep (local HTTP)</option>
           </select>
         </Field>
         <Field

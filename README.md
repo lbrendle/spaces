@@ -18,7 +18,7 @@
 ![Spaces — a local-first operating system for people and AI agents](./portal/public/og.png)
 
 <p align="center">
-  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.19-universal.dmg"><strong>Download for Mac</strong></a>
+  <a href="https://spaces-downloads.ghostreader-app.workers.dev/Spaces-0.1.20-universal.dmg"><strong>Download for Mac</strong></a>
   ·
   <a href="./docs/OPEN_SOURCE_INVENTORY.md">Feature inventory</a>
   ·
@@ -112,8 +112,11 @@ ordinary sync.
 
 ## Agents have native workspace tools
 
-Spaces routes Claude, Codex, and Ritz through one versioned event-harness
-contract. Each turn carries an explicit `[Spaces Context]` block with the run,
+Spaces routes Claude, Codex, any stdin/stdout Custom CLI, and a configurable
+local HTTP engine through one versioned event-harness contract. Existing
+Markdown agent profiles can be imported from conventional Claude, Codex,
+OpenCode, and project-local folders. Each turn carries an explicit
+`[Spaces Context]` block with the run,
 agent, project, channel, triggering event, reply destination, and working
 directory. Sessions remain scoped to one `(channel, agent)` pair; a durable
 SQLite queue batches events that arrive while an agent is busy.
@@ -152,8 +155,10 @@ surface by surface.
 
 ## Quick start
 
-You need macOS 13+, Node.js 22, Rust stable, and at least one supported agent
-runtime (`claude` or `codex`). Install `gh` for GitHub-backed project surfaces.
+You need macOS 13+, Node.js 22, and Rust stable. An agent runtime is optional:
+use `claude`, `codex`, the generic Local HTTP adapter, or configure any Custom
+CLI executable that accepts a prompt on stdin. Install `gh` for GitHub-backed
+project surfaces.
 
 ```bash
 git clone https://github.com/lbrendle/spaces.git

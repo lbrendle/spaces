@@ -60,6 +60,17 @@ struct PortalMediaResponse {
     error: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveredAgentProfile {
+    path: String,
+    name: String,
+    kind: String,
+    description: String,
+    model: String,
+    persona: String,
+}
+
 /// PATH from a login shell — a bundled .app gets a minimal launchd PATH, which
 /// breaks both finding CLIs and the node/git tooling they spawn.
 fn login_path() -> &'static str {
@@ -256,10 +267,8 @@ async fn upload_portal_media(
         {
             #[cfg(target_os = "macos")]
             {
-                let converted = std::env::temp_dir().join(format!(
-                    "spaces-instagram-{}.jpg",
-                    temp_suffix()
-                ));
+                let converted =
+                    std::env::temp_dir().join(format!("spaces-instagram-{}.jpg", temp_suffix()));
                 let output = Command::new("/usr/bin/sips")
                     .args(["-s", "format", "jpeg", "-s", "formatOptions", "95"])
                     .arg(&real)
@@ -273,8 +282,7 @@ async fn upload_portal_media(
                     let _ = std::fs::remove_file(&converted);
                     let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
                     return Err(if detail.is_empty() {
-                        "Could not convert this image to the JPEG format Instagram requires."
-                            .into()
+                        "Could not convert this image to the JPEG format Instagram requires.".into()
                     } else {
                         format!("Could not convert this image for Instagram: {detail}")
                     });
@@ -300,15 +308,15 @@ async fn upload_portal_media(
         let upload_metadata = std::fs::metadata(&upload_path)
             .map_err(|error| format!("could not inspect {}: {error}", upload_path.display()))?;
         if upload_metadata.len() == 0 {
-            let _ = converted_path
-                .as_ref()
-                .map(|path| std::fs::remove_file(path));
+            if let Some(path) = converted_path.as_ref() {
+                let _ = std::fs::remove_file(path);
+            }
             return Err("The prepared media file is empty.".into());
         }
         if upload_metadata.len() > 95 * 1024 * 1024 {
-            let _ = converted_path
-                .as_ref()
-                .map(|path| std::fs::remove_file(path));
+            if let Some(path) = converted_path.as_ref() {
+                let _ = std::fs::remove_file(path);
+            }
             return Err("Media uploads are limited to 95 MB.".into());
         }
         let result = (|| -> Result<PortalMedia, String> {
@@ -320,9 +328,8 @@ async fn upload_portal_media(
                 .query_pairs_mut()
                 .append_pair("filename", &file_name)
                 .append_pair("projectId", project_id.trim());
-            let file = std::fs::File::open(&upload_path).map_err(|error| {
-                format!("could not open {}: {error}", upload_path.display())
-            })?;
+            let file = std::fs::File::open(&upload_path)
+                .map_err(|error| format!("could not open {}: {error}", upload_path.display()))?;
             let client = reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(300))
                 .build()
@@ -332,10 +339,7 @@ async fn upload_portal_media(
                 .bearer_auth(token.trim())
                 .header(reqwest::header::CONTENT_TYPE, &content_type)
                 .header(reqwest::header::CONTENT_LENGTH, upload_metadata.len())
-                .body(reqwest::blocking::Body::sized(
-                    file,
-                    upload_metadata.len(),
-                ))
+                .body(reqwest::blocking::Body::sized(file, upload_metadata.len()))
                 .send()
                 .map_err(|error| format!("Spaces could not upload the media file: {error}"))?;
             let status = response.status();
@@ -491,6 +495,141 @@ async fn check_tools() -> HashMap<String, bool> {
             m.insert(name.to_string(), found);
         }
         m
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Check a user-configured executable without launching it. Bare commands are
+/// resolved against the same login-shell PATH used for agent runs; explicit
+/// paths are checked directly.
+#[tauri::command]
+async fn check_program(program: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
+        let program = program.trim();
+        if program.is_empty() {
+            return false;
+        }
+        let path = Path::new(program);
+        if path.components().count() > 1 || path.is_absolute() {
+            return path.is_file();
+        }
+        Path::new(&resolve_bin(program)).is_absolute()
+    })
+    .await
+    .unwrap_or(false)
+}
+
+fn unquote_frontmatter(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        value[1..value.len() - 1].to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn parse_agent_profile(path: &Path, kind: &str) -> Option<DiscoveredAgentProfile> {
+    let bytes = std::fs::read(path).ok()?;
+    let bounded = &bytes[..bytes.len().min(65_536)];
+    let source = String::from_utf8_lossy(bounded).replace("\r\n", "\n");
+    let mut name = path.file_stem()?.to_string_lossy().replace(['-', '_'], " ");
+    let mut description = String::new();
+    let mut model = String::new();
+    let mut persona = source.trim().to_string();
+
+    if let Some(body) = source.strip_prefix("---\n") {
+        if let Some(end) = body.find("\n---\n") {
+            let front = &body[..end];
+            persona = body[end + 5..].trim().to_string();
+            for line in front.lines() {
+                let Some((key, value)) = line.split_once(':') else {
+                    continue;
+                };
+                let value = unquote_frontmatter(value);
+                match key.trim() {
+                    "name" if !value.is_empty() => name = value,
+                    "description" => description = value,
+                    "model" if kind != "custom" => model = value,
+                    _ => {}
+                }
+            }
+        }
+    }
+    if kind == "custom" {
+        model = "opencode".to_string();
+    }
+    if persona.is_empty() {
+        persona = description.clone();
+    }
+    Some(DiscoveredAgentProfile {
+        path: path.to_string_lossy().to_string(),
+        name,
+        kind: kind.to_string(),
+        description,
+        model,
+        persona,
+    })
+}
+
+/// Discover agent instruction profiles from the conventional user and project
+/// locations used by Claude Code, Codex, OpenCode and tool-neutral repos.
+/// Read-only, bounded, and restricted to fixed subdirectories.
+#[tauri::command]
+async fn discover_agent_profiles(project_roots: Vec<String>) -> Vec<DiscoveredAgentProfile> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mut roots: Vec<(PathBuf, String)> = vec![
+            (
+                PathBuf::from(&home).join(".claude/agents"),
+                "claude".to_string(),
+            ),
+            (
+                PathBuf::from(&home).join(".codex/agents"),
+                "codex".to_string(),
+            ),
+            (
+                PathBuf::from(&home).join(".config/opencode/agents"),
+                "custom".to_string(),
+            ),
+        ];
+        for root in project_roots.into_iter().take(50) {
+            let root = PathBuf::from(root);
+            roots.push((root.join(".claude/agents"), "claude".to_string()));
+            roots.push((root.join(".codex/agents"), "codex".to_string()));
+            roots.push((root.join(".agents"), "codex".to_string()));
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        let mut found = Vec::new();
+        for (directory, kind) in roots {
+            let Ok(entries) = std::fs::read_dir(directory) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                if found.len() >= 200 {
+                    break;
+                }
+                let path = entry.path();
+                if path.extension().and_then(|value| value.to_str()) != Some("md")
+                    || !path.is_file()
+                {
+                    continue;
+                }
+                let key = path.to_string_lossy().to_string();
+                if !seen.insert(key) {
+                    continue;
+                }
+                if let Some(profile) = parse_agent_profile(&path, &kind) {
+                    found.push(profile);
+                }
+            }
+        }
+        found.sort_by_key(|profile| profile.name.to_lowercase());
+        found
     })
     .await
     .unwrap_or_default()
@@ -1849,6 +1988,8 @@ pub fn run() {
             run_git,
             run_git_ex,
             check_tools,
+            check_program,
+            discover_agent_profiles,
             apple_calendar_snapshot,
             apple_calendar_create,
             start_agent_run,

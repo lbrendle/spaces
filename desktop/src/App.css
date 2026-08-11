@@ -1360,17 +1360,24 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
  * vertical edges within 63px of each other, none of them shared. Near-misses
  * like that are what read as broken; a real offset would not.
  *
- * The caret itself cannot make the line — the leading stack (padding, the
- * emoji button, the gap) is 62px against a 40px gutter — so the box's edge is
- * what carries the alignment.
+ * The caret makes the line too: the textarea comes first, while the emoji and
+ * send controls live at the trailing edge. That keeps typed text on the same
+ * reading column instead of shifting it behind a leading toolbar button.
  */
 .composer {
-  display: flex; gap: var(--space-3); align-items: flex-end;
-  margin-left: var(--msg-gutter);
+  display: flex;
+  flex-direction: column;
+  margin-left: calc(var(--msg-gutter) - var(--space-3));
   background: var(--bg-input);
   border: 1px solid var(--border); border-radius: var(--radius-md);
   padding: var(--space-3);
   transition: var(--t-color);
+}
+.composer-main {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
 }
 /* A thread is already a narrow column with its own gutter; indenting again
    would eat it. */
@@ -1381,6 +1388,8 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 /* The composer box IS the field — the textarea inside it keeps no chrome of
    its own, so it keeps no recess either. */
 .composer textarea {
+  flex: 1 1 auto;
+  min-width: 0;
   border: none; background: none;
   /*
    * No horizontal inset: the box around this IS the field, which is why the
@@ -1406,13 +1415,12 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   color: var(--text-faint); font-size: var(--fs-xs);
   margin-top: var(--space-2);
   margin-left: var(--msg-gutter);
-  padding-left: var(--space-1);
 }
 .composer-wrap.in-thread .composer-hint { margin-left: 0; }
 /* Level 3: a popover over the composer, not a modal — --shadow-md, not lg. */
 .mention-pop {
   position: absolute; bottom: 100%;
-  left: calc(var(--pane-x) + var(--msg-gutter)); right: var(--pane-x);
+  left: calc(var(--pane-x) + var(--msg-gutter) - var(--space-3)); right: var(--pane-x);
   background: var(--bg-overlay);
   border: 1px solid var(--border); border-radius: var(--radius-md);
   overflow: hidden; box-shadow: var(--shadow-md);
@@ -1468,10 +1476,10 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   top: 0;
   z-index: 3;
   margin: 0 0 var(--space-4);
-  /* Bleed to the body's gutter so the fill covers the full width of what
-     passes behind it, then put the text back on its own column. */
-  margin-inline: calc(var(--pane-x) * -1);
-  padding: var(--space-3) var(--pane-x);
+  /* Keep the sticky fill inside its layout box. Negative inline margins made
+     every dashboard-derived surface a few pixels wider than its scroller,
+     producing hidden horizontal drift in People, Settings and activity. */
+  padding: var(--space-3) 0;
   background: var(--bg);
   font-size: var(--fs-md); font-weight: 650;
   letter-spacing: var(--ls-title);
@@ -1479,7 +1487,7 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 }
 /* A nested section is inside another section's flow, so it must not pin to the
    same line as its parent — it is a heading in a document, not a column head. */
-.dash-card .dash-card h3 { position: static; margin-inline: 0; padding-inline: 0; }
+.dash-card .dash-card h3 { position: static; padding-inline: 0; }
 /* A section nested in a section is one heading level quieter, not one box
    deeper. */
 .dash-card .dash-card { margin-top: var(--space-5); }

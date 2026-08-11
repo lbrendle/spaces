@@ -624,7 +624,7 @@ export function Palette() {
       { label: "Calendar", glyph: "◷", tone: "var(--yellow)", view: { type: "calendar" }, hint: "Events across every visible calendar", extra: "schedule agenda week day events" },
       { label: "Tasks", glyph: "✓", tone: "var(--green)", view: { type: "tasks" }, hint: "The board", extra: "board backlog todo doing done kanban" },
       { label: "Memory", glyph: "◆", tone: "var(--purple)", view: { type: "memory" }, hint: "Decisions and standing context", extra: "notes decisions context" },
-      { label: "Agents & Teams", glyph: "✳", tone: "var(--orange)", view: { type: "agents" }, hint: "The roster", extra: "roster people bots claude codex ritz" },
+      { label: "Agents & Teams", glyph: "✳", tone: "var(--orange)", view: { type: "agents" }, hint: "The roster", extra: "roster people bots claude codex local http custom cli harness" },
       { label: "Connections", glyph: "⧉", tone: "var(--cyan)", view: { type: "graph" }, hint: "The link graph", extra: "graph links map network relations" },
       { label: "Workspaces", glyph: "⑂", tone: "var(--cyan)", view: { type: "workspaces" }, hint: "Per-agent git worktrees", extra: "worktrees branches isolate" },
       { label: "Git activity", glyph: "⌥", tone: "var(--green)", view: { type: "git" }, hint: "Commits, branches, pull requests", extra: "github commits diff branches prs" },

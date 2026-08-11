@@ -20,6 +20,7 @@ import { useStore } from "../store";
 import { getDb } from "../db";
 import { toast } from "../toast";
 import { fetchRitzModels, RITZ_BASE } from "../capabilities";
+import { config } from "../config";
 import { Spinner } from "./ui";
 import { IconBolt, IconCheck, IconGitHub } from "./icons";
 import "./setup.css";
@@ -291,7 +292,7 @@ export function SetupGuide() {
       <p className="rt-lede">
         Agents belong to this workspace, not to a person — everyone here can use anyone's.
         Each one wraps a runtime on somebody's machine: the <code>claude</code> or{" "}
-        <code>codex</code> CLI, or the local Ritz engine. It answers while its host device is
+        <code>codex</code> CLI, a Custom CLI, or {config().localAiName} over HTTP. It answers while its host device is
         online.
       </p>
       <p className="rt-lede">
@@ -412,14 +413,14 @@ export function SetupGuide() {
             summary={
               <>
                 <Dot tone="ok" />
-                Ritz is answering on {host}
+                {config().localAiName} is answering on {host}
                 {ritz.models > 0 && ` — ${ritz.models} model${ritz.models === 1 ? "" : "s"}`}.
               </>
             }
           >
             <p className="rt-card-good">
-              Spaces's third runtime: your own on-device engine, reached over local HTTP. Agents of
-              kind <code>ritz</code> run here, with no CLI and no cloud round-trip.
+              Your configured on-device engine, reached over local HTTP. Local HTTP agents run
+              here, with no CLI and no cloud round-trip.
             </p>
           </Fold>
         ) : (
@@ -428,13 +429,13 @@ export function SetupGuide() {
               <>
                 <Dot tone={ritz.state === "checking" ? "wait" : "idle"} />
                 {ritz.state === "checking"
-                  ? `Looking for Ritz on ${host}…`
-                  : "Ritz is not running — optional, and nothing to install from here."}
+                  ? `Looking for ${config().localAiName} on ${host}…`
+                  : `${config().localAiName} is not running — optional, and nothing to install from here.`}
               </>
             }
           >
             <p className="rt-card-good">
-              Ritz is a local engine rather than a CLI, so it never appears on your PATH. Start
+              {config().localAiName} is a local engine rather than a CLI, so it never appears on your PATH. Start
               it and Spaces picks it up at the address below on the next re-check.
             </p>
             <CopyLine cmd={RITZ_BASE} />
@@ -524,7 +525,7 @@ export function FirstRunChecklist() {
     {
       id: "agent",
       title: "Add an agent",
-      hint: "A named Claude Code, Codex or Ritz teammate. It runs on whichever machine hosts it.",
+      hint: "A named Claude Code, Codex, local HTTP, or Custom CLI teammate. It runs on whichever machine hosts it.",
       done: agents.length > 0,
       run: () => setView({ type: "agents" }),
     },

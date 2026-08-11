@@ -110,7 +110,7 @@ export function Avatar({ name, id, kind }: { name: string; id: string; kind?: st
   // be able to take down the entire project workspace.
   const letter = (name?.[0] ?? "?").toUpperCase();
   const badge =
-    kind === "claude" ? "✳" : kind === "codex" ? "◈" : kind === "ritz" ? "◉" : null;
+    kind === "claude" ? "✳" : kind === "codex" ? "◈" : kind === "ritz" ? "◉" : kind === "custom" ? "⌘" : null;
   return (
     <div className="avatar" style={{ background: colorFor(id) }}>
       {letter}

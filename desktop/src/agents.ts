@@ -323,6 +323,48 @@ const codexAdapter: AgentAdapter = {
   },
 };
 
+/**
+ * Product-neutral escape hatch for local agent harnesses. The executable is
+ * stored in Agent.model so it syncs through the existing schema; cli_args is
+ * passed through exactly. A custom CLI reads the prompt from stdin and may
+ * print plain text or common JSON/JSONL message shapes.
+ */
+const customAdapter: AgentAdapter = {
+  id: "custom",
+  program: "",
+
+  buildArgs(agent) {
+    return tokenize(agent.cli_args ?? "");
+  },
+
+  extractSessionId(obj) {
+    return String(obj.session_id ?? obj.sessionId ?? obj.thread_id ?? "");
+  },
+
+  parseLine(obj, run) {
+    const candidate =
+      obj.text ??
+      obj.message?.content ??
+      obj.message ??
+      obj.content ??
+      obj.delta?.content ??
+      obj.delta?.text ??
+      obj.choices?.[0]?.delta?.content ??
+      obj.choices?.[0]?.message?.content;
+    if (typeof candidate === "string" && candidate) {
+      run.parts.push(candidate);
+      run.liveActivity = "";
+      pushActivity(run, "text", candidate.slice(0, 200));
+    }
+    if (obj.tool || obj.tool_name || obj.name && obj.type === "tool") {
+      const name = String(obj.tool ?? obj.tool_name ?? obj.name);
+      pushActivity(run, "tool", name);
+      run.liveActivity = `⚙︎ using ${name}…`;
+    }
+    if (obj.error) pushActivity(run, "stderr", String(obj.error).slice(0, 300));
+  },
+};
+
 /* ------------------------------------------------------------------ *
  * Ritz — the user's local on-device engine. Not a CLI: an HTTP service
  * that streams Server-Sent Events. It is a different transport behind the
@@ -335,7 +377,7 @@ const codexAdapter: AgentAdapter = {
  * ------------------------------------------------------------------ */
 
 /** Local model server for the `ritz` kind; overridable per deployment. */
-export const RITZ_URL = config().ritzUrl;
+export const RITZ_URL = config().localAiUrl;
 
 export function ritzConversationId(channelId: string, agentId: string): string {
   return `spaces-${channelId}-${agentId}`;
@@ -415,7 +457,7 @@ async function startRitzRun(opts: {
     ),
   });
   if (!res.ok || !res.body) {
-    throw new Error(`Ritz engine returned ${res.status} ${res.statusText}`);
+    throw new Error(`${config().localAiName} returned ${res.status} ${res.statusText}`);
   }
 
   // Drain in the background; runAgent's promise settles off the done event.
@@ -431,7 +473,7 @@ async function startRitzRun(opts: {
     const stall = setTimeout(() => {
       if (!sawData && !ctrl.signal.aborted) {
         failure =
-          "Ritz accepted the request but produced no output in 2 minutes. Its GPU worker is " +
+          `${config().localAiName} accepted the request but produced no output in 2 minutes. Its worker is ` +
           "probably busy with an earlier request — restart the engine if this persists.";
         ctrl.abort();
         void handleEvent({ runId: opts.runId, kind: "error", data: failure, exitCode: 1 });
@@ -475,9 +517,13 @@ const ADAPTERS: Record<AgentKind, AgentAdapter> = {
   claude: claudeAdapter,
   codex: codexAdapter,
   ritz: ritzAdapter,
+  custom: customAdapter,
 };
 
 export function adapterFor(agent: Agent): AgentAdapter {
+  if (agent.kind === "custom") {
+    return { ...customAdapter, program: agent.model.trim() };
+  }
   return ADAPTERS[agent.kind] ?? claudeAdapter;
 }
 
@@ -1732,6 +1778,9 @@ export async function runAgent(
   });
 
   try {
+    if (!remote && agent.kind === "custom" && !adapter.program) {
+      throw new Error("Choose an executable for this Custom CLI agent before running it.");
+    }
     if (remote) {
       const remoteAgentId = await portalIdForLocal("agent", agent.id);
       if (!remoteAgentId) {

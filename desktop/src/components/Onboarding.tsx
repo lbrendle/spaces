@@ -507,7 +507,7 @@ type Presence = "here" | "checking" | "absent";
 function useRitzProbe(): { state: Presence; url: string; recheck: () => void } {
   const [state, setState] = useState<Presence>("checking");
   const [nonce, setNonce] = useState(0);
-  const url = config().ritzUrl;
+  const url = config().localAiUrl;
 
   useEffect(() => {
     let live = true;
@@ -1305,7 +1305,7 @@ function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situat
       <Aside title="What this means, precisely">
         <p className="ob-hint">
           <code>claude</code> and <code>codex</code> are command-line programs, found by looking on
-          the PATH of the machine hosting the agent. Ritz is not: it is an HTTP service, so it never
+          the PATH of the machine hosting the agent. {config().localAiName} is not: it is an HTTP service, so it never
           appears on a PATH and is detected by asking it directly — which is why it can read as
           absent on a machine that has it, if it simply is not running. Its address is a setting;
           change it in Settings and this checks the new one.

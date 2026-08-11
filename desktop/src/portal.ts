@@ -209,9 +209,25 @@ export async function portalProviderAction<T>(
   });
   const body = (await response.json()) as { ok?: boolean; result?: T; error?: string };
   if (!response.ok || !body.ok) {
-    throw new Error(body.error || "The connected account action failed.");
+    const message = body.error || "The connected account action failed.";
+    if (isProviderReconnectRequired(message)) {
+      const db = await getDb();
+      await db.execute(
+        `UPDATE integration_accounts
+            SET status = 'error', updated_at = $1
+          WHERE provider = $2`,
+        [now(), provider],
+      );
+      window.dispatchEvent(new CustomEvent("hq:portal-change"));
+    }
+    throw new Error(message);
   }
   return body.result as T;
+}
+
+export function isProviderReconnectRequired(reason: unknown): boolean {
+  const message = reason instanceof Error ? reason.message : String(reason ?? "");
+  return /needs? to be reconnected|choose reconnect|expired or revoked/i.test(message);
 }
 
 /**
@@ -1009,7 +1025,7 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       );
     }
     for (const remote of body.agents ?? []) {
-      const kind = ["claude", "codex", "ritz"].includes(remote.backend)
+      const kind = ["claude", "codex", "ritz", "custom"].includes(remote.backend)
         ? remote.backend
         : "codex";
       const effort = remote.effort.trim();

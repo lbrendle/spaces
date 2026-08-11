@@ -2074,7 +2074,7 @@ export async function mutateWorkspace(
       name,
       text(input.role, 120),
       text(input.owns, 500),
-      oneOf(input.backend, ["claude", "codex", "ritz"] as const, "codex"),
+      oneOf(input.backend, ["claude", "codex", "ritz", "custom"] as const, "codex"),
       text(input.model, 160),
       oneOf(
         input.effort,
@@ -3262,7 +3262,7 @@ export async function syncDevice(token: string, payload: unknown) {
     const agentId = adoptable?.id ?? id("agent");
     const backend = oneOf(
       agent.backend,
-      ["claude", "codex", "ritz"] as const,
+      ["claude", "codex", "ritz", "custom"] as const,
       "codex",
     );
     const visibility = oneOf(

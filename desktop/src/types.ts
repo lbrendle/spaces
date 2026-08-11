@@ -21,7 +21,7 @@ export interface Channel {
   created_at: number;
 }
 
-export type AgentKind = "claude" | "codex" | "ritz";
+export type AgentKind = "claude" | "codex" | "ritz" | "custom";
 
 export interface Agent {
   id: string;

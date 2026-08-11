@@ -1458,7 +1458,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(200px, 1fr));
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
   gap: var(--space-5);
   overflow-x: auto;
   padding: var(--space-5) var(--pane-x) var(--space-6);
@@ -1472,7 +1472,7 @@
 /* A column is a heading with cards under it. It was a bordered, filled panel
    containing bordered, filled cards — a box inside a box, five times across. */
 .content-column {
-  min-width: 200px;
+  min-width: 150px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1894,6 +1894,15 @@
   margin: 0;
   max-width: 26ch;
 }
+.column-empty .btn {
+  max-width: 100%;
+  min-width: 0;
+  justify-content: center;
+  padding-inline: var(--space-2);
+  white-space: normal;
+  line-height: 1.3;
+  text-align: center;
+}
 
 .content-detail {
   min-width: 0;
@@ -2066,7 +2075,8 @@
 
 @media (max-width: 1240px) {
   .content-board {
-    grid-template-columns: repeat(5, minmax(190px, 1fr));
+    grid-template-columns: repeat(5, minmax(150px, 1fr));
+    gap: var(--space-4);
   }
 }
 @media (max-width: 1120px) {

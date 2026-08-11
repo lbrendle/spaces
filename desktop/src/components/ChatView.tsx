@@ -1334,7 +1334,6 @@ function Composer({
   const [mentionSel, setMentionSel] = useState(0);
   const [showEmoji, setShowEmoji] = useState(false);
   const [noTargets, setNoTargets] = useState(false);
-  const [focused, setFocused] = useState(false);
   const [commands, setCommands] = useState<SlashCommand[]>(SPACES_COMMANDS);
   /** Escape dismisses the command hints; the next keystroke brings them back. */
   const [slashOff, setSlashOff] = useState(false);
@@ -1639,27 +1638,8 @@ function Composer({
         </div>
       )}
       <div className="composer">
-        <div className="composer-emoji">
-          <button
-            className="icon-btn emoji-trigger"
-            title="Add emoji"
-            aria-label="Add emoji"
-            aria-expanded={showEmoji}
-            onClick={() => setShowEmoji((open) => !open)}
-          >
-            ☺
-          </button>
-          {showEmoji && (
-            <div className="emoji-pop composer-emoji-pop" role="menu">
-              {QUICK_EMOJI.map((emoji) => (
-                <button key={emoji} role="menuitem" onClick={() => insertEmoji(emoji)}>
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <textarea
+        <div className="composer-main">
+          <textarea
           ref={taRef}
           value={text}
           rows={Math.min(6, Math.max(1, text.split("\n").length))}
@@ -1680,8 +1660,6 @@ function Composer({
           placeholder={
             inThread ? "Reply in thread…" : `Message #${composerChannelName}`
           }
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           onChange={(e) => {
             if (noTargets) dismissHint();
             setSlashOff(false);
@@ -1713,8 +1691,42 @@ function Composer({
               setSlashOff(true);
             }
           }}
-        />
-        <button className="btn primary" onClick={send} disabled={!text.trim()}>Send</button>
+          />
+          <div className="composer-emoji">
+            <button
+              className="icon-btn emoji-trigger"
+              title="Add emoji"
+              aria-label="Add emoji"
+              aria-expanded={showEmoji}
+              onClick={() => setShowEmoji((open) => !open)}
+            >
+              ☺
+            </button>
+            {showEmoji && (
+              <div className="emoji-pop composer-emoji-pop" role="menu">
+                {QUICK_EMOJI.map((emoji) => (
+                  <button key={emoji} role="menuitem" onClick={() => insertEmoji(emoji)}>
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="btn primary" onClick={send} disabled={!text.trim()}>Send</button>
+        </div>
+        <div className="composer-foot">
+          {!inThread && agents.length === 1 && (
+            <span className="composer-hint">
+              Messages here go to <span className="mention">@{slug(agents[0].name)}</span>{" "}
+              automatically.
+            </span>
+          )}
+          <span className="composer-keys">
+            <span><kbd>↵</kbd> send</span>
+            <span><kbd>⇧↵</kbd> new line</span>
+            {slashOptions.length > 0 && <span><kbd>↹</kbd> complete</span>}
+          </span>
+        </div>
       </div>
 
       {/* Who this message is about to reach, before it is sent. An agent whose
@@ -1771,21 +1783,6 @@ function Composer({
           Nobody was addressed — @mention an agent or team, or @all.
         </div>
       )}
-      <div className="composer-foot">
-        {!inThread && agents.length === 1 && (
-          <span className="composer-hint">
-            Messages here go to <span className="mention">@{slug(agents[0].name)}</span>{" "}
-            automatically.
-          </span>
-        )}
-        {(focused || text) && (
-          <span className="composer-keys">
-            <span><kbd>↵</kbd> send</span>
-            <span><kbd>⇧↵</kbd> new line</span>
-            {slashOptions.length > 0 && <span><kbd>↹</kbd> complete</span>}
-          </span>
-        )}
-      </div>
     </div>
   );
 }

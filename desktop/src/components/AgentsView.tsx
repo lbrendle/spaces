@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../store";
+import { config } from "../config";
 import { slug } from "../types";
 import type {
   Agent,
@@ -32,9 +33,10 @@ import type { AssignmentView } from "../links";
 import { useAutosave, useSaveShortcut } from "../autosave";
 import { confirmAction, toast } from "../toast";
 import { timeAgo } from "../github";
-import { Avatar, Field, Spinner } from "./ui";
+import { Avatar, Field, Modal, Spinner } from "./ui";
 import { SaveState, useCloseGuard } from "./SaveState";
 import { EntityAvatarStack, EntityChip } from "./EntityChip";
+import { HarnessMark } from "./Face";
 import { RadioChips } from "./LinkPicker";
 import { IconPlus, IconX, IconInfo, IconGear, IconBolt, IconSearch, IconCheck } from "./icons";
 import {
@@ -60,7 +62,7 @@ import "./agents.css";
 type Availability = "ready" | "unavailable" | "unknown";
 
 interface Runtimes {
-  of(kind: string): Availability;
+  of(kind: string, program?: string): Availability;
   recheck(): void;
   checking: boolean;
 }
@@ -74,11 +76,13 @@ const RITZ_TIMEOUT = 2500;
  * answers on its port right now or does not. Ritz is only asked when somebody
  * actually has a Ritz agent — an idle workspace shouldn't poll a local port.
  */
-function useRuntimes(needRitz: boolean): Runtimes {
+function useRuntimes(needRitz: boolean, customPrograms: string[] = []): Runtimes {
   const tools = useStore((s) => s.tools);
   const [ritz, setRitz] = useState<Availability>("unknown");
   const [checking, setChecking] = useState(false);
+  const [custom, setCustom] = useState<Record<string, boolean>>({});
   const [nonce, setNonce] = useState(0);
+  const customKey = [...new Set(customPrograms.map((p) => p.trim()).filter(Boolean))].sort().join("\n");
 
   useEffect(() => {
     if (!needRitz) return;
@@ -99,6 +103,23 @@ function useRuntimes(needRitz: boolean): Runtimes {
     };
   }, [needRitz, nonce]);
 
+  useEffect(() => {
+    const programs = customKey ? customKey.split("\n") : [];
+    if (!programs.length) {
+      setCustom({});
+      return;
+    }
+    let live = true;
+    void Promise.all(
+      programs.map(async (program) => [program, await invoke<boolean>("check_program", { program })] as const)
+    ).then((pairs) => {
+      if (live) setCustom(Object.fromEntries(pairs));
+    }).catch(() => {
+      if (live) setCustom(Object.fromEntries(programs.map((program) => [program, false])));
+    });
+    return () => { live = false; };
+  }, [customKey, nonce]);
+
   const recheck = useCallback(() => {
     setChecking(true);
     setNonce((n) => n + 1);
@@ -112,15 +133,20 @@ function useRuntimes(needRitz: boolean): Runtimes {
   // may only change when an answer actually changes.
   return useMemo(
     () => ({
-      of: (kind: string): Availability => {
+      of: (kind: string, program = ""): Availability => {
         if (kind === "ritz") return ritz;
+        if (kind === "custom") {
+          const key = program.trim();
+          if (!key) return "unavailable";
+          return custom[key] === undefined ? "unknown" : custom[key] ? "ready" : "unavailable";
+        }
         const found = tools[kind];
         return found === undefined ? "unknown" : found ? "ready" : "unavailable";
       },
       recheck,
       checking,
     }),
-    [tools, ritz, recheck, checking]
+    [tools, ritz, custom, recheck, checking]
   );
 }
 
@@ -128,7 +154,10 @@ function useRuntimes(needRitz: boolean): Runtimes {
 function unavailableNote(kind: string, name: string): string {
   const handle = `@${slug(name)}`;
   if (kind === "ritz") {
-    return `The Ritz engine isn't answering on ${RITZ_BASE.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
+    return `${config().localAiName} isn't answering on ${RITZ_BASE.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
+  }
+  if (kind === "custom") {
+    return `That custom executable isn't available on this machine, so ${handle} can't run here. Configure its command or host it on a teammate's device.`;
   }
   const bin = kind === "codex" ? "codex" : "claude";
   return `${bin} isn't on this machine's PATH, so ${handle} can't run from here. Teammates who have it can.`;
@@ -209,6 +238,15 @@ interface AgentRow {
   haystack: string;
 }
 
+interface DiscoveredAgentProfile {
+  path: string;
+  name: string;
+  kind: Agent["kind"];
+  description: string;
+  model: string;
+  persona: string;
+}
+
 interface TeamRow {
   team: Team;
   handle: string;
@@ -286,9 +324,16 @@ export function AgentsView() {
   const [harness, setHarness] = useState<HarnessFilter>("all");
   const [avail, setAvail] = useState<AvailFilter>("all");
   const [sort, setSort] = useState<SortKey>("name");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [discovered, setDiscovered] = useState<DiscoveredAgentProfile[]>([]);
+  const [importSelected, setImportSelected] = useState<Set<string>>(new Set());
   const seq = useRef(0);
 
-  const runtimes = useRuntimes(agents.some((a) => a.kind === "ritz"));
+  const runtimes = useRuntimes(
+    agents.some((a) => a.kind === "ritz"),
+    agents.filter((a) => a.kind === "custom").map((a) => a.model)
+  );
 
   // The window is the wrong thing to measure: the sidebar and the inspector
   // both eat into this pane without the window changing size.
@@ -357,7 +402,7 @@ export function AgentsView() {
       return {
         agent,
         handle: slug(agent.name),
-        availability: runtimes.of(agent.kind),
+        availability: runtimes.of(agent.kind, agent.model),
         running,
         lastActive: lastActiveOf(agent.id, sessions, runs),
         workload,
@@ -438,7 +483,7 @@ export function AgentsView() {
         members,
         workload: workloadOf({ type: "team", id: team.id }).sort(byRole),
         channels: channels.filter((c) => channelIds.has(c.id)),
-        ready: members.filter((m) => runtimes.of(m.kind) === "ready").length,
+        ready: members.filter((m) => runtimes.of(m.kind, m.model) === "ready").length,
         memberLoad: members.reduce((n, m) => n + (loadById.get(m.id) ?? 0), 0),
         lastActive: members.reduce((t, m) => Math.max(t, lastActiveOf(m.id, sessions, runs)), 0),
         haystack: [team.name, slug(team.name), team.description, team.charter,
@@ -478,6 +523,59 @@ export function AgentsView() {
     setQuery("");
     setHarness("all");
     setAvail("all");
+  }
+
+  async function openLocalImport() {
+    setImportOpen(true);
+    setImportBusy(true);
+    try {
+      const response = await invoke<DiscoveredAgentProfile[]>("discover_agent_profiles", {
+        projectRoots: projects.map((project) => project.local_path).filter(Boolean),
+      });
+      const profiles = Array.isArray(response) ? response : [];
+      setDiscovered(profiles);
+      setImportSelected(new Set(profiles.map((profile) => profile.path)));
+    } catch (error) {
+      toast.error("Could not scan local agent profiles", error);
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function importLocalProfiles() {
+    const chosen = discovered.filter((profile) => importSelected.has(profile.path));
+    if (!chosen.length) return;
+    setImportBusy(true);
+    const used = new Set(useStore.getState().agents.map((agent) => agent.name.toLowerCase()));
+    let firstId = "";
+    try {
+      for (const profile of chosen) {
+        let name = profile.name.trim() || "Imported agent";
+        let suffix = 2;
+        while (used.has(name.toLowerCase())) name = `${profile.name} ${suffix++}`;
+        used.add(name.toLowerCase());
+        const created = await useStore.getState().addAgent({
+          name,
+          kind: profile.kind,
+          model: profile.model,
+          persona: profile.persona,
+          role: "Imported agent",
+          owns: profile.description,
+          cli_args: "",
+        });
+        if (!firstId) firstId = created.id;
+      }
+      toast.success(
+        `${chosen.length} local agent${chosen.length === 1 ? "" : "s"} imported`,
+        "Their instruction files were copied into the shared roster; the originals were not changed."
+      );
+      setImportOpen(false);
+      if (firstId) setSel({ kind: "agent", id: firstId });
+    } catch (error) {
+      toast.error("Could not import local agents", error);
+    } finally {
+      setImportBusy(false);
+    }
   }
 
   const showRoster = wide || !sel;
@@ -573,6 +671,9 @@ export function AgentsView() {
           </div>
         </div>
         <div className="row">
+          <button className="btn" onClick={() => void openLocalImport()}>
+            Import local
+          </button>
           <button className="btn" onClick={openNewTeam}>
             <IconPlus size={13} /> Team
           </button>
@@ -671,6 +772,52 @@ export function AgentsView() {
 
         {showDetail && <div className="ag-detail-col">{detail}</div>}
       </div>
+      {importOpen && (
+        <Modal title="Import local agents" wide onClose={() => !importBusy && setImportOpen(false)}>
+          <div className="ag-import-intro">
+            Reads conventional profile folders for Claude Code, Codex, OpenCode, and this workspace.
+            Importing copies their instructions into the roster and never edits the source files.
+          </div>
+          {importBusy && discovered.length === 0 ? (
+            <div className="ag-import-empty"><Spinner /> Looking for agent profiles…</div>
+          ) : discovered.length === 0 ? (
+            <div className="ag-import-empty">
+              No Markdown profiles found in ~/.claude/agents, ~/.codex/agents,
+              ~/.config/opencode/agents, or this workspace&apos;s agent folders.
+            </div>
+          ) : (
+            <div className="ag-import-list">
+              {discovered.map((profile) => (
+                <label className="ag-import-row" key={profile.path}>
+                  <input
+                    type="checkbox"
+                    checked={importSelected.has(profile.path)}
+                    onChange={(event) => setImportSelected((current) => {
+                      const next = new Set(current);
+                      if (event.target.checked) next.add(profile.path);
+                      else next.delete(profile.path);
+                      return next;
+                    })}
+                  />
+                  <span className="ag-import-mark"><HarnessMark kind={profile.kind} size={16} /></span>
+                  <span className="ag-import-copy">
+                    <strong>{profile.name}</strong>
+                    <span>{profile.description || harnessFor(profile.kind).label}</span>
+                    <code>{profile.path}</code>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="ag-import-actions">
+            <span>{importSelected.size} selected</span>
+            <button type="button" className="btn" disabled={importBusy} onClick={() => setImportOpen(false)}>Cancel</button>
+            <button type="button" className="btn primary" disabled={importBusy || importSelected.size === 0} onClick={() => void importLocalProfiles()}>
+              {importBusy ? "Importing…" : "Import selected"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -767,7 +914,7 @@ function AboutAgents() {
             <div>
               <dt>Each one runs on the machine that has its runtime.</dt>
               <dd>
-                <code>claude</code> and <code>codex</code> are CLIs on somebody's PATH; Ritz is an
+                <code>claude</code>, <code>codex</code>, and Custom CLI agents run from somebody's PATH; {config().localAiName} is an
                 engine answering on {RITZ_BASE.replace("http://", "")}. An agent can work while at
                 least one host with that runtime is online — which is why a card can say it is
                 unavailable <em>from here</em> and still be perfectly usable by a teammate.
@@ -1888,8 +2035,9 @@ function AgentEditor({
   const preview = commandPreview(kind, values);
   const risks = riskNotes(kind, values);
   const serialized = serializeArgs(kind, values);
-  const runtimes = useRuntimes(kind === "ritz");
-  const availability = runtimes.of(kind);
+  const customProgram = String(values.model ?? "");
+  const runtimes = useRuntimes(kind === "ritz", kind === "custom" ? [customProgram] : []);
+  const availability = runtimes.of(kind, customProgram);
 
   const handle = slug(name);
   // Mentions resolve by handle, so two agents sharing one is a real ambiguity.
@@ -2781,7 +2929,7 @@ function RitzModelPicker({
           }}
         >
           <option value="">
-            {engineDefault ? `Let Ritz choose (${engineDefault})` : "Let Ritz choose"}
+            {engineDefault ? `Let ${config().localAiName} choose (${engineDefault})` : `Let ${config().localAiName} choose`}
           </option>
           {/* keeps a saved model visible while the live list is still loading */}
           {!!value && !inList && <option value={value}>{value}</option>}
@@ -2796,12 +2944,12 @@ function RitzModelPicker({
       )}
       {models === null && !error && (
         <div className="model-status">
-          <Spinner /> Asking Ritz which models it has…
+          <Spinner /> Asking {config().localAiName} which models it has…
         </div>
       )}
       {!!error && (
         <div className="model-status warn">
-          Ritz isn&rsquo;t answering on 127.0.0.1:8765 — type a model key, or start the engine and
+          {config().localAiName} isn&rsquo;t answering on {RITZ_BASE.replace(/^https?:\/\//, "")} — type a model key, or start the engine and
           reopen this dialog.
         </div>
       )}

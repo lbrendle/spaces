@@ -3606,6 +3606,15 @@ kbd {
   text-transform: uppercase;
 }
 
+.provider-account > header > span.error,
+.source-state.error {
+  color: var(--red);
+}
+
+.source-state.error {
+  background: var(--red-soft);
+}
+
 .project-account-links {
   display: grid;
   gap: 5px;

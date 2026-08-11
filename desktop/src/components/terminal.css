@@ -48,8 +48,8 @@
 }
 
 .tm-root-embedded .tm-bar {
-  min-height: 34px;
-  padding: 6px 10px;
+  min-height: 38px;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--code-border);
   background: color-mix(in srgb, var(--code-bg) 88%, var(--bg-raised));
 }
@@ -67,14 +67,15 @@
 }
 
 .tm-root-embedded .tm-screen {
+  --tm-fs: 12.5px;
   flex: 1;
   height: auto;
   min-height: 0;
-  padding: 14px 16px 20px;
+  padding: 16px 14px 24px;
   border: 0;
   border-radius: 0;
   background: var(--code-bg);
-  font-size: 12.5px;
+  font-size: var(--tm-fs);
 }
 
 /* Full-bleed inside a clipping parent, so it takes the one permitted focus

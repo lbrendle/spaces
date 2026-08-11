@@ -27,7 +27,7 @@
  */
 import { config } from "./config";
 
-export type HarnessKind = "claude" | "codex" | "ritz";
+export type HarnessKind = "claude" | "codex" | "ritz" | "custom";
 
 /** Widget used to edit an option. */
 export type ControlKind = "text" | "enum" | "boolean" | "number" | "repeatable";
@@ -95,7 +95,7 @@ export interface HarnessMeta {
  * Local model server for the `ritz` kind. Read through config() so a fork can
  * point it elsewhere — or run none at all — without editing this manifest.
  */
-export const RITZ_BASE = config().ritzUrl;
+export const RITZ_BASE = config().localAiUrl;
 export const RITZ_CHAT_URL = `${RITZ_BASE}/chat`;
 export const RITZ_MODELS_URL = `${RITZ_BASE}/models`;
 
@@ -120,7 +120,7 @@ export interface RitzModelList {
  */
 export async function fetchRitzModels(signal?: AbortSignal): Promise<RitzModelList> {
   const res = await fetch(RITZ_MODELS_URL, { signal });
-  if (!res.ok) throw new Error(`Ritz returned ${res.status}`);
+  if (!res.ok) throw new Error(`${config().localAiName} returned ${res.status}`);
   const raw: unknown = await res.json();
   const box = (raw ?? {}) as Record<string, unknown>;
   const list: unknown = Array.isArray(raw) ? raw : box.models ?? box.data ?? [];
@@ -382,7 +382,7 @@ const RITZ_OPTIONS: readonly HarnessOption[] = [
   {
     key: "model",
     label: "Model",
-    help: "Fetched live from the engine. Blank lets Ritz route the message itself.",
+    help: `Fetched live from ${config().localAiName}. Blank lets the engine route the message itself.`,
     control: "text",
     kind: "json",
     storage: "model",
@@ -446,6 +446,20 @@ const RITZ_OPTIONS: readonly HarnessOption[] = [
   },
 ];
 
+const CUSTOM_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "model",
+    label: "Executable",
+    help: "Command name on PATH or an absolute executable path. Spaces sends the prompt on stdin and reads stdout.",
+    control: "text",
+    kind: "flag",
+    storage: "model",
+    placeholder: "aider",
+    group: "Command",
+    chip: true,
+  },
+];
+
 export const HARNESSES: readonly HarnessMeta[] = [
   {
     kind: "claude",
@@ -469,13 +483,23 @@ export const HARNESSES: readonly HarnessMeta[] = [
   },
   {
     kind: "ritz",
-    label: "Ritz (local)",
-    blurb: "Your on-device engine over HTTP at 127.0.0.1:8765 — no CLI, no cloud, no API key.",
+    label: `${config().localAiName} (HTTP)`,
+    blurb: `A configurable local or self-hosted engine at ${RITZ_BASE} — no vendor lock-in.`,
     wire: "http",
     base: `POST ${RITZ_CHAT_URL}`,
     rawLabel: "Raw body fields",
     rawHelp: "The JSON body fields, as key=value pairs. Edit them and the controls follow; unknown fields are kept and sent as-is.",
     rawPlaceholder: "use_tools=true deep=false",
+  },
+  {
+    kind: "custom",
+    label: "Custom CLI",
+    blurb: "Runs any local stdin/stdout agent or harness in the project checkout.",
+    wire: "cli",
+    base: "<executable>",
+    rawLabel: "Arguments",
+    rawHelp: "Arguments passed after the executable. The prompt is sent on stdin; plain text or JSON-line output is accepted.",
+    rawPlaceholder: "--json --yes",
   },
 ];
 
@@ -483,6 +507,7 @@ const MANIFEST: Record<HarnessKind, readonly HarnessOption[]> = {
   claude: CLAUDE_OPTIONS,
   codex: CODEX_OPTIONS,
   ritz: RITZ_OPTIONS,
+  custom: CUSTOM_OPTIONS,
 };
 
 /**
@@ -491,7 +516,9 @@ const MANIFEST: Record<HarnessKind, readonly HarnessOption[]> = {
  * separately, and unknown kinds degrade to Claude rather than crashing.
  */
 function norm(kind: string): HarnessKind {
-  return kind === "codex" || kind === "ritz" || kind === "claude" ? kind : "claude";
+  return kind === "codex" || kind === "ritz" || kind === "claude" || kind === "custom"
+    ? kind
+    : "claude";
 }
 
 export function harnessFor(kind: string): HarnessMeta {
@@ -776,6 +803,7 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
     if (!text) continue;
     if (opt.choices && !opt.choices.includes(text)) continue;
     if (opt.key === "model") {
+      if (norm(fromKind) === "custom" || norm(toKind) === "custom") continue;
       const prev = optionFor(fromKind, "model");
       const fromList = Boolean(prev?.suggestions?.includes(text)) || prev?.dynamic !== undefined;
       const crossWire = harnessFor(fromKind).wire !== harnessFor(toKind).wire;
@@ -797,7 +825,7 @@ export function commandPreview(kind: string, values: OptionValues): string {
   const k = norm(kind);
   const modelOpt = optionFor(k, "model");
   const model = asText(values.model).trim();
-  const parts = [meta.base];
+  const parts = [k === "custom" ? quoteArg(model || "<executable>") : meta.base];
   if (model && modelOpt?.flag) parts.push(modelOpt.flag, quoteArg(model));
   const args = serializeArgs(k, values);
   if (args) parts.push(args);

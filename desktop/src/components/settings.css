@@ -250,6 +250,9 @@
 .connection-status.connected {
   color: var(--green);
 }
+.connection-status.error {
+  color: var(--red);
+}
 
 .connection-cards .quiet-btn {
   grid-column: 2 / -1;
@@ -315,6 +318,47 @@
   height: 36px;
   padding: 0 var(--space-4);
   font-size: var(--fs-sm);
+}
+
+.runtime-config-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+.runtime-config-form label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.runtime-config-form label > span {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.runtime-config-form input {
+  width: 100%;
+  min-width: 0;
+}
+.runtime-config-form small {
+  color: var(--text-faint);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+}
+.runtime-wide { grid-column: 1 / -1; }
+.runtime-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+@media (max-width: 760px) {
+  .runtime-config-form { grid-template-columns: 1fr; }
+  .runtime-wide { grid-column: auto; }
+  .runtime-config-actions { align-items: flex-start; flex-direction: column; }
 }
 
 /* The paired device: a heading-and-facts block, not a panel. */

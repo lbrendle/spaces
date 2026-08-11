@@ -502,6 +502,13 @@
   box-shadow: none;
 }
 
+/* Four useful columns should fit on a normal laptop without hiding Done. */
+@media (max-width: 1320px) {
+  .kanban { gap: var(--space-4); }
+  .kanban .kanban-col,
+  .swimlane-cols .kanban-col { min-width: 214px; }
+}
+
 /*
  * Drop target. The wash lands on the cards, which is where the card is going —
  * it used to light the whole column including its head, which at four columns
@@ -603,18 +610,18 @@
   100% { transform: scale(2.4); opacity: 0; }
 }
 
-/* No scroller: the board owns vertical movement. The 3px of padding is there
-   so the drag wash and the hover shadows have somewhere to land, and it is
-   cancelled by the matching negative margin so the cards stay on the column's
-   own edge. */
+/* No scroller: the board owns vertical movement. The horizontal breathing room
+   lets the drag wash and hover shadows land without widening the column. The
+   top is intentionally not cancelled: pulling it upward puts the first card
+   under the sticky heading and clips its border. */
 .kanban-col .kanban-cards {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   overflow: visible;
   min-height: var(--space-3);
-  margin: calc(var(--space-1) * -1);
-  padding: var(--space-1);
+  margin: 0 calc(var(--space-1) * -1) calc(var(--space-1) * -1);
+  padding: var(--space-3) var(--space-1) var(--space-1);
   transition: background var(--dur) var(--ease);
 }
 

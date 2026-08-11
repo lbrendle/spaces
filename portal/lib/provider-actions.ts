@@ -2,7 +2,10 @@ import { env } from "cloudflare:workers";
 import { getD1 } from "../db";
 import {
   connectedAccountAccess,
+  IntegrationReconnectRequiredError,
+  markConnectionReconnectRequired,
   markConnectionSynced,
+  reconnectRequiredError,
   type ConnectedAccountAccess,
 } from "./integrations";
 
@@ -91,6 +94,12 @@ async function providerJson<T>(
     raw = {};
   }
   if (!response.ok) {
+    if (response.status === 401) {
+      throw reconnectRequiredError(
+        access.provider,
+        "The provider rejected the saved authorization.",
+      );
+    }
     throw new Error(parseProviderError(raw, `${access.provider} rejected the request.`));
   }
   return raw as T;
@@ -795,9 +804,16 @@ export async function createConnectedCalendarEvent(
     providerId,
     actorUserId,
   );
-  const result = await createCalendar(access, input);
-  await markConnectionSynced(access.connectionId);
-  return result;
+  try {
+    const result = await createCalendar(access, input);
+    await markConnectionSynced(access.connectionId);
+    return result;
+  } catch (error) {
+    if (error instanceof IntegrationReconnectRequiredError) {
+      await markConnectionReconnectRequired(access.connectionId);
+    }
+    throw error;
+  }
 }
 
 export async function runDeviceProviderAction(
@@ -816,14 +832,21 @@ export async function runDeviceProviderAction(
       projectId,
     },
   );
-  let result: unknown;
-  if (action === "calendar.sources") result = await listCalendarSources(access);
-  else if (action === "calendar.list") result = await listCalendar(access, input);
-  else if (action === "calendar.create") result = await createCalendar(access, input);
-  else if (action === "mail.list") result = await listMail(access, input);
-  else if (action === "mail.send") result = await sendMail(access, input);
-  else if (action === "social.publish") result = await publishSocial(access, input);
-  else throw new Error("Unknown provider action.");
-  await markConnectionSynced(access.connectionId);
-  return { ok: true, result };
+  try {
+    let result: unknown;
+    if (action === "calendar.sources") result = await listCalendarSources(access);
+    else if (action === "calendar.list") result = await listCalendar(access, input);
+    else if (action === "calendar.create") result = await createCalendar(access, input);
+    else if (action === "mail.list") result = await listMail(access, input);
+    else if (action === "mail.send") result = await sendMail(access, input);
+    else if (action === "social.publish") result = await publishSocial(access, input);
+    else throw new Error("Unknown provider action.");
+    await markConnectionSynced(access.connectionId);
+    return { ok: true, result };
+  } catch (error) {
+    if (error instanceof IntegrationReconnectRequiredError) {
+      await markConnectionReconnectRequired(access.connectionId);
+    }
+    throw error;
+  }
 }

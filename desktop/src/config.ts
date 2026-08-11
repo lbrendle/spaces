@@ -31,8 +31,10 @@ export interface SpacesConfig {
    * the pairing screen prompts and stores what the user types.
    */
   portalUrl: string;
-  /** Local model server used by the `ritz` agent kind. */
-  ritzUrl: string;
+  /** User-facing label for the bundled generic local HTTP adapter. */
+  localAiName: string;
+  /** Base URL for the local HTTP /models + /chat adapter. */
+  localAiUrl: string;
   /** SQLite file name, relative to the platform app-data directory. */
   dbName: string;
   /** Directory Spaces mirrors shared context into, inside each project repo. */
@@ -53,7 +55,13 @@ const BUILD_DEFAULTS: SpacesConfig = {
   brand: env("VITE_SPACES_BRAND", "Spaces"),
   brandShort: env("VITE_SPACES_BRAND_SHORT", env("VITE_SPACES_BRAND", "Spaces")),
   portalUrl: env("VITE_SPACES_PORTAL_URL", ""),
-  ritzUrl: env("VITE_SPACES_RITZ_URL", "http://127.0.0.1:8765"),
+  localAiName: env("VITE_SPACES_LOCAL_AI_NAME", "Local AI"),
+  // VITE_SPACES_RITZ_URL is retained as a build-time compatibility alias for
+  // existing forks; new distributions should use the product-neutral name.
+  localAiUrl: env(
+    "VITE_SPACES_LOCAL_AI_URL",
+    env("VITE_SPACES_RITZ_URL", "http://127.0.0.1:8765")
+  ),
   dbName: env("VITE_SPACES_DB_NAME", "spaces.db"),
   contextDir: env("VITE_SPACES_CONTEXT_DIR", ".hq"),
   samplePath: env("VITE_SPACES_SAMPLE_PATH", "~/code/my-app"),
@@ -61,7 +69,15 @@ const BUILD_DEFAULTS: SpacesConfig = {
 };
 
 /** Keys a user may change at runtime; the rest are build-time only. */
-const RUNTIME_KEYS = ["brand", "brandShort", "portalUrl", "ritzUrl", "samplePath", "docsUrl"] as const;
+const RUNTIME_KEYS = [
+  "brand",
+  "brandShort",
+  "portalUrl",
+  "localAiName",
+  "localAiUrl",
+  "samplePath",
+  "docsUrl",
+] as const;
 export type RuntimeConfigKey = (typeof RUNTIME_KEYS)[number];
 
 function loadOverrides(): Partial<SpacesConfig> {
@@ -69,6 +85,11 @@ function loadOverrides(): Partial<SpacesConfig> {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // One-time compatibility for 0.1.x installations that stored the old
+    // product-specific key. It is read but never written again.
+    if (typeof parsed.localAiUrl !== "string" && typeof parsed.ritzUrl === "string") {
+      parsed.localAiUrl = parsed.ritzUrl;
+    }
     const out: Partial<SpacesConfig> = {};
     for (const k of RUNTIME_KEYS) {
       const v = parsed[k];

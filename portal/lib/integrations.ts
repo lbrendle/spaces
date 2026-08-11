@@ -24,6 +24,24 @@ interface Provider {
   authorizeParams?: (runtime: Runtime) => Record<string, string>;
 }
 
+/**
+ * Providers can permanently revoke a refresh token while Spaces is offline.
+ * Keep that state separate from transient network and rate-limit failures so
+ * the account stops presenting as healthy and the UI can offer reconnection.
+ */
+export class IntegrationReconnectRequiredError extends Error {
+  readonly provider: ProviderId;
+
+  constructor(providerId: ProviderId, label: string, detail = "") {
+    super(
+      `${label} needs to be reconnected. Open Settings → Integrations and choose Reconnect.` +
+        (detail ? ` ${detail}` : ""),
+    );
+    this.name = "IntegrationReconnectRequiredError";
+    this.provider = providerId;
+  }
+}
+
 type Runtime = Record<string, string | undefined>;
 
 const PROVIDERS: Record<ProviderId, Provider> = {
@@ -124,6 +142,45 @@ function provider(value: string): Provider {
   const found = PROVIDERS[value as ProviderId];
   if (!found) throw new Error("Unknown integration provider.");
   return found;
+}
+
+export function reconnectRequiredError(
+  providerId: string,
+  detail = "",
+): IntegrationReconnectRequiredError {
+  const config = provider(providerId);
+  return new IntegrationReconnectRequiredError(config.id, config.label, detail);
+}
+
+function oauthErrorMessage(raw: Record<string, unknown>, fallback: string): string {
+  if (typeof raw.error_description === "string") return raw.error_description;
+  if (typeof raw.error === "string") return raw.error;
+  if (raw.error && typeof raw.error === "object") {
+    const nested = raw.error as Record<string, unknown>;
+    if (typeof nested.message === "string") return nested.message;
+    if (typeof nested.type === "string") return nested.type;
+  }
+  return fallback;
+}
+
+function refreshRequiresReconnect(
+  response: Response,
+  raw: Record<string, unknown>,
+): boolean {
+  const nested =
+    raw.error && typeof raw.error === "object"
+      ? (raw.error as Record<string, unknown>)
+      : {};
+  const code = String(raw.error ?? nested.code ?? "").toLowerCase();
+  const description = oauthErrorMessage(raw, "").toLowerCase();
+  return (
+    ["invalid_grant", "invalid_token", "access_denied"].includes(code) ||
+    Number(nested.code) === 190 ||
+    /expired|revoked|reauthori[sz]|reconnect|invalid refresh|token is not active/.test(
+      description,
+    ) ||
+    (response.status === 401 && /token|credential|authoriz/.test(description))
+  );
 }
 
 function randomToken(bytes = 32): string {
@@ -614,6 +671,7 @@ export async function finishIntegration(
 interface ConnectedAccountRow {
   id: string;
   kind: ProviderId;
+  status: string;
   accountLabel: string;
   metadataJson: string;
   encryptedJson: string;
@@ -634,7 +692,7 @@ async function refreshTokens(
   if (config.id === "meta") {
     const accessToken = String(tokens.access_token ?? "");
     if (!accessToken) {
-      throw new Error("Instagram needs to be reconnected before it can sync.");
+      throw reconnectRequiredError(config.id, "The saved authorization is missing.");
     }
     const url = new URL("https://graph.instagram.com/refresh_access_token");
     url.searchParams.set("grant_type", "ig_refresh_token");
@@ -642,12 +700,14 @@ async function refreshTokens(
     const response = await fetch(url, { headers: { accept: "application/json" } });
     const refreshed = (await response.json()) as Record<string, unknown>;
     if (!response.ok || typeof refreshed.access_token !== "string") {
+      if (refreshRequiresReconnect(response, refreshed)) {
+        throw reconnectRequiredError(
+          config.id,
+          "The saved authorization was expired or revoked.",
+        );
+      }
       throw new Error(
-        typeof refreshed.error_description === "string"
-          ? refreshed.error_description
-          : typeof refreshed.error === "string"
-            ? refreshed.error
-            : "Instagram account access could not be refreshed.",
+        oauthErrorMessage(refreshed, "Instagram account access could not be refreshed."),
       );
     }
     return {
@@ -662,7 +722,7 @@ async function refreshTokens(
     return tokens;
   }
   if (!refreshToken) {
-    throw new Error(`${config.label} needs to be reconnected before it can sync.`);
+    throw reconnectRequiredError(config.id, "The saved authorization is missing.");
   }
 
   const values = runtime();
@@ -693,12 +753,14 @@ async function refreshTokens(
   });
   const refreshed = (await response.json()) as Record<string, unknown>;
   if (!response.ok || typeof refreshed.access_token !== "string") {
+    if (refreshRequiresReconnect(response, refreshed)) {
+      throw reconnectRequiredError(
+        config.id,
+        "The saved authorization was expired or revoked.",
+      );
+    }
     throw new Error(
-      typeof refreshed.error_description === "string"
-        ? refreshed.error_description
-        : typeof refreshed.error === "string"
-          ? refreshed.error
-          : `${config.label} could not refresh its account access.`,
+      oauthErrorMessage(refreshed, `${config.label} could not refresh its account access.`),
     );
   }
   return {
@@ -745,8 +807,11 @@ export async function connectedAccountAccess(
       ? `ORDER BY (
            SELECT pc.is_default FROM project_connections pc
             WHERE pc.project_id = ? AND pc.connection_id = c.id
-         ) DESC, c.updated_at DESC`
-      : "ORDER BY c.updated_at DESC";
+         ) DESC,
+         CASE WHEN c.status = 'connected' THEN 0 ELSE 1 END,
+         c.updated_at DESC`
+      : `ORDER BY CASE WHEN c.status = 'connected' THEN 0 ELSE 1 END,
+                  c.updated_at DESC`;
   const bindings = [
     workspaceId,
     config.id,
@@ -758,11 +823,11 @@ export async function connectedAccountAccess(
   ];
   const row = await getD1()
     .prepare(
-      `SELECT c.id, c.kind, c.account_label AS accountLabel,
+      `SELECT c.id, c.kind, c.status, c.account_label AS accountLabel,
               c.metadata_json AS metadataJson, s.encrypted_json AS encryptedJson
          FROM connections c
          JOIN connection_secrets s ON s.connection_id = c.id
-        WHERE c.workspace_id = ? AND c.kind = ? AND c.status = 'connected'
+        WHERE c.workspace_id = ? AND c.kind = ?
           AND (? = 'workspace' OR c.created_by = ?)
           ${projectClause}
           ${accountClause}
@@ -783,9 +848,20 @@ export async function connectedAccountAccess(
     );
   }
 
+  if (row.status !== "connected") {
+    throw reconnectRequiredError(config.id, "The saved authorization is no longer active.");
+  }
+
   let tokens = await decryptTokens(row.encryptedJson);
   if (!accessTokenStillValid(tokens)) {
-    tokens = await refreshTokens(config, tokens);
+    try {
+      tokens = await refreshTokens(config, tokens);
+    } catch (error) {
+      if (error instanceof IntegrationReconnectRequiredError) {
+        await markConnectionReconnectRequired(row.id);
+      }
+      throw error;
+    }
     const stamp = new Date().toISOString();
     await getD1()
       .prepare(
@@ -811,6 +887,20 @@ export async function connectedAccountAccess(
     accountId: String(metadata.accountId ?? tokens.accountId ?? ""),
     accessToken,
   };
+}
+
+export async function markConnectionReconnectRequired(
+  connectionId: string,
+): Promise<void> {
+  const stamp = new Date().toISOString();
+  await getD1()
+    .prepare(
+      `UPDATE connections
+          SET status = 'error', updated_at = ?
+        WHERE id = ?`,
+    )
+    .bind(stamp, connectionId)
+    .run();
 }
 
 export async function markConnectionSynced(connectionId: string): Promise<void> {

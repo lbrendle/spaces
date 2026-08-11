@@ -29,6 +29,7 @@ import { KIND_BY_TYPE } from "../entities";
 import { LINK_KIND_BY_ID, workloadOf } from "../links";
 import { getQueueSnapshot, subscribeQueue } from "../orchestrator";
 import { RITZ_BASE } from "../capabilities";
+import { config } from "../config";
 import { errorText, toast } from "../toast";
 import { slug } from "../types";
 import type { Agent, AgentKind, EntityRef, EntityType, MemoryKind, TaskStatus } from "../types";
@@ -327,7 +328,7 @@ function runtimeAvailability(kind: AgentKind, tools: Record<string, boolean>): A
     return {
       tone: "unknown",
       label: "over HTTP",
-      hint: `Ritz is a service, not a binary — Spaces talks to it at ${RITZ_BASE}. Settings shows whether it is answering.`,
+      hint: `${config().localAiName} is a service, not a binary — ${config().brand} talks to it at ${RITZ_BASE}. Settings shows whether it is answering.`,
     };
   }
   if (Object.keys(tools).length === 0) {

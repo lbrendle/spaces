@@ -14,7 +14,7 @@ import {
   type PortalConnection,
 } from "../portal";
 import { listIntegrationAccounts, type IntegrationAccount } from "../operations";
-import { config } from "../config";
+import { config, setConfig } from "../config";
 
 
 
@@ -49,6 +49,7 @@ const PROVIDERS = [
  */
 const SECTIONS = [
   { id: "workspace", label: "Workspace", blurb: "Pairing with Spaces web" },
+  { id: "runtime", label: "Open source", blurb: "Brand and local runtime defaults" },
   { id: "integrations", label: "Integrations", blurb: "Google, Microsoft, social accounts" },
   { id: "appearance", label: "Appearance", blurb: "Theme, accent, density" },
   { id: "calendars", label: "Calendars", blurb: "Which calendars are visible" },
@@ -92,17 +93,30 @@ export function SettingsView() {
   const [portalMessage, setPortalMessage] = useState("");
   const [integrations, setIntegrations] = useState<IntegrationAccount[]>([]);
   const [appVersion, setAppVersion] = useState("");
+  const [runtimeConfig, setRuntimeConfig] = useState(() => ({
+    brand: config().brand,
+    brandShort: config().brandShort,
+    portalUrl: config().portalUrl,
+    localAiName: config().localAiName,
+    localAiUrl: config().localAiUrl,
+    docsUrl: config().docsUrl,
+  }));
 
   useEffect(() => {
-    void loadPortalConnection().then((connection) => {
-      setPortal(connection);
-      if (connection) {
-        setPortalUrl(connection.base_url);
-        setDeviceName(connection.device_name);
-      }
-    });
-    void listIntegrationAccounts().then(setIntegrations);
+    const refresh = () => {
+      void loadPortalConnection().then((connection) => {
+        setPortal(connection);
+        if (connection) {
+          setPortalUrl(connection.base_url);
+          setDeviceName(connection.device_name);
+        }
+      });
+      void listIntegrationAccounts().then(setIntegrations);
+    };
+    refresh();
+    window.addEventListener("hq:portal-change", refresh);
     void getVersion().then(setAppVersion);
+    return () => window.removeEventListener("hq:portal-change", refresh);
   }, []);
 
 
@@ -147,6 +161,12 @@ export function SettingsView() {
     setPairingCode("");
     setPortalMessage("This desktop is disconnected from Spaces web.");
     setPortalBusy(false);
+  }
+
+  function saveRuntimeConfig(event: FormEvent) {
+    event.preventDefault();
+    setConfig(runtimeConfig);
+    window.location.reload();
   }
 
   return (
@@ -280,6 +300,76 @@ export function SettingsView() {
           {portalMessage && <div className="portal-message">{portalMessage}</div>}
         </section>
 
+        <section className="dash-card" hidden={section !== "runtime"}>
+          <h3>Open-source runtime</h3>
+          <div className="set-hint about-hint">
+            Personalize this installation without editing source. These values stay on this Mac and
+            override the distribution defaults; a fork can set the same values with VITE_SPACES_* variables.
+          </div>
+          <form className="runtime-config-form" onSubmit={saveRuntimeConfig}>
+            <label>
+              <span>Product name</span>
+              <input
+                value={runtimeConfig.brand}
+                onChange={(event) => setRuntimeConfig((value) => ({ ...value, brand: event.target.value }))}
+                placeholder="Spaces"
+                required
+              />
+            </label>
+            <label>
+              <span>Short name</span>
+              <input
+                value={runtimeConfig.brandShort}
+                onChange={(event) => setRuntimeConfig((value) => ({ ...value, brandShort: event.target.value }))}
+                placeholder="Spaces"
+                required
+              />
+            </label>
+            <label className="runtime-wide">
+              <span>Web workspace default</span>
+              <input
+                value={runtimeConfig.portalUrl}
+                onChange={(event) => setRuntimeConfig((value) => ({ ...value, portalUrl: event.target.value }))}
+                placeholder="https://your-workspace.example.com"
+                type="url"
+              />
+              <small>Optional. Pairing a desktop can also set this address.</small>
+            </label>
+            <label>
+              <span>Local HTTP engine label</span>
+              <input
+                value={runtimeConfig.localAiName}
+                onChange={(event) => setRuntimeConfig((value) => ({ ...value, localAiName: event.target.value }))}
+                placeholder="Local AI"
+                required
+              />
+            </label>
+            <label>
+              <span>Local HTTP engine URL</span>
+              <input
+                value={runtimeConfig.localAiUrl}
+                onChange={(event) => setRuntimeConfig((value) => ({ ...value, localAiUrl: event.target.value }))}
+                placeholder="http://127.0.0.1:8765"
+                type="url"
+                required
+              />
+            </label>
+            <label className="runtime-wide">
+              <span>Documentation URL</span>
+              <input
+                value={runtimeConfig.docsUrl}
+                onChange={(event) => setRuntimeConfig((value) => ({ ...value, docsUrl: event.target.value }))}
+                placeholder="https://docs.example.com"
+                type="url"
+              />
+            </label>
+            <div className="runtime-config-actions runtime-wide">
+              <span className="set-hint">Saving reloads the interface so every surface uses the new values.</span>
+              <button className="primary-btn" type="submit">Save and reload</button>
+            </div>
+          </form>
+        </section>
+
         <section className="dash-card" hidden={section !== "integrations"}>
           <h3>
             {/* "Integrations", not "Connections". The rail already has a
@@ -304,6 +394,7 @@ export function SettingsView() {
                   candidate.category === provider.category
               );
               const connected = account?.status === "connected";
+              const reconnect = account?.status === "error";
               return (
                 <article key={provider.id}>
                   <span className="connection-monogram">
@@ -311,10 +402,21 @@ export function SettingsView() {
                   </span>
                   <div>
                     <strong>{provider.label}</strong>
-                    <span>{connected ? account.handle || "Connected" : provider.detail}</span>
+                    <span>
+                      {connected
+                        ? account.handle || "Connected"
+                        : reconnect
+                          ? `${account?.handle || provider.label} needs authorization again`
+                          : provider.detail}
+                    </span>
                   </div>
-                  <span className={"connection-status" + (connected ? " connected" : "")}>
-                    {connected ? "connected" : "not connected"}
+                  <span
+                    className={
+                      "connection-status" +
+                      (connected ? " connected" : reconnect ? " error" : "")
+                    }
+                  >
+                    {connected ? "connected" : reconnect ? "reconnect" : "not connected"}
                   </span>
                   <button
                     className="quiet-btn"
@@ -333,7 +435,13 @@ export function SettingsView() {
                       void openUrl(target.toString());
                     }}
                   >
-                    {connected ? "Manage" : provider.id === "apple" ? "Connect locally" : "Open web admin"}
+                    {connected
+                      ? "Manage"
+                      : reconnect
+                        ? "Reconnect"
+                        : provider.id === "apple"
+                          ? "Connect locally"
+                          : "Open web admin"}
                   </button>
                 </article>
               );

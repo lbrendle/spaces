@@ -19,7 +19,7 @@
   z-index: 1;
   display: flex;
   justify-content: space-between;
-  padding: 7px 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-soft);
   color: var(--text-faint);
   background: var(--bg-raised);
@@ -35,7 +35,7 @@
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--border-soft);
   text-align: left;
 }
@@ -112,11 +112,11 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  min-height: 43px;
+  min-height: 48px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--code-border);
   background: var(--bg-raised);
 }
@@ -144,11 +144,11 @@
   display: flex;
   gap: 14px;
   overflow: hidden;
-  padding: 6px 9px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--code-border);
   color: var(--text-dim);
   background: var(--code-bg);
-  font: 10px/1.4 var(--mono);
+  font: 10.5px/1.5 var(--mono);
 }
 
 .proc-facts span {
@@ -172,7 +172,7 @@
   display: flex;
   gap: 7px;
   overflow: hidden;
-  padding: 6px 9px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--code-border);
   color: var(--text-dim);
   font: var(--fs-micro)/1.4 var(--mono);
@@ -190,10 +190,10 @@
 
 .proc-output {
   margin: 0;
-  padding: 10px;
+  padding: 12px;
   color: var(--text);
   background: var(--code-bg);
-  font: 10.5px/1.55 var(--mono);
+  font: 11px/1.6 var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -223,7 +223,7 @@
 }
 
 .proc-prompt summary {
-  padding: 6px 9px;
+  padding: 8px 10px;
   color: var(--text-dim);
   cursor: pointer;
   font-size: var(--fs-micro);

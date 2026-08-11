@@ -1275,3 +1275,62 @@
 /* Motion is silenced globally in App.css — both by the media query and by the
    data-reduce-motion attribute the appearance settings set — so nothing in
    this file repeats it. */
+
+/* ── local profile import ───────────────────────────────────── */
+.ag-import-intro {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  margin-bottom: var(--space-4);
+}
+.ag-import-empty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--text-faint);
+  text-align: center;
+  line-height: 1.55;
+}
+.ag-import-list {
+  max-height: min(52vh, 460px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 2px;
+}
+.ag-import-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  cursor: pointer;
+}
+.ag-import-row:hover { background: var(--bg-hover); }
+.ag-import-row input { margin-top: 3px; }
+.ag-import-mark { display: inline-flex; color: var(--text-dim); margin-top: 1px; }
+.ag-import-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ag-import-copy strong { color: var(--text); font-size: var(--fs-sm); }
+.ag-import-copy span { color: var(--text-dim); font-size: var(--fs-xs); }
+.ag-import-copy code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.ag-import-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-5);
+}
+.ag-import-actions > span { margin-right: auto; color: var(--text-faint); font-size: var(--fs-xs); }
