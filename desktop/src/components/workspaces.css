@@ -206,7 +206,58 @@
   opacity: 0.4;
   cursor: default;
 }
-.ws-actions .btn:disabled:hover { background: var(--bg-raised); }
+.ws-actions .btn:disabled:hover { background: var(--surface-1); }
+
+/*
+ * The overflow that holds the two operations which destroy work.
+ *
+ * A <details> rather than a portalled menu on purpose: it is native, it is
+ * keyboard-reachable without a focus trap, and it cannot get out of sync with
+ * the card it belongs to. The cost is that it does not close on an outside
+ * click — acceptable for a menu whose contents you are meant to think about
+ * before pressing.
+ */
+.ws-more {
+  position: relative;
+  margin-left: auto;
+}
+.ws-more > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.ws-more > summary::-webkit-details-marker { display: none; }
+.ws-more[open] > summary { background: var(--bg-active); color: var(--text); }
+
+.ws-more-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  z-index: 20;
+  min-width: 236px;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  --enter-dy: 4px;
+  animation: hq-rise var(--dur-fast) var(--ease-enter);
+}
+
+.ws-more-item {
+  display: block;
+  width: 100%;
+  min-height: var(--row-h);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  transition: var(--t-color);
+}
+.ws-more-item:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+/* Red on hover, not at rest: a menu of two red rows is a warning sign, and a
+   warning you see every time you open the menu is one you stop reading. */
+.ws-more-item.danger:hover:not(:disabled) { background: var(--red-soft); color: var(--red); }
+.ws-more-item:disabled { opacity: 0.4; cursor: default; }
 
 .ws-inline-form {
   display: flex;

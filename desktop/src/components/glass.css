@@ -48,20 +48,32 @@
    (1.06x), so a menu still reads as lifted rather than as a hole. */
 
 :root {
-  /* Share of the theme's own overlay colour kept in the translucent mix. */
-  --glass-tint: 76%;
-  --glass-rail-tint: 84%;
+  /* Share of the theme's own overlay colour kept in the translucent mix.
+     The rail tint came down from 84% when the app's *chrome* — sticky pane
+     headers, the composer, sticky column heads — started using this material
+     instead of painting itself opaque. At 84% it was a panel with a rumour of
+     blur in it; the point of putting glass on a band that content scrolls
+     behind is being able to see the content go. The band below still holds the
+     contrast floor, which is what makes the extra transparency safe. */
+  --glass-tint: 74%;
+  --glass-rail-tint: 76%;
+  --glass-modal-tint: 93%;
 
   /* Small on purpose. Past ~20px the blur turns to soup and the cost per
      frame climbs; under ~8px it reads as a flat wash and you may as well
      be opaque. */
-  --glass-blur: 16px;
+  /* The note above this block says past ~20px the blur turns to soup and the
+     cost per frame climbs. It is right, and it is a ceiling rather than a
+     suggestion: 26px here was over it, and the extra 6px bought nothing a
+     glance could tell apart. */
+  --glass-blur: 17px;
   --glass-rail-blur: 20px;
 
   /* Blur averages colour away; the saturation lift puts it back, which is
      what makes the surface read as *sampling* the page rather than sitting
-     on a tinted panel. */
-  --glass-saturate: 140%;
+     on a tinted panel. Raised along with the tint: at a lower opacity there
+     is more backdrop in the mix to put the colour back into. */
+  --glass-saturate: 165%;
 
   /* The band, dark appearance: roughly [0.16, 0.34] per channel. Dark
      enough that a bright card behind a modal cannot glow through the
@@ -102,11 +114,12 @@
    text 11.1 / 14.6 / 7.1 to 1, secondary text 5.75 / 5.65 / 4.36, within
    0.2 / 0.5 / 0.6 of its fully opaque score. */
 :root[data-appearance="light"] {
-  --glass-tint: 68%;
-  --glass-rail-tint: 76%;
-  --glass-blur: 12px;
-  --glass-rail-blur: 16px;
-  --glass-saturate: 130%;
+  --glass-tint: 66%;
+  --glass-rail-tint: 70%;
+  --glass-modal-tint: 92%;
+  --glass-blur: 14px;
+  --glass-rail-blur: 18px;
+  --glass-saturate: 150%;
   --glass-contrast: 0.45;
   --glass-brightness: 2.7;
   --glass-edge: var(--border);
@@ -147,8 +160,15 @@
   --elev-3-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
 
   /* 4 — owns the window: modal, command palette. Glass, and the only
-     level allowed --shadow-lg. */
-  --elev-4-bg: var(--glass-fill);
+     level allowed --shadow-lg.
+
+     Its fill is deliberately more opaque than level 3's. A popover floats over
+     a lit page and wants to sample it; a modal floats over --backdrop, which
+     has already dimmed that page to near-black, so sampling it a second time
+     is how the command palette ended up reading as a slightly-less-dark hole
+     rather than as the brightest thing on screen. Keeping more of the overlay
+     colour puts the panel back on top of its own scrim. */
+  --elev-4-bg: color-mix(in srgb, var(--bg-overlay) var(--glass-modal-tint), transparent);
   --elev-4-border: var(--glass-edge);
   --elev-4-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
 
@@ -222,7 +242,11 @@
    popovers, dropdown and context menus, the mention and slash menus, the
    link picker, toasts, the inspector drawer. Add .elev-4 for the modal
    tier. NOT on rows, cells, chips or buttons. */
-.glass {
+/* .elev-3 is the same treatment reached for by ladder position rather than by
+   material — the third rung IS glass. Both names resolve here, because two
+   names resolving differently is exactly what left an opaque .elev-3 in
+   App.css quietly disagreeing with this file for as long as both existed. */
+.glass, .elev-3 {
   background: var(--elev-3-bg);
   border: 1px solid var(--elev-3-border);
   border-radius: var(--radius-md);
@@ -233,7 +257,8 @@
 
 /* USE ON: a .glass surface that owns the window — modal, command palette,
    confirm dialog. Nothing else in the app takes --shadow-lg. */
-.glass.elev-4 {
+.glass.elev-4,
+.elev-4 {
   background: var(--elev-4-bg);
   border-radius: var(--radius-lg);
   border-color: var(--elev-4-border);

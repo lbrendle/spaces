@@ -17,6 +17,85 @@
  * inherited. Neither is ever re-invented here.
  */
 
+/* ── the settings frame ──────────────────────────────────────── */
+
+/*
+ * An index beside the sections rather than a scroll through all of them — see
+ * the note in SettingsView.tsx. The same shape as the setup flow's step spine
+ * and Knowledge's sources rail, because it is the same object: a recessed
+ * column of places you can be, beside the one you are in.
+ */
+/* The index does not scroll with the section beside it — see the scroll-model
+   note in App.css. The split fills what the header leaves and clips; the
+   section body inside it is the only scroller. */
+.set-split {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.set-index {
+  flex: 0 0 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-5) var(--space-3);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+
+.set-index-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-dim);
+  transition: var(--t-color);
+}
+.set-index-btn:hover { background: var(--bg-hover); color: var(--text); }
+/* The app's one selected treatment. A list of destinations inside a surface
+   fills; only a switch in a groove lifts. */
+.set-index-btn.on { background: var(--accent-soft); color: var(--text); }
+
+.set-index-label { font-size: var(--fs); font-weight: 550; }
+.set-index-btn.on .set-index-label { font-weight: 650; }
+.set-index-blurb {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.set-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.set-index {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 880px) {
+  .set-split { flex-direction: column; }
+  .set-index {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+    padding: var(--space-3) var(--space-4);
+  }
+  /* Too narrow for two lines a row; the label carries it. */
+  .set-index-blurb { display: none; }
+}
+
 /* ── The page is sections, not cards ─────────────────────────── */
 
 /*

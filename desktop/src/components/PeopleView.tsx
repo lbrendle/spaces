@@ -352,14 +352,28 @@ export function PeopleView() {
                 }
               />
             ))}
-          </div>
 
-          {members.length === 1 && (
-            <p className="pe-note">
-              Invite a teammate with their email. They appear here as a real member after signing
-              in with that ChatGPT account and accepting the private link.
-            </p>
-          )}
+            {/* The next person, as a place for them rather than as a sentence
+                about them. A workspace of one showed a single 320px card
+                stranded in a 1250px grid with two empty tracks beside it and
+                the explanation of how to fill them set as a footnote below —
+                so the emptiest state on the surface was also the one where the
+                action it wanted was hardest to find. The tile occupies the slot
+                the person will occupy, which is both the affordance and the
+                answer to "is this thing broken or just empty". */}
+            {canInvite && (
+              <button type="button" className="pe-add" onClick={() => adding.show()}>
+                <span className="pe-add-glyph" aria-hidden="true">
+                  <IconPlus size={16} />
+                </span>
+                <span className="pe-add-title">Invite a teammate</span>
+                <span className="pe-add-blurb">
+                  They join with their email and appear here as a real member once they sign in
+                  with that ChatGPT account and accept the private link.
+                </span>
+              </button>
+            )}
+          </div>
         </section>
 
         {unclaimed.length > 0 && (

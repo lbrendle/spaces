@@ -1563,10 +1563,11 @@ export function KnowledgeView() {
         </>
       ) : (
         <div className="kb-blank">
+          {/* The two clauses of qualification after the em dash were answering
+            * a question nobody has yet, in the middle of an empty pane. */}
           <p className="kb-blank-text">
-            Pick a result to read it here. Imported notes render with their{" "}
-            <code>[[wikilinks]]</code> live — the ones that point at a note in the
-            same collection, anyway. The rest stay as text.
+            Pick a result to read it here. <code>[[wikilinks]]</code> stay live
+            within a collection.
           </p>
         </div>
       )}
@@ -1623,9 +1624,9 @@ export function KnowledgeView() {
             <IconAgents size={12} /> Ask an agent
           </button>
         )}
-        <button className="btn" onClick={() => void importFolder()} disabled={busy}>
-          <IconPlus size={12} /> Import a folder
-        </button>
+        {/* Import lives in the Collections column, beside the drop zone and the
+          * line that says nothing is imported yet. A second identical button up
+          * here put the same action on screen twice, 200px apart. */}
       </div>
 
       {blank ?? (
@@ -1819,12 +1820,13 @@ function Progress({ state }: { state: ImportingState }) {
  */
 function ReachNote() {
   return (
+    /* Sixty words, set in the narrowest column on the screen. Every fact below
+     * was in it; what went is the explaining. The limit stays — that is the
+     * part that would be a broken promise if it were dropped. */
     <p className="kb-reach">
-      <strong>Where this lives.</strong> Imported notes are copied into Spaces's database
-      on this device — that is what makes them readable without the original folder,
-      and what everyone using this workspace here can search. Reaching other members'
-      machines rides on the paired web workspace, which does not carry these rows yet.
-      Nothing is written back to the folders you import from.
+      <strong>Where this lives.</strong> Imported notes are copied into this device&rsquo;s
+      database — readable without the original folder, and never written back to it.
+      Other members&rsquo; machines are not reached yet.
     </p>
   );
 }

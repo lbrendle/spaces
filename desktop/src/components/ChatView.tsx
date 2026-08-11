@@ -513,6 +513,7 @@ export function ChatView({ channelId }: { channelId: string }) {
   }, [channelId, roots.length, lastRoot?.content?.length]);
 
   if (!channel) return <div className="main-pane center-note">Channel not found.</div>;
+  /* eslint-disable-next-line @typescript-eslint/no-use-before-define */
 
   const mode = modeOf(channel.mode);
   const meta = modeMeta(mode);
@@ -645,18 +646,18 @@ export function ChatView({ channelId }: { channelId: string }) {
             }}
           >
             {msgs.length === 0 && (
-              <div className="center-note chat-blank">
-                <p><strong>#{channel.name}</strong> is quiet.</p>
+              /* On the message column, left-aligned, like everything else in
+               * this scroller. It used to be centred prose in the middle of an
+               * empty pane — the one thing on the screen that did not share an
+               * edge with the composer directly beneath it. */
+              <div className="chat-blank">
+                <h2>#{channel.name} is quiet</h2>
                 {agents.length === 0 ? (
                   <>
-                    <p>
-                      No agents or teams are in this channel yet, so a message here reaches
-                      nobody.
-                    </p>
+                    <p>No agents or teams are here yet, so a message would reach nobody.</p>
                     <p className="chat-blank-rule">
-                      Once one joins, <span className="mention">@name</span> routes a message
-                      to that agent and <span className="mention">@all</span> reaches
-                      everyone in the channel. {meta.blurb}
+                      Once one joins, <span className="mention">@name</span> routes to that
+                      agent and <span className="mention">@all</span> reaches the channel.
                     </p>
                     <button className="btn" onClick={() => setShowMembers(true)}>
                       <IconAgents size={14} /> Add members
@@ -695,6 +696,18 @@ export function ChatView({ channelId }: { channelId: string }) {
           </div>
           <Composer channelId={channelId} />
         </div>
+
+        {/* The channel's context, in the space the transcript was not using.
+            Hidden while a thread is open — a thread is already the second
+            column — and inside the command centre, where the dock is. */}
+        {!threadRootId && (
+          <ChannelContext
+            channelId={channelId}
+            projectId={channel.project_id}
+            agents={agents}
+            onAddMembers={() => setShowMembers(true)}
+          />
+        )}
 
         {threadRootId && (
           <ThreadPanel
@@ -1076,6 +1089,138 @@ function agentKind(agentId: string): string | undefined {
   return useStore.getState().agents.find((a) => a.id === agentId)?.kind;
 }
 
+/* ── the channel's context ────────────────────────────────────── */
+
+/**
+ * What this channel is, beside what was said in it.
+ *
+ * A transcript is a single column of text, and it was being given the whole
+ * pane — so on any normal window roughly a third of the screen was empty to
+ * the right of every line, and the answers to "who is in here", "what work is
+ * this attached to" and "what have the agents actually done lately" were
+ * somewhere else entirely: the members modal, the board, the run inspector.
+ *
+ * The column is not decoration for the gap. It is the three questions you ask
+ * about a channel while reading it, answered where you are reading.
+ */
+function ChannelContext({
+  channelId,
+  projectId,
+  agents,
+  onAddMembers,
+}: {
+  channelId: string;
+  projectId: string;
+  agents: Agent[];
+  onAddMembers: () => void;
+}) {
+  const tasks = useStore((s) => s.tasks);
+  const runs = useStore((s) => s.runs);
+  const setView = useStore((s) => s.setView);
+  const setInspect = useStore((s) => s.setInspect);
+
+  const open = useMemo(
+    () => tasks.filter((t) => t.project_id === projectId && t.status !== "done").slice(0, 6),
+    [tasks, projectId]
+  );
+
+  /* Runs that happened in THIS channel, newest first. The store keys runs by
+     id rather than by channel, so this is a scan — it is a handful of records
+     held in memory, not a query. */
+  const recent = useMemo(
+    () =>
+      Object.values(runs)
+        .filter((r) => r.channel_id === channelId && r.finished_at)
+        .sort((a, b) => b.finished_at - a.finished_at)
+        .slice(0, 4),
+    [runs, channelId]
+  );
+
+  return (
+    <aside className="chat-context" aria-label="Channel context">
+      <section className="cx-sec">
+        <h3 className="cx-head">
+          In this channel
+          <button type="button" className="cx-add" onClick={onAddMembers}>
+            Add
+          </button>
+        </h3>
+        {agents.length === 0 ? (
+          <p className="cx-none">Nobody yet — a message here reaches no one.</p>
+        ) : (
+          <ul className="cx-people">
+            {agents.map((a) => (
+              <li key={a.id}>
+                <button
+                  type="button"
+                  className="cx-person"
+                  onClick={() => setInspect({ type: "agent", id: a.id })}
+                >
+                  <Avatar id={a.id} name={a.name} kind={a.kind} />
+                  <span className="cx-person-text">
+                    <span className="cx-person-name">{a.name}</span>
+                    <span className="cx-person-role">{a.role || a.kind}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="cx-sec">
+        <h3 className="cx-head">
+          Open work
+          <button type="button" className="cx-add" onClick={() => setView({ type: "tasks" })}>
+            Board
+          </button>
+        </h3>
+        {open.length === 0 ? (
+          <p className="cx-none">Nothing open on this project.</p>
+        ) : (
+          <ul className="cx-list">
+            {open.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  className="cx-item"
+                  onClick={() => setInspect({ type: "task", id: t.id })}
+                >
+                  <span className={"cx-dot cx-dot-" + t.status} aria-hidden="true" />
+                  <span className="cx-item-text">{t.title}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {recent.length > 0 && (
+        <section className="cx-sec">
+          <h3 className="cx-head">Recent runs</h3>
+          <ul className="cx-list">
+            {recent.map((r) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  className="cx-item"
+                  onClick={() => setInspect({ type: "run", id: r.id })}
+                >
+                  <span className={"cx-dot cx-run-" + r.status} aria-hidden="true" />
+                  <span className="cx-item-text">
+                    {agents.find((a) => a.id === r.agent_id)?.name ?? "An agent"}
+                  </span>
+                  <span className="cx-item-tail num">{timeAgo(r.finished_at)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </aside>
+  );
+}
+
 function ThreadPanel({
   channelId,
   rootId,
@@ -1197,6 +1342,7 @@ function Composer({
   const hintTimer = useRef<number | undefined>(undefined);
   const listId = useId();
   const agents = channelAgents(store, channelId);
+  const composerChannelName = store.channels.find((c) => c.id === channelId)?.name ?? "";
 
   // Adjusting state during render is React's own answer to "the props moved":
   // an effect would paint the previous channel's draft for one frame first.
@@ -1521,12 +1667,18 @@ function Composer({
           aria-expanded={options.length > 0}
           aria-controls={options.length > 0 ? listId : undefined}
           aria-activedescendant={mentionAt >= 0 ? `${listId}-m${mentionAt}` : undefined}
+          /*
+           * Just the channel. The old string was a template literal with
+           * nothing interpolated into it, so the "#…" was not a truncation —
+           * it was literally what shipped, and the channel you were writing to
+           * never appeared. Both variants then ran long enough to be cut
+           * mid-word ("@mention a") as soon as the command centre dock opened
+           * and took the column down to 620px. What they were explaining —
+           * how mentions route, that agents have to be added first — is what
+           * the empty state of a channel now says, where there is room.
+           */
           placeholder={
-            inThread
-              ? "Reply in thread…"
-              : agents.length
-                ? `Message #… — @mention a person, agent, or team`
-                : "Message… (add agents via the members button to get replies)"
+            inThread ? "Reply in thread…" : `Message #${composerChannelName}`
           }
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}

@@ -35,10 +35,13 @@
 }
 
 /* Level 4 — the only elevation in this file. */
+/* Level 4 — the only elevation in this file. Wider than it was, because the
+   step spine now takes a column of its own and the prose beside it should not
+   come out narrower than it was before. */
 .ob-panel-wrap {
   display: flex;
   flex-direction: column;
-  width: min(760px, 100%);
+  width: min(940px, 100%);
   max-height: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -83,30 +86,66 @@
 
 /* ── step rail ───────────────────────────────────────────────── */
 
+/* ── the split: spine beside content ─────────────────────────── */
+
+.ob-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.ob-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * The spine. Seven steps in a row above the content wrapped on any window
+ * under ~700px and, more to the point, read as a toolbar — a strip of pills
+ * you operate — rather than as a list of what this is going to involve.
+ * Down the side it is a contents page, and the one thing a setup flow most
+ * needs to say ("there are seven of these and you are on the second") is
+ * legible without counting.
+ */
 .ob-rail {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  flex: 0 0 202px;
   margin: 0;
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--border-soft);
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
   list-style: none;
+  overflow-y: auto;
 }
 
 .ob-rail-btn {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 28px;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-h);
   padding: 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--text-faint);
   font: inherit;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
+  text-align: left;
   cursor: pointer;
   transition: var(--t-color);
+}
+.ob-rail-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ob-rail-btn:disabled {
   cursor: default;
@@ -116,13 +155,37 @@
   background: var(--bg-hover);
 }
 
+/* The dots stand in one column and the line runs between them, so the spine is
+   a spine rather than seven unrelated circles. Drawn on the list item rather
+   than the button: it has to reach the gap between two rows, which is outside
+   either button's box. The last one has nothing below it to connect to. */
+.ob-rail-step {
+  position: relative;
+}
+.ob-rail-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--space-3) + 8px);
+  top: calc(var(--row-h) / 2 + 8px);
+  bottom: -9px;
+  width: 1px;
+  background: var(--border);
+}
+.ob-rail-step.ob-past:not(:last-child)::after {
+  background: var(--green-border);
+}
+
 .ob-rail-dot {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   width: 17px;
   height: 17px;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
+  background: var(--bg-raised);
   font-size: var(--fs-micro);
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -147,9 +210,31 @@
   color: var(--green);
 }
 
-/* The label is the first thing to go on a narrow window; the numbered dots
-   still say where you are. */
-@media (max-width: 620px) {
+/* Below the width that can carry a spine and a column of content side by side,
+   it folds back to the row it used to be — and there the label is the first
+   thing to go, because the numbered dots still say where you are. */
+@media (max-width: 720px) {
+  .ob-split {
+    flex-direction: column;
+  }
+  .ob-rail {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: var(--space-3) var(--space-4);
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+    overflow: visible;
+  }
+  .ob-rail-btn {
+    width: auto;
+    min-height: 28px;
+    font-size: var(--fs-xs);
+  }
+  .ob-rail-step:not(:last-child)::after {
+    display: none;
+  }
   .ob-rail-step:not(.ob-on) .ob-rail-label {
     display: none;
   }
@@ -250,9 +335,14 @@
 
 /* Three sentences about what Spaces is. They were three filled, bordered cards
    stacked inside the panel that already framed them. */
+/* Three reassurances, side by side. Stacked they were three short paragraphs
+   that between them filled the bottom third of the first screen anyone ever
+   sees; across the width the step column now has, they read as what they are —
+   one glance, three facts, no reading order that matters. */
 .ob-facts {
   display: grid;
-  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-4) var(--space-5);
   margin: var(--space-5) 0 0;
   padding: 0;
   list-style: none;
@@ -629,7 +719,7 @@
    of it rather than floating in the middle of three lines. */
 .ob-cmd-prose {
   align-items: flex-start;
-  background: var(--bg-inset);
+  background: var(--bg-raised);
 }
 .ob-cmd-prose .ob-cmd-text {
   overflow-x: visible;

@@ -40,11 +40,23 @@
 
 /* ── the surface ─────────────────────────────────────────────── */
 
+/*
+ * A drawer over the content panel, not over the window.
+ *
+ * It is portalled to <body> and therefore fixed to the viewport, which used to
+ * be the same thing: the app filled the window edge to edge. It does not any
+ * more — the shell insets the content as a rounded panel — so a drawer pinned
+ * to 0,0 would hang past the panel's corners and butt against the window,
+ * reading as a second, differently-shaped app stuck to the side of the first.
+ * Insetting it by the frame's own gap and giving it the frame's own radius
+ * keeps it inside the sheet it belongs to. --frame-gap and --titlebar are both
+ * root tokens for exactly this reason.
+ */
 .sp {
   --sp-w: 420px; /* the live value arrives inline, from localStorage */
   position: fixed;
-  top: 0;
-  bottom: 0;
+  top: var(--titlebar);
+  bottom: var(--frame-gap);
   z-index: 89; /* the trailing-edge layer, shared with the inspector drawer:
                   only one of the two is ever open — see SidePanel.tsx */
   width: var(--sp-w);
@@ -52,17 +64,19 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   --enter-dx: 16px;
-  animation: hq-slide var(--dur) var(--ease);
+  animation: hq-slide var(--dur) var(--ease-enter);
 }
 .sp[data-side="right"] {
-  right: 0;
-  border-left: 1px solid var(--border-soft);
+  right: var(--frame-gap);
 }
 .sp[data-side="left"] {
-  left: 0;
-  border-right: 1px solid var(--border-soft);
+  left: var(--frame-gap);
   --enter-dx: -16px;
 }
 .sp:focus-visible {

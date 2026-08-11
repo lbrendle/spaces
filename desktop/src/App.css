@@ -16,25 +16,48 @@
 
 :root {
   /* shape — mirrors RADIUS_SCALES.default */
-  --radius-sm: 6px;
-  --radius: 9px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-sm: 10px;
+  --radius: 15px;
+  --radius-md: 22px;
+  --radius-lg: 30px;
 
-  /* motion */
-  --dur-fast: 120ms;
-  --dur: 200ms;
+  /* motion
+     Three curves, and the difference between them is what a movement means.
+     --ease is the workhorse: leaves fast, settles slow, no overshoot — right
+     for anything that is *changing state*. --ease-enter is flatter at the tail
+     so something arriving from off-canvas glides in rather than snapping to a
+     stop. --ease-exit is the mirror: leaves slowly, then goes, because a thing
+     being dismissed should not appear to be yanked. Nothing here overshoots;
+     a bounce is a performance, and the direction says motion confirms. */
+  --dur-fast: 130ms;
+  --dur: 240ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 0.9, 0.4);
+  /* The one curve that overshoots, and the only place the app is allowed to be
+     springy: something *arriving* — a card lifting under the pointer, a toggle
+     landing, a panel popping in. It settles past its target by about 3% and
+     comes back, which is the difference between a thing that moved and a thing
+     with weight. Never used on anything leaving; a dismissal that bounces is a
+     dismissal you have to watch. */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
 
   /* type scale — mirrors FONT_SIZES at fontScale 1 */
-  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
-  --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
-  --fs-micro: 10.5px;  /* uppercase labels */
-  --fs-xs: 11.5px;     /* meta, timestamps */
-  --fs-sm: 12.5px;     /* secondary text */
-  --fs: 13.5px;        /* body */
-  --fs-md: 15px;       /* card titles */
-  --fs-lg: 20px;       /* pane titles */
+  /* The app's own face — see fonts.css. The system stack stays behind it as
+     the fallback for the seconds before the file lands and for any glyph
+     outside the latin subset, but it is no longer what the product looks
+     like. --font-display exists so headline type can diverge later (a real
+     display cut, tighter spacing) without touching every heading rule. */
+  --font: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: var(--font);
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-micro: 11px;    /* uppercase labels */
+  --fs-xs: 12px;       /* meta, timestamps */
+  --fs-sm: 13px;       /* secondary text */
+  --fs: 14.5px;        /* body */
+  --fs-md: 16px;       /* card titles */
+  --fs-lg: 21px;       /* section headings */
+  --fs-xl: 28px;       /* the name of the surface you are on */
 
   /* Letter-spacing tracks the size, not a fixed px offset: display type wants
      to close up, micro caps want air. In em so a font-scale change carries. */
@@ -44,13 +67,13 @@
   --ls-caps: 0.08em;
 
   /* spacing rhythm — mirrors DENSITY_SCALES.cozy */
-  --space-1: 3px;
-  --space-2: 6px;
-  --space-3: 9px;
-  --space-4: 13px;
-  --space-5: 18px;
-  --space-6: 26px;
-  --row-h: 30px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 17px;
+  --space-5: 24px;
+  --space-6: 34px;
+  --row-h: 36px;
 
   /* Pane gutter. Wider than --space-5 so content breathes against the window
      edge, and still derived, so compact really does reclaim the margins. */
@@ -61,14 +84,33 @@
   /* chrome */
   --titlebar: 30px; /* room for the macOS traffic lights over our own UI */
   --sidebar-w: 252px;
+  /* The air the shell leaves around the floating content panel. Declared at the
+     root rather than on .sh-app because the things that have to line up with
+     that panel's edges are portalled to <body> and never see the shell's own
+     scope — the side-panel drawer above all. One value, so a drawer's edge and
+     the panel's edge cannot drift apart. */
+  --frame-gap: var(--space-3);
+  /* The avatar column plus the gap beside it: the x where a message's text
+     starts. Shared, because the composer has to land on the same line —
+     see .composer. */
+  --msg-gutter: calc(var(--row-h) - var(--space-2) + var(--space-3));
 
   /* focus */
   --focus-w: 2px;
   --focus-gap: 2px;
+  /* The halo drawn outside the ring. --focus-halo comes from the theme, so it
+     is the accent at low alpha on every palette. */
+  --focus-spread: 3px;
 
   /* The press acknowledgement, in one place so every control agrees on how
-     much a click moves. Zeroed under reduced motion at the bottom of the file. */
-  --press: translateY(0.5px) scale(0.994);
+     much a click moves. Zeroed under reduced motion at the bottom of the file.
+
+     It was translateY(0.5px) scale(0.994) — half a pixel and six thousandths,
+     which is below the threshold at which a person registers that anything
+     happened. A control that does not visibly give under the pointer is the
+     single largest reason an interface feels dead, and the fix is not more
+     animation anywhere else; it is this number being large enough to see. */
+  --press: scale(0.965);
 
   /* Transition bundles. Components compose these instead of re-listing
      properties — and because every one is authored against --dur/--dur-fast,
@@ -77,8 +119,9 @@
              background-color var(--dur-fast) var(--ease),
              border-color var(--dur-fast) var(--ease);
   --t-press: transform var(--dur-fast) var(--ease);
-  --t-lift: transform var(--dur) var(--ease),
-            box-shadow var(--dur) var(--ease),
+  --t-lift: transform var(--dur) var(--ease-spring),
+            box-shadow var(--dur) var(--ease-enter),
+            background-color var(--dur-fast) var(--ease),
             border-color var(--dur-fast) var(--ease);
   --t-fade: opacity var(--dur-fast) var(--ease);
 
@@ -97,7 +140,12 @@
 html, body, #root {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  /* The window, not the page. The shell paints its own --app-bg over this, but
+     the document still shows through a rubber-band overscroll and behind the
+     pre-shell states — the loading screen and the pairing gate — and all three
+     should be the colour of the window rather than of a surface that is not on
+     screen yet. */
+  background: var(--app-bg);
   color: var(--text);
   font-size: var(--fs);
   line-height: 1.55;
@@ -133,6 +181,20 @@ a:hover { text-decoration: underline; }
   outline-offset: var(--focus-gap);
   /* deliberately no border-radius here: an outline already follows the
      element's own corners, and forcing one squares off pills and circles */
+}
+
+/* The one place an outline alone is not enough: focused ON the accent — the
+   primary button, a selected row filled with --accent-soft-strong, a chip in
+   its active state. There the ring and its background are the same hue and it
+   reads as a slightly thicker border rather than as focus. The halo is the
+   accent at ~20%, spreading just past the ring, so the eye gets a second edge
+   at a different value whatever is behind. It is a box-shadow rather than a
+   second outline because only one outline exists per element — but unlike the
+   rings this file deleted, it never has to name the surface behind it, so it
+   costs no per-component maintenance. */
+.btn.primary:focus-visible,
+.focus-halo:focus-visible {
+  box-shadow: 0 0 0 calc(var(--focus-w) + var(--focus-gap) + var(--focus-spread)) var(--focus-halo);
 }
 
 /* Full-bleed rows inside a clipping parent have no room for an outset ring, so
@@ -174,14 +236,34 @@ input, textarea, select {
   border-radius: var(--radius);
   padding: var(--space-3);
   width: 100%;
-  transition: var(--t-color);
+  /* A field is recessed, so it carries the inner top edge that .glass-inset
+     uses and never the outer highlight a button wears. One line, and it is
+     what stops every input in the app reading as a flat rectangle.
+
+     Named rather than inlined because the recess belongs to the *chrome*, not
+     to the element: a field that has already given up its border and its fill
+     — the composer's textarea, the palette's search, the editor's input layer
+     — has no chrome to be recessed into, and a shadow drawn there is a stray
+     line across the middle of a panel. Those set --field-recess: none, which
+     is one token to find rather than a box-shadow: none to remember. */
+  --field-recess: inset 0 1px 2px color-mix(in srgb, var(--border) 40%, transparent);
+  box-shadow: var(--field-recess);
+  transition: var(--t-color), box-shadow var(--dur-fast) var(--ease);
+  caret-color: var(--accent);
 }
+/* Controls the browser paints itself. A range track and a checkbox are not
+   boxes we drew, so there is nothing to recess. */
+input[type="checkbox"], input[type="radio"], input[type="range"],
+input[type="color"] { --field-recess: none; }
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
 /* A focused field says so with its border, and the keyboard ring above is the
    only thing drawn on top of that. The 3px --accent-soft halo that used to sit
    here is the reason a dozen components then invented rings of their own: it
    made the shared ring look wrong wherever the surface behind it changed. */
 input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+/* The recess flattens out as the field takes focus — the field comes up to
+   meet you. Cheaper than it sounds: the same property, animated to none. */
+input:focus, textarea:focus { --field-recess: none; }
 textarea { resize: vertical; }
 select {
   appearance: none;
@@ -202,8 +284,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cur
 /* canvas   --bg           no border, no shadow
    level 1  --surface-1    --border-soft  + --shadow-sm    cards, columns
    level 2  --surface-2    --border-soft  + none           nested in a card
-   level 3  --bg-overlay   --border       + --shadow-md    popovers, menus
-   level 4  --bg-overlay   --border       + --shadow-lg    modals
+   level 3  glass          --glass-edge   + --shadow-md    popovers, menus
+   level 4  glass          --glass-edge   + --shadow-lg    modals
 
    Level 2 is a fill, not a lift: it sits *inside* level 1, so a resting shadow
    would be light coming from the wrong place. It earns --shadow-sm only while
@@ -211,26 +293,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cur
 
    The ladder is for things that genuinely stack. Most of the app is flat: a
    section of a page is level 0 with space around it, not a card. Reaching for
-   level 1 to mean "this is a group" is how a screen ends up as ten boxes. */
-.elev-1 {
-  background: var(--surface-1);
-  border: 1px solid var(--border-soft);
-  box-shadow: var(--shadow-sm);
-}
-.elev-2 {
-  background: var(--surface-2);
-  border: 1px solid var(--border-soft);
-}
-.elev-3 {
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
-}
-.elev-4 {
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
-}
+   level 1 to mean "this is a group" is how a screen ends up as ten boxes.
+
+   The CLASSES live in components/glass.css, which loads immediately after this
+   file and owns the material for all four levels. There was a second copy of
+   .elev-1..4 here that predated it, still painting levels 3 and 4 as opaque
+   panels; both files defined the same two selectors and only load order
+   decided which won. Levels are described here and drawn there. */
 
 /* ── Motion primitives ─────────────────────────────────────── */
 
@@ -255,6 +324,72 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cur
 .anim-slide { animation: hq-slide var(--dur) var(--ease); }
 .anim-pop   { animation: hq-pop var(--dur) var(--ease); transform-origin: var(--pop-origin, center); }
 .anim-exit  { animation: hq-exit var(--dur-fast) var(--ease) forwards; }
+
+/* A list that arrives, rather than one that is simply already there.
+
+   Switching surfaces in this app replaces the entire content pane at once, and
+   an instant swap of thirty rows gives the eye no thread to follow — you land
+   on a finished screen and have to find your place in it. Dealing the first
+   rows in over ~130ms total does follow the reading order, so the eye is
+   already at the top of the list when the list stops moving.
+
+   Two rules keep it from becoming a performance. It only ever runs on the
+   first eight children: past that the delay would be longer than the time it
+   takes to look down the page, and a row that animates after you have started
+   reading it is worse than no animation. And each step is a fraction of
+   --dur-fast, so this is the *cheapest* motion in the app, not the showiest —
+   and it inherits the reduced-motion switch with everything else.
+
+   Set on a container: <div class="stagger"> rows </div>.
+
+   The two page-level containers opt in here rather than in their components,
+   because they are the shape rather than the content: .db-body and .dash-body
+   are the section stacks behind the dashboard, people, workspaces, settings
+   and git activity, and .kanban is the column strip. Their children are always
+   a handful of large blocks, which is exactly the case the cap was written
+   for — the rows *inside* those blocks do not animate, and should not. */
+.stagger > *,
+.db-body > *,
+.dash-body > *,
+.kanban > * {
+  animation: hq-rise var(--dur) var(--ease-enter) backwards;
+  --enter-dy: 5px;
+}
+.stagger, .db-body, .dash-body, .kanban {
+  --stagger-step: calc(var(--dur-fast) * 0.16);
+}
+.stagger > :nth-child(2), .db-body > :nth-child(2),
+.dash-body > :nth-child(2), .kanban > :nth-child(2) {
+  animation-delay: var(--stagger-step);
+}
+.stagger > :nth-child(3), .db-body > :nth-child(3),
+.dash-body > :nth-child(3), .kanban > :nth-child(3) {
+  animation-delay: calc(var(--stagger-step) * 2);
+}
+.stagger > :nth-child(4), .db-body > :nth-child(4),
+.dash-body > :nth-child(4), .kanban > :nth-child(4) {
+  animation-delay: calc(var(--stagger-step) * 3);
+}
+.stagger > :nth-child(5), .db-body > :nth-child(5),
+.dash-body > :nth-child(5), .kanban > :nth-child(5) {
+  animation-delay: calc(var(--stagger-step) * 4);
+}
+.stagger > :nth-child(6), .db-body > :nth-child(6),
+.dash-body > :nth-child(6), .kanban > :nth-child(6) {
+  animation-delay: calc(var(--stagger-step) * 5);
+}
+.stagger > :nth-child(7), .db-body > :nth-child(7),
+.dash-body > :nth-child(7), .kanban > :nth-child(7) {
+  animation-delay: calc(var(--stagger-step) * 6);
+}
+.stagger > :nth-child(8), .db-body > :nth-child(8),
+.dash-body > :nth-child(8), .kanban > :nth-child(8) {
+  animation-delay: calc(var(--stagger-step) * 7);
+}
+.stagger > :nth-child(n + 9), .db-body > :nth-child(n + 9),
+.dash-body > :nth-child(n + 9), .kanban > :nth-child(n + 9) {
+  animation: none;
+}
 
 /* Press acknowledgement for anything clickable that is not already a .btn. */
 .press { transition: var(--t-press); }
@@ -391,7 +526,10 @@ body:has([data-dragging]) * {
      logo and the account's face, both round or dense enough that matching an
      icon's box would make them look smaller than it. It doubles as the height
      of the chips at the far end of a row, so both ends run on one measure. */
-  --rail-glyph: 20px;
+  /* Also the hit box for every trailing icon button in the rail, which is why
+     it is 24 and not 20: the glyph only needs 20, but a control pinned to this
+     column must still clear the app's target floor. */
+  --rail-glyph: 24px;
   /* What icons.tsx is drawn for — see its header. The set stays at the size it
      was designed for and is centred in the column rather than stretched. */
   --rail-icon: 16px;
@@ -408,15 +546,27 @@ body:has([data-dragging]) * {
   --rail-text: calc(var(--rail-pad) + (var(--rail-glyph) - var(--rail-icon)) / 2);
 
   width: var(--sidebar-w); min-width: var(--sidebar-w);
-  background: var(--bg-raised);
-  border-right: 1px solid var(--border-soft);
+  /* No fill and no right edge: the shell floats the content as a panel and the
+     rail stands on the bare window beside it. A second surface here would put
+     a panel next to a panel and give the layout nothing to be inset from. */
+  background: none;
   display: flex; flex-direction: column;
   padding: var(--titlebar) var(--rail-x) var(--rail-x);
-  /* The rail does NOT scroll. When it did, a workspace with enough projects
-     pushed the top-level nav off the top — measured at -763px — leaving you
-     stuck at the bottom with only channels and no way back to Dashboard
-     without scrolling up. Only the project list below scrolls now. */
+  /* The rail itself never scrolls — .nav-scroll inside it does. The brand above
+     and the account row below are pinned, so neither can be pushed off an edge
+     however many projects there are or however short the window is. */
   overflow: hidden;
+}
+/* Everything between the wordmark and the account row. */
+.nav-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* No bar and no gutter — see the scrollbar block at the foot of this file.
+     The rail is bare window; a track drawn out here would be the only piece of
+     furniture on it, and an 11px reserved gutter would push every nav label
+     off the column the glyphs are aligned to. */
 }
 /* The icon-only buttons that sit at the end of a rail row get the glyph
    column's box, so the trailing controls stop inventing a height each (19, 21
@@ -432,10 +582,14 @@ body:has([data-dragging]) * {
 /* The brand is a row like any other — mark in the glyph column, wordmark in
    the label column, --row-h tall. The space beneath it is the gap to the first
    section, not part of the row, so it is padding and not height. */
+/* The wordmark. It shares the top strip with the traffic lights, which is why
+   the rail reserves --titlebar above it; on the window rather than on a panel
+   it can carry the display tracking the pane titles use, because there is
+   nothing beside it competing to be read first. */
 .sidebar-brand {
   min-height: calc(var(--row-h) + var(--space-5));
   padding: 0 var(--rail-pad) var(--space-5);
-  font-size: var(--fs-md); font-weight: 700; letter-spacing: var(--ls-title);
+  font-size: var(--fs-md); font-weight: 680; letter-spacing: var(--ls-display);
   display: flex; align-items: center; gap: var(--rail-gap);
   user-select: none;
 }
@@ -453,20 +607,61 @@ body:has([data-dragging]) * {
   min-height: var(--rail-glyph); padding: 0 var(--space-2);
   display: inline-flex; align-items: center;
 }
-.nav-section { flex: 0 0 auto; margin-bottom: var(--space-5); }
-.nav-section.grow {
-  flex: 1 1 0;
-  /* Load-bearing: a flex child will not shrink below its content without it,
-     which is why `flex: 1` alone left this section unable to scroll. */
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+/* A group, and the gap under it is what separates it from the next one. The
+   rail's sections used to be one flat list under one heading, so this spacing
+   only had to hold "nav" apart from "projects"; now it is doing the work that
+   makes four groups read as four. */
+.nav-section { flex: 0 0 auto; margin-bottom: var(--space-2); }
+/* Folded: the heading is the whole section, so the gap under it collapses to
+   the rhythm of the rows it replaced. The rows stay in the DOM — see the note
+   in Sidebar.tsx — so the mini rail can overrule this. */
+.nav-section[data-shut] { margin-bottom: 0; }
+.nav-section[data-shut] > .nav-item { display: none; }
+
+/* A heading that folds its group. It is a button, so it takes the row shape
+   every other rail row has — but it never fills on hover the way a nav row
+   does, because it is not a destination and a fill here would offer to take
+   you somewhere. */
+.nav-heading-btn {
+  width: 100%;
+  background: none;
+  cursor: pointer;
+  gap: var(--space-2);
+  transition: var(--t-color);
 }
+.nav-heading-btn:hover:not(:disabled) { color: var(--text-dim); }
+/* The section holding the current view cannot fold — see Sidebar.tsx. Dimming
+   it would read as "unavailable"; it is simply not offering, so it keeps its
+   own colour and drops the affordance. */
+.nav-heading-btn:disabled { cursor: default; }
+.nav-heading-chevron {
+  display: inline-flex;
+  margin-left: auto;
+  opacity: 0;
+  transition: var(--t-fade), transform var(--dur) var(--ease);
+}
+.nav-heading-btn:hover .nav-heading-chevron,
+.nav-heading-btn:focus-visible .nav-heading-chevron,
+.nav-section[data-shut] .nav-heading-chevron { opacity: 1; }
+.nav-heading-btn:disabled .nav-heading-chevron { display: none; }
+.nav-section[data-shut] .nav-heading-chevron { transform: rotate(-90deg); }
+/* The project list no longer owns a scroller of its own — .nav-scroll above it
+   carries the whole navigation — so this is just the section that takes up the
+   slack when the others are short. */
+.nav-section.grow {
+  flex: 0 0 auto;
+}
+/* A label, not a row. It used to stand a full --row-h tall because it was one
+   of two headings in the rail; at five, that height was 150px of the rail spent
+   on words you read once — and the project list, which is the part that grows,
+   is what paid for it. It keeps the row's horizontal columns and gives back the
+   vertical, with the space above it doing the separating instead. */
 .nav-heading {
   font-size: var(--fs-micro); font-weight: 700;
   text-transform: uppercase; letter-spacing: var(--ls-caps);
   color: var(--text-faint);
-  min-height: var(--row-h);
+  min-height: calc(var(--row-h) - var(--space-2));
+  margin-top: var(--space-2);
   padding: 0 var(--rail-pad) 0 var(--rail-text);
   display: flex; justify-content: space-between; align-items: center;
 }
@@ -484,16 +679,36 @@ body:has([data-dragging]) * {
 }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
 .nav-item:active { transform: var(--press); }
-/* The whole row fills. That is the entire selected treatment — there was also
-   a 2px accent bar down the left edge, saying the same thing a second time. */
-.nav-item.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+/*
+ * A selected row is a piece of the panel, brought out onto the rail.
+ *
+ * The rail is bare window now, and the surface it opens is the sheet floating
+ * beside it — so the selected row takes that sheet's own colour, its edge and
+ * its contact shadow. It stops being "the row with a tint on it" and becomes
+ * the near end of the thing you are looking at, which is the one relationship
+ * a sidebar exists to express. --accent-soft said only "this one", in a colour
+ * that on the window now reads as a third surface with no meaning.
+ *
+ * The accent does not disappear; it moves to the glyph, where it is the row's
+ * one coloured mark rather than a wash behind its text.
+ */
+.nav-item.active {
+  background: var(--bg);
+  border-color: var(--border-soft);
+  color: var(--text); font-weight: 600;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+}
+.nav-item {
+  /* Declared so the selected state can fill it in without moving the row. */
+  border: 1px solid transparent;
+}
 .nav-icon {
   width: var(--rail-glyph); height: var(--rail-glyph);
   flex-shrink: 0; opacity: 0.75;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: var(--t-fade);
+  transition: var(--t-fade), var(--t-color);
 }
-.nav-item.active .nav-icon { opacity: 1; }
+.nav-item.active .nav-icon { opacity: 1; color: var(--accent); }
 .nav-item:hover .nav-icon { opacity: 1; }
 .nav-empty {
   color: var(--text-faint); font-size: var(--fs-sm);
@@ -618,17 +833,65 @@ body:has([data-dragging]) * {
 
 .main-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .scroll-pane { overflow-y: auto; overscroll-behavior: contain; }
+
+/*
+ * The header does not scroll; the body under it does.
+ *
+ * The two pane models disagreed. Shell panes (.sh-pane) put a fixed header
+ * above a scrolling body. The six legacy panes scrolled the *whole* pane and
+ * made the header `position: sticky` to compensate — which works, and costs
+ * the thing that matters: a sticky header pinned at top:0 owns that offset, so
+ * nothing inside the body can stick underneath it without knowing the header's
+ * height, which CSS cannot know. That is why section headings scroll away on
+ * Dashboard, People, Settings, Workspaces and Git activity while column heads
+ * on the board and group heads in the palette stay put.
+ *
+ * Same model everywhere now: the pane is a flex column that does not scroll,
+ * the header is a fixed-height sibling, and the body owns the scroller. Every
+ * heading inside a body can now stick at top:0 of its own scroller, and the
+ * header above it is not competing for the offset.
+ */
+.main-pane.scroll-pane { overflow: hidden; }
+.main-pane.scroll-pane > .pane-header {
+  position: static;
+  flex: 0 0 auto;
+}
+.main-pane.scroll-pane > .db-body,
+.main-pane.scroll-pane > .dash-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The same wrap rule the shell's own header uses — see .sh-pane-head-row. The
+   two render side by side across the app, so a header that gives way by
+   crushing its title on one surface and by wrapping on the next is two
+   different products. The title column claims a real minimum; the actions drop
+   to their own right-aligned line when they cannot fit beside it. */
 .pane-header {
   padding: calc(var(--titlebar) - var(--space-2)) var(--pane-x) var(--space-5);
   border-bottom: 1px solid var(--border-soft);
   display: flex; justify-content: space-between; align-items: flex-end;
-  gap: var(--space-4); flex-shrink: 0;
-  background: var(--bg);
+  gap: var(--space-4); flex-shrink: 0; flex-wrap: wrap;
   position: sticky; top: 0; z-index: 5;
+  /* Glass, and this is the one kind of surface it is actually for: the header
+     is sticky, so a list genuinely passes behind it. glass.css has documented
+     "a sticky pane header" as .glass-rail's use since it was written and
+     nothing in the app had ever taken it — every header painted itself opaque
+     --bg instead, which meant content did not scroll *under* the header so much
+     as get deleted at its edge. With the rail material you can see it go. */
+  background: var(--glass-rail-fill);
+  -webkit-backdrop-filter: var(--glass-rail-filter);
+  backdrop-filter: var(--glass-rail-filter);
 }
+.pane-header > :first-child { flex: 1 1 260px; min-width: 0; }
+.pane-header > .row { margin-left: auto; flex: 0 0 auto; }
+/* The legacy header's title, kept in step with .sh-pane-title — the two render
+   side by side across the app and a two-step size difference between them was
+   visible every time you moved from one surface to the next. */
 .pane-title {
-  font-size: var(--fs-lg); font-weight: 700; letter-spacing: var(--ls-display);
-  line-height: 1.2;
+  font-size: var(--fs-xl); font-weight: 680; letter-spacing: var(--ls-display);
+  line-height: 1.15;
   display: flex; align-items: baseline; gap: 1px;
 }
 .pane-title .hash { font-size: 0.8em; opacity: 0.55; font-weight: 600; }
@@ -637,15 +900,45 @@ body:has([data-dragging]) * {
   display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
 }
 .topic { color: var(--text-faint); }
+/*
+ * The app's shared empty state — the thing you see on a surface you have not
+ * filled yet, which for a new workspace is most of them. It is worth more than
+ * a centred paragraph.
+ *
+ * Two changes carry it. The measure drops from --measure (68ch, tuned for a
+ * left-aligned document) to 46ch: centred text has no consistent left edge for
+ * the eye to return to, so a long line is markedly harder to read centred than
+ * ragged-right, and every one of these is two or three sentences at most. And
+ * the gap goes from --space-1 to --space-4, because these are separate
+ * thoughts — a lead, an explanation, an action — rather than the lines of one
+ * paragraph, which is what a 3px gap said they were.
+ *
+ * The lead line keeps its own size. `strong` is what every caller already uses
+ * to mark it, so no markup has to change for it to become a heading.
+ */
 .center-note {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   color: var(--text-dim); text-align: center;
-  padding: calc(var(--space-6) * 1.8) var(--space-6);
-  line-height: 1.7; gap: var(--space-1);
+  padding: calc(var(--space-6) * 1.5) var(--space-6);
+  line-height: 1.65; gap: var(--space-4);
+  text-wrap: pretty;
 }
-.center-note > * { max-width: var(--measure); }
-.center-note strong { color: var(--text); }
+.center-note > * { max-width: 46ch; }
+/* Inline emphasis stays at the size of the sentence it is inside. Several of
+   these open with a bold clause mid-paragraph — "Calendars here have owners.
+   Yours is your own time" — and sizing every `strong` up put a step change in
+   the middle of a line of running text. */
+.center-note strong { color: var(--text); font-weight: 650; }
+/* A lead that is the whole of its own line is a heading, and takes the size. */
+.center-note > p:first-child > strong:only-child,
+.center-note > strong:first-child {
+  font-size: var(--fs-lg);
+  letter-spacing: var(--ls-display);
+}
+/* An action here is the point of the screen, so it gets air rather than being
+   the next line of the paragraph. */
+.center-note .btn { margin-top: var(--space-2); }
 
 /* ── Chips ─────────────────────────────────────────────────── */
 
@@ -656,6 +949,10 @@ body:has([data-dragging]) * {
   font-size: var(--fs-xs); line-height: 1.5;
   border: 1px solid var(--border-soft);
   white-space: nowrap;
+  /* A chip is a label, so it never wraps and never sits below the height of
+     the text it labels — but a row of them at ragged heights is the thing
+     that makes a metadata strip look assembled rather than designed. */
+  min-height: calc(var(--row-h) - var(--space-4));
 }
 .project-chip {
   color: var(--text); cursor: pointer;
@@ -677,6 +974,85 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 .tool-chip.ok { color: var(--green); }
 .tool-chip.missing { color: var(--text-faint); }
 
+/* ── Segmented control ─────────────────────────────────────── */
+
+/*
+ * One control, four names.
+ *
+ * The calendar's range switcher, the operations view switcher, the diff's
+ * unified/split toggle and the appearance mode picker are the same object, and
+ * they had drifted into four: track padding of 1.5px, 2px and 3px; radius-sm
+ * against radius; 11.5px against 12.5px type; weight 550 against 600; a border
+ * on two of them and not the other two — and three different answers to what
+ * "selected" looks like (--accent-soft, --accent-soft-strong, and a raised
+ * --bg-raised thumb). Moving between Calendar and Documents you were operating
+ * two controls that did the same job and looked related but not the same,
+ * which is the specific way an app stops feeling like one app.
+ *
+ * Declared here over all four selectors so there is one definition rather than
+ * one convention. The component sheets keep only what is genuinely theirs.
+ *
+ * Selected is a RAISED THUMB, not the app's usual --accent-soft fill, and that
+ * is a deliberate exception with a reason: the track is a well (--bg-inset),
+ * and a wash inside a well reads as a coloured hole in it. What a segmented
+ * control is depicting is one physical thumb sliding along a groove, so the
+ * selected segment is the thing that comes *up* out of it. The app's fill rule
+ * is about rows and cards resting on a surface; this is not one of those.
+ */
+.cal-seg, .ops-seg, .rd-seg, .ap-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.cal-seg-btn, .ops-seg-btn, .rd-segbtn, .ap-seg-btn {
+  /* Flex, and this is load-bearing rather than tidy: the appearance picker's
+     segments carry an icon beside their label, and when this rule replaced the
+     four component copies it inherited every property they had except their
+     display. A button defaults to inline-block, where `gap` does nothing — so
+     the glyph and the word ran together with no space between them. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: calc(var(--row-h) - var(--space-3));
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  background: none;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--t-color), var(--t-press),
+              box-shadow var(--dur-fast) var(--ease);
+}
+.cal-seg-btn:hover, .ops-seg-btn:hover, .rd-segbtn:hover, .ap-seg-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.cal-seg-btn:active, .ops-seg-btn:active, .rd-segbtn:active, .ap-seg-btn:active {
+  transform: var(--press);
+}
+/* The ring sits inside the track — there is no room for an outset one between
+   a segment and the groove it is in. */
+.cal-seg-btn:focus-visible, .ops-seg-btn:focus-visible,
+.rd-segbtn:focus-visible, .ap-seg-btn:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+
+.cal-seg-btn.on, .ops-seg-btn.on, .rd-segbtn.on {
+  color: var(--text);
+  font-weight: 650;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+}
+
 /* ── Buttons ───────────────────────────────────────────────── */
 
 /* --row-h is the app's hit-area floor and it moves with the density pref, so a
@@ -685,24 +1061,67 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   min-height: var(--row-h);
   padding: var(--space-2) var(--space-4); border-radius: var(--radius);
   border: 1px solid var(--border);
-  background: var(--bg-raised); color: var(--text);
-  font-size: var(--fs); font-weight: 500;
-  display: inline-flex; align-items: center; gap: var(--space-2);
+  /* A secondary button is paper, so it takes the paper surface and the contact
+     shadow that goes with it rather than the rail's colour. On light that is
+     the difference between a button and a rectangle of the same grey as the
+     toolbar it sits in; on dark it is a barely-perceptible lift that the eye
+     still reads as "this is pressable". The inset hairline is the lit top edge
+     — one pixel, and the single cheapest thing in this file. */
+  background: var(--surface-1); color: var(--text);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+  font-size: var(--fs); font-weight: 550;
+  letter-spacing: var(--ls-body);
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--space-2);
   white-space: nowrap;
-  transition: var(--t-color), var(--t-press);
+  transition: var(--t-color),
+              transform var(--dur-fast) var(--ease-spring),
+              box-shadow var(--dur-fast) var(--ease);
 }
-.btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
-.btn:active:not(:disabled) { transform: var(--press); }
-.btn:disabled { opacity: 0.42; cursor: default; transform: none; }
-.btn:disabled:hover { background: var(--bg-raised); border-color: var(--border); }
+/* Under the pointer it comes up; under the click it goes down. Two directions,
+   so the control has somewhere to travel from and the press has something to
+   undo — a button that only changes colour on hover and only changes colour
+   again on click has told you twice that you are pointing at it and never once
+   that you pressed it. */
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
+}
+.btn:active:not(:disabled) {
+  transform: var(--press);
+  box-shadow: none;
+}
+.btn:disabled { opacity: 0.42; cursor: default; transform: none; box-shadow: none; }
+.btn:disabled:hover { background: var(--surface-1); border-color: var(--border); }
 .btn.primary {
   background: var(--accent); border-color: var(--accent);
   color: var(--accent-fg); font-weight: 600;
+  /* Its own contact shadow tinted by nothing — height, not glow. */
+  box-shadow: var(--shadow-sm);
 }
-.btn.primary:hover { filter: brightness(1.08); border-color: var(--accent); }
-.btn.primary:disabled:hover { filter: none; }
+.btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn.primary:active:not(:disabled) {
+  background: var(--accent-active); border-color: var(--accent-active);
+}
+.btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
 .btn.danger { color: var(--red); border-color: var(--red-border); }
 .btn.danger:hover { background: var(--red-soft); border-color: var(--red); }
+/* A button that is one of several equal choices in a row of chrome — a filter,
+   a view switch, a toolbar affordance. It is still a button, so it still takes
+   the padding, the height floor and the press; it just does not claim the
+   paper, because a strip of six raised rectangles is a worse toolbar than six
+   quiet ones with a hover. */
+.btn.quiet {
+  background: none; border-color: transparent; box-shadow: none;
+  color: var(--text-dim);
+}
+.btn.quiet:hover { background: var(--bg-hover); border-color: transparent; color: var(--text); }
+.btn.quiet.on {
+  background: var(--accent-soft); color: var(--text);
+  border-color: transparent; font-weight: 600;
+}
 /* The one exception to the floor: a tiny button rides inside a filter row or a
    chip strip, where matching the row it sits in matters more than the floor. */
 .btn.tiny {
@@ -710,14 +1129,62 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   padding: var(--space-1) var(--space-3); font-size: var(--fs-xs);
   margin-top: var(--space-2);
 }
+/* 24px is the floor, not the size: padding still sets the box for anything
+   larger, and the min only bites on the icon buttons that were coming out
+   20px — small enough to miss, and below the WCAG 2.2 target minimum. */
 .icon-btn {
   color: var(--text-faint); border-radius: var(--radius-sm);
   padding: var(--space-1) var(--space-2); font-size: var(--fs); line-height: 1;
+  min-inline-size: 24px; min-block-size: 24px;
   display: inline-flex; align-items: center; justify-content: center;
   transition: var(--t-color), var(--t-press);
 }
 .icon-btn:hover { color: var(--text); background: var(--bg-active); }
 .icon-btn:active:not(:disabled) { transform: var(--press); }
+
+/*
+ * Small inline controls, given a real hit area without changing their size.
+ *
+ * This file states that --row-h is the app's hit-area floor, and then a set of
+ * controls that live *inside a line of text* quietly fall through it: the run
+ * inspector link came out 13px tall, the cost line 19, an entity chip 19, a
+ * memory pin 19. They cannot simply be made --row-h — a chip that tall would
+ * break the sentence it sits in — so the visual box stays put and only the
+ * target grows, via an overlay centred on the control and floored at 24px on
+ * both axes (the WCAG 2.2 minimum). The overlay is a child of the button, so
+ * the clicks it catches are the button's own.
+ *
+ * Padding + negative margin is the shorter trick and it is wrong here: most of
+ * these carry a background, so padding would visibly fatten the chip instead
+ * of quietly extending its target.
+ *
+ * ::before, not ::after — .msg-meta-btn's ::after is its chevron. Excluded
+ * for the same reason: .mem-card-open, whose ::after is already an inset:0
+ * overlay stretching its target across the whole card. Giving it a positioned
+ * parent here would shrink that target back to the title text.
+ */
+.msg-inspect, .msg-meta-btn, .mem-pin, .ec-sm, .cx-add,
+.chan-cx-open, .chan-cx-add, .task-edit {
+  position: relative;
+}
+.msg-inspect::before, .msg-meta-btn::before, .mem-pin::before, .ec-sm::before,
+.cx-add::before, .chan-cx-open::before, .chan-cx-add::before,
+.task-edit::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 50%; inset-inline-start: 50%;
+  translate: -50% -50%;
+  inline-size: max(100%, 24px); block-size: max(100%, 24px);
+}
+
+/* An overlay cannot help a control whose ancestor clips — .run-mark sits in
+   .task-foot and .db-repo-tag in a card head, both overflow:hidden, so the
+   extra 3–6px would simply be cut off. These two are pills rather than inline
+   words, so they can afford to actually be 24 tall. */
+.run-mark, .db-repo-tag {
+  min-block-size: 24px;
+  display: inline-flex; align-items: center;
+}
 .row { display: flex; gap: var(--space-3); align-items: center; }
 
 /* ── Messages (shared base; chat.css refines) ──────────────── */
@@ -739,19 +1206,45 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   background: var(--accent-soft); color: var(--accent);
   padding: 1.5px 5px; border-radius: var(--radius-sm);
 }
-.msg-body { margin-left: 36px; line-height: 1.6; }
+/* The body hangs off the author's name, so its indent is the avatar column and
+   the gap beside it — derived, not the literal 36px that happened to match a
+   26px avatar. With the avatar now sized off --row-h, a hardcoded indent would
+   drift a few pixels every time the density pref moved, and a paragraph that
+   does not start under the name above it is the most visible misalignment a
+   message list can have. */
+.msg-body {
+  margin-left: var(--msg-gutter);
+  line-height: 1.62;
+}
 .msg-meta { color: var(--text-faint); font-size: var(--fs-xs); margin-top: var(--space-2); }
 .running-note {
   color: var(--text-dim); font-size: var(--fs-sm);
   display: flex; align-items: center; gap: var(--space-3); padding: var(--space-1) 0;
 }
+/* Identity, and in an app where half the people are agents it is the single
+   most repeated object on screen. Sized and shaped off the tokens rather than
+   off two literals: 26px and an 8px corner were tuned against a 30px row and a
+   9px radius, and stayed put when both moved — leaving a small hard square
+   sitting in rows half again as tall. It is a squircle on the shape ladder now
+   and it grows with the density pref like everything else. */
 .avatar {
-  width: 26px; height: 26px; border-radius: 8px;
+  width: calc(var(--row-h) - var(--space-2));
+  height: calc(var(--row-h) - var(--space-2));
+  border-radius: var(--radius-sm);
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: var(--fs-xs); font-weight: 700;
+  font-size: var(--fs-sm); font-weight: 700;
   position: relative; flex-shrink: 0;
   color: var(--avatar-fg);
   letter-spacing: var(--ls-title);
+  /* Identity colours are saturated by definition, and a saturated square
+     butted straight against paper reads as a sticker. The inner hairline is
+     the same colour as the fill, darkened — an edge, not a border, so it costs
+     no layout and works on all eight hues in all 39 palettes. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14),
+              inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  /* A one-letter monogram is optically low in its box at these sizes. */
+  line-height: 1;
+  user-select: none;
 }
 .avatar-badge {
   position: absolute; bottom: -4px; right: -4px;
@@ -843,31 +1336,83 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 
 /* ── Composer ──────────────────────────────────────────────── */
 
+/* The message list runs to the bottom of the pane and the composer sits on top
+   of it, so this band has a conversation behind it — the second place in the
+   app where glass is describing something true rather than decorating. The
+   last message fades under the composer instead of being clipped by it. */
 .composer-wrap {
   padding: var(--space-4) var(--pane-x) var(--space-5);
   position: relative; flex-shrink: 0;
+  background: var(--glass-rail-fill);
+  /* The hairline is what makes it a pane of glass rather than a smudge: a
+     translucent band with no edge reads as the conversation going out of
+     focus, which is a rendering fault, not a surface. Same edge the header
+     above it draws, on the side the content arrives from. */
+  border-top: 1px solid var(--border-soft);
+  -webkit-backdrop-filter: var(--glass-rail-filter);
+  backdrop-filter: var(--glass-rail-filter);
 }
+/*
+ * Indented onto the message body column, so the box you type in occupies
+ * exactly the column you have been reading — same left edge, same right edge,
+ * same width. Before this it started at the pane gutter, 40px left of the text
+ * above it, while its own caret sat 23px to the *right* of that text: three
+ * vertical edges within 63px of each other, none of them shared. Near-misses
+ * like that are what read as broken; a real offset would not.
+ *
+ * The caret itself cannot make the line — the leading stack (padding, the
+ * emoji button, the gap) is 62px against a 40px gutter — so the box's edge is
+ * what carries the alignment.
+ */
 .composer {
   display: flex; gap: var(--space-3); align-items: flex-end;
+  margin-left: var(--msg-gutter);
   background: var(--bg-input);
   border: 1px solid var(--border); border-radius: var(--radius-md);
   padding: var(--space-3);
   transition: var(--t-color);
 }
+/* A thread is already a narrow column with its own gutter; indenting again
+   would eat it. */
+.composer-wrap.in-thread .composer { margin-left: 0; }
 /* The whole box is the field, so the border is what lights up — the textarea
    inside keeps none of its own, and neither of them glows. */
 .composer:focus-within { border-color: var(--accent); }
+/* The composer box IS the field — the textarea inside it keeps no chrome of
+   its own, so it keeps no recess either. */
 .composer textarea {
-  border: none; background: none; padding: var(--space-1) var(--space-2);
+  border: none; background: none;
+  /*
+   * No horizontal inset: the box around this IS the field, which is why the
+   * textarea carries no border and no fill. Keeping 8px of its own padding put
+   * the sentence you type 50px in from the composer's edge while the emoji
+   * button beside it sat on that edge — the same fault the dashboard launcher
+   * had, in the control it was copied from.
+   */
+  padding: var(--space-1) 0;
+  --field-recess: none;
+  /*
+   * The composer grows with its content; a native grabber here drew a stray
+   * diagonal artifact inside the field and let the box be dragged to a height
+   * the layout does not survive.
+   */
+  resize: none;
 }
 .composer textarea:focus-visible { outline: none; }
+/* Both of these belong to the composer, not to the pane, so they follow it onto
+   the message column — otherwise the hint and the mention list stay behind at
+   the old pane edge and reopen the misalignment one level down. */
 .composer-hint {
   color: var(--text-faint); font-size: var(--fs-xs);
-  margin-top: var(--space-2); padding-left: var(--space-1);
+  margin-top: var(--space-2);
+  margin-left: var(--msg-gutter);
+  padding-left: var(--space-1);
 }
+.composer-wrap.in-thread .composer-hint { margin-left: 0; }
 /* Level 3: a popover over the composer, not a modal — --shadow-md, not lg. */
 .mention-pop {
-  position: absolute; bottom: 100%; left: var(--pane-x); right: var(--pane-x);
+  position: absolute; bottom: 100%;
+  left: calc(var(--pane-x) + var(--msg-gutter)); right: var(--pane-x);
   background: var(--bg-overlay);
   border: 1px solid var(--border); border-radius: var(--radius-md);
   overflow: hidden; box-shadow: var(--shadow-md);
@@ -902,11 +1447,39 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 .dash-card {
   min-width: 0;
 }
+/*
+ * A section heading holds its place while you read the section.
+ *
+ * Now that the body owns the scroller and the pane header is not competing for
+ * top:0, every one of these can stick — so on a long page you always know
+ * which section the rows under your eye belong to, and each heading is pushed
+ * out by the next rather than disappearing at the top edge.
+ *
+ * Opaque rather than glass, deliberately. There is one pane header per screen
+ * and it can afford a compositing layer; there are six to ten of these on the
+ * dashboard alone, and that is the multiplication that made the board slow
+ * when the same idea was tried on kanban column heads. The fill and the
+ * negative margins that bleed it to the gutter are what stop rows showing
+ * through — a sticky heading with a transparent background is just text
+ * sliding over other text.
+ */
 .dash-card h3 {
-  margin: 0 0 var(--space-4); font-size: var(--fs-md); font-weight: 650;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 0 var(--space-4);
+  /* Bleed to the body's gutter so the fill covers the full width of what
+     passes behind it, then put the text back on its own column. */
+  margin-inline: calc(var(--pane-x) * -1);
+  padding: var(--space-3) var(--pane-x);
+  background: var(--bg);
+  font-size: var(--fs-md); font-weight: 650;
   letter-spacing: var(--ls-title);
   display: flex; align-items: center; gap: var(--space-3);
 }
+/* A nested section is inside another section's flow, so it must not pin to the
+   same line as its parent — it is a heading in a document, not a column head. */
+.dash-card .dash-card h3 { position: static; margin-inline: 0; padding-inline: 0; }
 /* A section nested in a section is one heading level quieter, not one box
    deeper. */
 .dash-card .dash-card { margin-top: var(--space-5); }
@@ -948,14 +1521,16 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   padding: var(--space-5) var(--pane-x) var(--pane-x);
   overflow-x: auto; align-items: flex-start;
 }
-/* Level 1. */
+/* A column is a heading with cards under it — space and a name, no box. The
+   gap between columns says the same thing a fill, an edge, a radius and a
+   shadow were saying four times over, and it leaves the card as the only rung
+   above the canvas, which is what a board is for. board.css already reached
+   this conclusion for the real board and had to strip these four properties
+   back off to get there; the primitive now starts where it ends up. */
 .kanban-col {
-  background: var(--surface-1);
-  border: 1px solid var(--border-soft); border-radius: var(--radius-md);
   width: 274px; min-width: 274px;
   display: flex; flex-direction: column;
-  max-height: 100%; padding: var(--space-3);
-  box-shadow: var(--shadow-sm);
+  max-height: 100%;
   transition: var(--t-color);
 }
 .kanban-head {
@@ -973,15 +1548,26 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3);
   min-height: var(--space-3); overscroll-behavior: contain;
 }
-/* Level 2, inside the column. */
+/* Paper, sitting in the tray above. */
 .task-card {
-  background: var(--surface-2); border: 1px solid var(--border-soft);
+  background: var(--surface-1); border: 1px solid var(--border-soft);
   border-radius: var(--radius); padding: var(--space-3) var(--space-4); cursor: pointer;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
   transition: var(--t-lift);
+  /* Named so the hover can move the card without the column's own scroll
+     position or the drag layer fighting it for the transform. */
+  will-change: transform;
 }
+/* Picked up, not highlighted. The lift is what says "this is draggable"; the
+   accent edge is the confirmation that the pointer is on THIS card and not the
+   one under it. Both are needed — the edge alone was invisible on light
+   themes, where --accent-border on a near-white card is a pale line. */
 .task-card:hover {
-  border-color: var(--accent-border); transform: translateY(-1px); box-shadow: var(--shadow-sm);
+  border-color: var(--accent-border);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
+.task-card:active { transform: translateY(0); box-shadow: var(--shadow-sm); }
 .task-title {
   font-weight: 600; font-size: var(--fs); line-height: 1.45;
   letter-spacing: var(--ls-title);
@@ -1076,19 +1662,60 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 
 /* ── Scrollbars ────────────────────────────────────────────── */
 
-/* Styled once, globally, and deliberately NOT with scrollbar-width /
-   scrollbar-color: in Chromium the standard properties switch the
-   ::-webkit-scrollbar pseudo-elements off entirely, which would trade this
-   inset, themed thumb for the browser default. */
-::-webkit-scrollbar { width: 11px; height: 11px; }
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar); border-radius: 999px;
-  border: 3px solid transparent; background-clip: content-box;
-  min-height: 28px; /* long lists otherwise produce a thumb too small to grab */
+/*
+ * Invisible at rest, and never moving the content.
+ *
+ * Two separate problems, and they have different fixes.
+ *
+ * VISIBLE AT REST. The thumb was painted --scrollbar (about 30% alpha) the
+ * whole time, so every list, column and rail in the app carried a permanent
+ * grey bar down its edge. Multiplied across a sidebar, a context column, a
+ * settings index and a message list on one screen, that is four vertical lines
+ * of furniture describing nothing. The thumb is transparent now and appears
+ * when the pointer is in the region it belongs to — which is the only moment
+ * it is any use.
+ *
+ * CONTENT SLIDING. This one is not the colour, it is the WIDTH. A styled
+ * ::-webkit-scrollbar is an in-flow scrollbar: it takes 11px out of the
+ * content box the instant a list grows past its container, and gives them back
+ * when it shrinks — so adding one row could shunt an entire column sideways,
+ * and a list that hovers around the overflow threshold would jitter. The
+ * `stable` gutter below reserves the space permanently, so the content sits
+ * where it sits whether or not there is anything to scroll.
+ *
+ * Both together are what "invisible" has to mean: not merely unpainted, but
+ * costing nothing when it is not there.
+ */
+/*
+ * No scrollbar takes any space, anywhere.
+ *
+ * The first attempt at this kept the 11px styled bar, made the thumb
+ * transparent at rest, and reserved the width with `scrollbar-gutter: stable`
+ * so a list crossing the overflow threshold could not shunt its column
+ * sideways. That fixed the jitter and introduced a worse bug: a stable gutter
+ * insets the SCROLLER by 11px and does nothing to its non-scrolling siblings,
+ * so every scroller in the app fell out of alignment with the chrome above and
+ * below it. The composer sat 11px right of the messages; pane headers sat 11px
+ * left of their own bodies. One measurement caught it — .messages content
+ * ending at 1036 against .composer-wrap ending at 1047 — and the same fault
+ * was under every pane in the app.
+ *
+ * Patching each site with a matching inset would mean every non-scrolling
+ * element in the app having to know whether its sibling scrolls. A zero-width
+ * bar removes the class of bug instead: nothing to reserve, nothing to shift,
+ * nothing to align against. The scroll position is still readable from the
+ * content, and wheel, trackpad, keyboard and drag-select all scroll exactly as
+ * before — a scrollbar has not been a required affordance on this platform
+ * since macOS started hiding its own.
+ */
+* {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* old Edge */
 }
-::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
 
 /* ── Reduced motion ────────────────────────────────────────── */
 
@@ -1097,12 +1724,21 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
    data-reduce-motion on <html> (which also zeroes --dur, covering everything
    authored against the motion tokens). This block is the backstop for the few
    durations that are deliberately literal, like the spinner. */
+/* animation-delay has to be zeroed alongside the duration, and it is not the
+   same fix. Collapsing the duration alone leaves a delayed entrance holding its
+   `from` keyframe for the length of the delay — and with `animation-fill-mode:
+   backwards`, which is what makes a staggered list arrive in order, that frame
+   is opacity 0. Under reduced motion the eighth row of a stagger would sit
+   invisible for ~130ms and then appear: a flash, delivered to the person who
+   asked for less movement. */
 @media (prefers-reduced-motion: reduce) {
   :root { --press: none; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
 }
@@ -1111,8 +1747,10 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
 :root[data-reduce-motion] *::before,
 :root[data-reduce-motion] *::after {
   animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
   scroll-behavior: auto !important;
 }
 /* "Running" is a state, not an animation, so the ring keeps a resting frame

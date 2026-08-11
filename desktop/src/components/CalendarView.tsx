@@ -1235,18 +1235,14 @@ export function CalendarView() {
   return (
     <Pane
       title="Calendar"
+      /* Moving between dates belongs beside the dates it moves, not in the
+         action group on the far right. The header carried five separate
+         control clusters across one row — step, range, layout, schedule, new —
+         and the first of them was the only one that was not about the view or
+         about creating something. Under the title it reads as one sentence:
+         this is the week you are on, and these move it. */
       subtitle={
         <>
-          <span className="cal-range">{title}</span>
-          {note && (
-            <span className="cal-note" title={note}>
-              Local only
-            </span>
-          )}
-        </>
-      }
-      actions={
-        <div className="cal-header-right">
           <div className="cal-nav">
             <button
               className="icon-btn cal-step"
@@ -1257,7 +1253,7 @@ export function CalendarView() {
               ‹
             </button>
             <button
-              className={"btn cal-today" + (showsToday ? " on" : "")}
+              className={"btn tiny cal-today" + (showsToday ? " on" : "")}
               onClick={() => setAnchor(Date.now())}
               title="Jump to today (t)"
             >
@@ -1272,7 +1268,16 @@ export function CalendarView() {
               ›
             </button>
           </div>
-
+          <span className="cal-range">{title}</span>
+          {note && (
+            <span className="cal-note" title={note}>
+              Local only
+            </span>
+          )}
+        </>
+      }
+      actions={
+        <div className="cal-header-right">
           <div className="cal-seg" role="group" aria-label="Calendar range">
             {MODES.map((m) => (
               <button
@@ -1419,22 +1424,29 @@ function EmptyCalendars({
   onConnect: () => void;
 }) {
   return (
-    <div className="center-note cal-empty">
-      <p>
-        <strong>Calendars here have owners.</strong> Yours is your own time; the workspace has one of its
-        own, and so do your teams and each of your agents.
-      </p>
-      <p>
-        They stack in one grid so you can see them together, and anything shared with you as “busy” shows
-        its times without ever showing what it is.
-      </p>
-      <button className="btn primary" onClick={onCreate}>
-        Create “My calendar”
-      </button>
+    /*
+     * Two panels, not a centred column of prose. This was fifty-five words of
+     * centred body copy explaining the ownership model before you could do
+     * anything, over a provider list whose labels were right-aligned against
+     * buttons that were left-aligned around the page's centre — so no two
+     * things on the screen shared an edge. The model is one line now; you find
+     * out the rest by having a calendar.
+     */
+    <div className="cal-empty">
+      <section className="cal-empty-card">
+        <h2>Every calendar here has an owner</h2>
+        <p>
+          Yours, the workspace&rsquo;s, your teams&rsquo;, your agents&rsquo; — stacked in one grid.
+          Anything shared as &ldquo;busy&rdquo; shows its times, never what it is.
+        </p>
+        <button className="btn primary" onClick={onCreate}>
+          Create &ldquo;My calendar&rdquo;
+        </button>
+      </section>
       {/* Somebody arriving with a calendar already elsewhere should not have to
        * make an empty one first. */}
-      <div className="cal-empty-accounts">
-        <span className="cal-empty-or">or bring one you already keep</span>
+      <section className="cal-empty-card cal-empty-bring">
+        <h3>Or bring one you already keep</h3>
         <div className="cal-acct-list">
           {providers.map((p) => (
             <AccountRow
@@ -1446,7 +1458,7 @@ function EmptyCalendars({
             />
           ))}
         </div>
-      </div>
+      </section>
     </div>
   );
 }

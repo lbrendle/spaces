@@ -1152,7 +1152,8 @@ export function DocumentsView() {
   return (
     <Pane
       title={<><IconDocument size={19} /> Documents</>}
-      subtitle="Write it once, share it deliberately, and let the agents who need it read it."
+      /* No subtitle: with documents on screen it restated the obvious, and with
+       * none it was the third copy of the empty state's own sentence. */
       actions={
         <div className="ops-header-right">
           <input
@@ -1180,7 +1181,13 @@ export function DocumentsView() {
       className="ops"
       onKeyDown={onPaneKeyDown}
     >
-      <div className="ops-split">
+      {/* Nothing written: the rail stands down and the editor's empty state
+       * speaks alone. With both up, this screen showed two empty states side
+       * by side — "Nothing written yet" and "Your shared working memory" —
+       * each with a button that called the same function under a different
+       * name, over a search field and a project filter with nothing to
+       * search or filter. */}
+      <div className={"ops-split" + (docs && !all.length ? " ops-split-solo" : "")}>
         <aside className="ops-list" aria-label="Documents">
           <div className="ops-rail-head">
             <div className="ops-search">
@@ -2033,7 +2040,8 @@ export function MailView() {
   return (
     <Pane
       title={<><IconMail size={19} /> Mail</>}
-      subtitle="One shared inbox, with agents able to draft and summarise on request."
+      /* No subtitle: it described the product rather than the screen, and the
+       * screen is a mail client — it does not need to introduce itself. */
       actions={
         <div className="ops-header-right">
           <span className={"provider-state" + (connected.length ? " connected" : "")}>
@@ -2064,15 +2072,11 @@ export function MailView() {
           <button className="icon-btn" aria-label="Dismiss" onClick={() => setNotice("")}>✕</button>
         </div>
       )}
-      {accounts && !connected.length && (
-        <div className="banner warn ops-notice">
-          <span>
-            No mail account is connected, so nothing arrives here and nothing can leave. You can
-            still write and keep drafts — they are stored in {config().brand} on this device.
-            Connect Google Workspace or Microsoft 365 in Settings to send and receive.
-          </span>
-        </div>
-      )}
+      {/* The "no account" banner that used to sit here said, at length, what
+       * three other things on this screen already say: the state chip, the
+       * Connect button beside it, and the inbox's own empty state, which also
+       * carried the same call to action. One statement is enough, and the
+       * empty state is where somebody looking at an empty inbox is looking. */}
 
       <div className="mail-shell">
         <aside className="mail-folders" aria-label="Mailboxes">
@@ -2245,13 +2249,16 @@ export function MailView() {
               {narrowed
                 ? "Nothing in this folder matches what you asked for."
                 : folder === "inbox" && !connected.length
-                  ? "Mail arrives here once an account is connected."
+                  ? "Mail arrives once an account is connected. Drafts work without one — they stay on this device."
                   : folderSpec?.blank ?? "Nothing in this folder."}
             </OpsEmpty>
           )}
         </section>
 
-        <section className="mail-reader">
+        {/* With no threads the reader renders nothing, and a third of the
+         * screen went to holding that nothing while the list beside it stayed
+         * capped at 340px. It gives the column back instead. */}
+        <section className={"mail-reader" + (threads && !threads.length ? " mail-reader-off" : "")}>
           {!threads ? (
             <OpsSkeleton rows={4} label="Loading the conversation…" />
           ) : selected ? (
@@ -2340,12 +2347,16 @@ export function MailView() {
                 ))}
               </div>
             </>
-          ) : (
+          ) : threads.length ? (
             <OpsEmpty icon={<IconMail size={28} />} title="Nothing selected">
               Pick a conversation on the left. Agents can draft a reply or summarise a thread — and
               you see the exact text they are given before it goes.
             </OpsEmpty>
-          )}
+          ) : null /* An empty folder has nothing to pick, so "pick a conversation
+              on the left" is an instruction that cannot be followed — and it was
+              sitting next to the list that had just finished saying there is
+              nothing there. Two empty states side by side, one of them wrong.
+              With no threads the reader is simply blank and the list speaks. */}
         </section>
       </div>
 
@@ -2548,35 +2559,43 @@ interface ContentStage {
   cta: string;
 }
 
+/*
+ * The blanks are phrases, not sentences. On a board where every column starts
+ * empty, a full line of prose per column meant five stacked paragraphs across
+ * one screen — and each was setting that prose in a 228px track, so the board
+ * read as a wall of text with a button under each block. The column label says
+ * what the stage is; the button says what to do; the blank only has to say
+ * that the column is empty.
+ */
 const CONTENT_STAGES: ContentStage[] = [
   {
     id: "idea",
     label: "Idea",
-    empty: "Everything starts as a line you did not want to lose.",
+    empty: "Nothing captured yet.",
     cta: "Add an idea",
   },
   {
     id: "drafting",
     label: "Drafting",
-    empty: "Nothing is being written. Pull an idea across, or brief an agent.",
+    empty: "Nothing being written.",
     cta: "Start a draft",
   },
   {
     id: "review",
     label: "Review",
-    empty: "Nothing is waiting on a human read.",
+    empty: "Nothing to read.",
     cta: "Add something to read",
   },
   {
     id: "scheduled",
     label: "Scheduled",
-    empty: "Nothing is queued. A piece here has a time and a target.",
+    empty: "Nothing queued.",
     cta: "Queue a piece",
   },
   {
     id: "published",
     label: "Published",
-    empty: "Nothing has gone out from here yet.",
+    empty: "Nothing published yet.",
     cta: "Log one you posted by hand",
   },
 ];

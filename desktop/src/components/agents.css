@@ -143,15 +143,29 @@
   background: var(--bg-active);
 }
 
+/*
+ * Three filters and an action, one per line.
+ *
+ * They were four items in a single wrapping row, which in a 280px column meant
+ * the runtime chips, the state chips and the sort chips all broke across each
+ * other: four ragged lines with no way to tell where one filter ended and the
+ * next began, and the re-check button pushed to whichever line had room. A
+ * group of radio chips only reads as a group if its own wrapping is the only
+ * wrapping happening — so each one gets a row, wraps inside it, and the action
+ * stops competing for the same space.
+ */
 .ag-filters {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3) var(--space-5);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+.ag-filters > * {
+  min-width: 0;
 }
 .ag-filters .btn.tiny.ag-recheck {
   margin-top: 0;
-  margin-left: auto;
+  align-self: flex-start;
 }
 
 /* ── the roster column ───────────────────────────────────────── */
@@ -180,10 +194,35 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.ag[data-wide] .ag-roster-col {
+/*
+ * The roster takes the pane until you pick somebody.
+ *
+ * It used to be pinned to a ~360px column whether or not anything was
+ * selected, with the other two thirds of the screen holding a "pick a
+ * teammate" panel and four paragraphs about how agents work. On the roster of
+ * an agent-native product, the roster was the narrow bit. Every agent's role,
+ * runtime, permissions and workload got squeezed into a 280px row while the
+ * space that could have shown them held an explanation of the concept.
+ *
+ * So: full width, laid out as cards, until a selection genuinely needs the
+ * other column — and then the column narrows and the cards reflow into it.
+ * One layout, two states, no separate mobile idea.
+ */
+.ag[data-wide]:has(.ag-detail-col) .ag-roster-col {
   flex: 0 0 clamp(300px, 32%, 420px);
   border-right: 1px solid var(--border-soft);
 }
+
+/* Help, under the roster rather than instead of it. Divided by a rule and set
+   at the width of running prose, so it reads as a footnote to the list above
+   and never competes with it for the top of the screen. */
+.ag-help {
+  margin-top: var(--space-4);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-soft);
+}
+.ag-help .ag-blank-pane { max-width: none; }
+.ag-help .ag-blank-title { font-size: var(--fs-md); }
 
 .ag-detail-col {
   flex: 1 1 auto;
@@ -214,9 +253,14 @@
 
 /* ── one agent, one line ─────────────────────────────────────── */
 
+/* A grid that becomes a list. auto-fill with a 264px floor gives three or four
+   cards across the open pane and exactly one inside the narrow column when a
+   teammate is selected — the same rule covering both states, so there is no
+   second layout to keep in step. */
 .ag-rows {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -225,21 +269,36 @@
   display: none;
 }
 
-/* A row is separated from its neighbours by being a row. It used to also carry
-   a 1px transparent border that turned --accent-border when selected. */
+/*
+ * A teammate is a card. Everything the row already knew — role, handle,
+ * runtime, the permissions worth knowing about, how much it is carrying — was
+ * being ellipsised into a 280px line; given room it simply fits.
+ */
 .ag-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  min-height: 36px;
-  padding: var(--space-2) var(--space-3);
+  min-height: calc(var(--row-h) + var(--space-4));
+  padding: var(--space-3);
   text-align: left;
-  border-radius: var(--radius);
-  transition: background var(--dur-fast) var(--ease);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+  transition: var(--t-lift);
 }
 .ag-row:hover {
-  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
+}
+.ag-row:active { transform: var(--press); box-shadow: var(--shadow-sm); }
+/* The tail wraps under the name rather than fighting it for the same line —
+   in a card there is a second line to use, which a row never had. */
+.ag-row-tail {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .ag-row-on,
 .ag-row-on:hover {

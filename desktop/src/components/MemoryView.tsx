@@ -1009,7 +1009,13 @@ export function MemoryView() {
 
   const kindCounts = KINDS.map((k) => entries.filter((m) => m.kind === k.key).length);
   const showList = wide || !sel;
-  const showDetail = wide || !!sel;
+  /* The detail column appears when there is a detail — the same correction
+     made in AgentsView, and for the same reason. `wide || !!sel` gave the
+     right-hand two thirds of this screen away permanently, so on a normal
+     window the company's decisions were a 440px column of wrapped paragraphs
+     beside a heading that said "Pick an entry". The entries own the pane until
+     one is picked. */
+  const showDetail = !!sel;
 
   const detail = (() => {
     if (sel?.mode === "new" || sel?.mode === "edit") {
@@ -1196,6 +1202,16 @@ export function MemoryView() {
                     written here.
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* The shapes an entry can take, under the list rather than
+                instead of it. They are how you start one, which matters after
+                you have looked at what is already written — not before. */}
+            {!sel && (
+              <div className="mem-shapes">
+                <h3 className="mem-shapes-head">Start a new one</h3>
+                <TemplateGrid onPick={(t) => openNew(t)} />
               </div>
             )}
           </div>

@@ -78,26 +78,30 @@
 
 /* ── Segmented control ───────────────────────────────────────── */
 
+/* Track, segment, hover and focus are App.css's shared segmented control. The
+   only thing genuinely this control's own is that its thumb *slides*: the
+   appearance picker is the one place the switch is the subject of the screen
+   rather than a filter on it, so the selection moves rather than jumping. That
+   needs equal-width columns and an absolutely positioned thumb, which is all
+   that is left here. */
 .ap-seg {
   position: relative;
   display: grid;
   grid-template-columns: repeat(var(--seg-n, 3), minmax(0, 1fr));
-  background: var(--bg-inset);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  padding: 3px;
   flex-shrink: 0;
 }
-/* The thumb is the selection, so it is the selection treatment and nothing
-   else: a soft accent wash. It used to also carry an --accent-border edge. */
+/* The moving part, wearing the same raised treatment the other three switchers
+   paint on their selected segment — so a sliding thumb and a jumping one are
+   still recognisably the same object. */
 .ap-seg-thumb {
   position: absolute;
   top: 3px;
   bottom: 3px;
   left: 3px;
   width: calc((100% - 6px) / var(--seg-n, 3));
-  background: var(--accent-soft-strong);
+  background: var(--surface-1);
   border-radius: calc(var(--radius) - 3px);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
   transform: translateX(calc(var(--seg, 0) * 100%));
   transition: transform var(--dur) var(--ease);
   pointer-events: none;
@@ -105,24 +109,13 @@
 .ap-seg-btn {
   position: relative;
   z-index: 1;
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  min-height: 30px;
-  padding: 0 var(--space-4);
-  border-radius: calc(var(--radius) - 3px);
-  font-size: var(--fs);
-  font-weight: 500;
-  color: var(--text-dim);
-  white-space: nowrap;
-  transition: color var(--dur-fast) var(--ease);
 }
-.ap-seg-btn:hover { color: var(--text); }
-.ap-seg-btn.active { color: var(--text); font-weight: 600; }
-/* Same ring as everywhere, drawn inside: the track clips at 3px of padding,
-   so an outset offset would be cropped by the control that owns it. */
-.ap-seg-btn:focus-visible { outline-offset: calc(var(--focus-w) * -1); }
+/* No fill on the active segment: the thumb underneath is the fill, and painting
+   both would put one selected treatment on top of another. */
+.ap-seg-btn.active { color: var(--text); font-weight: 650; background: none; }
+.ap-seg-btn.active:hover { background: none; }
 .ap-seg-icon { font-size: var(--fs-xs); opacity: 0.85; }
 
 /* ── Gallery filters ─────────────────────────────────────────── */
@@ -236,9 +229,17 @@
 .ap-group-count { font-size: var(--fs-xs); color: var(--text-faint); }
 .ap-group-rule { flex: 1; height: 1px; background: var(--border-soft); }
 
+/*
+ * The gallery lost a column when settings grew an index rail beside it: at a
+ * 222px floor the track arithmetic landed three pixels short of fitting three
+ * across, so thirty-nine themes came out two-wide and twenty rows deep. The
+ * floor is the *minimum* a preview needs, not its intended size — 1fr means
+ * they still grow to fill whatever is there — so lowering it costs nothing and
+ * buys back the third column.
+ */
 .ap-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(222px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(208px, 1fr));
   gap: var(--space-5);
 }
 

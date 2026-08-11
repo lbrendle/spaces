@@ -13,13 +13,39 @@
  * Colors are theme tokens only. No literal color may appear in this file.
  */
 
+/*
+ * The frame is a panel on a window, not two columns sharing an edge.
+ *
+ * It used to be a flex row of two full-bleed regions divided by a 1px border,
+ * with the macOS traffic lights floating over the top-left of the sidebar and
+ * every pane header in the app carrying --titlebar of dead space so they had
+ * somewhere to be. That is a web page filling a window.
+ *
+ * Now: the window is --app-bg, the rail sits directly on it with no fill and
+ * no edge of its own, and the content is a single rounded panel inset from
+ * three sides and lifted with --shadow-md. The traffic lights land on the
+ * window above the panel, which is where OS chrome belongs, and the strip they
+ * live in stops being something every surface has to route around.
+ */
 .sh-app {
   --sh-measure: 1240px; /* a comfortable line length, not the window's width */
   --sh-rail-mini: calc(var(--row-h) + var(--space-4) * 2);
+  /* The air around the floating panel comes from --frame-gap in App.css, which
+     is at the root so the portalled drawers can line up with these same edges. */
   position: relative;
   display: flex;
   height: 100vh;
   overflow: hidden;
+  /* Lit from behind the rail, falling off across the window. The panel's own
+     shadow then has a surface with a gradient in it to fall on, which is the
+     difference between a card on a colour and a sheet in a room. */
+  background:
+    radial-gradient(
+      120% 90% at 0% 0%,
+      var(--app-bg-lift) 0%,
+      var(--app-bg) 62%
+    ),
+    var(--app-bg);
 }
 
 /* The macOS traffic lights are drawn over our chrome. --titlebar keeps that
@@ -68,15 +94,15 @@
   transition: width var(--dur) var(--ease), min-width var(--dur) var(--ease);
 }
 
+/* The rail has no fill and no edges now — it is type and icons standing on the
+   window. The border-top and border-right here were both drawing the seam that
+   the panel's own gap replaced. */
 .sh-rail-foot {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-raised);
-  border-top: 1px solid var(--border-soft);
-  /* continues the sidebar's own right edge past the end of its scroll box */
-  border-right: 1px solid var(--border-soft);
+  padding: var(--space-2) var(--space-3) var(--frame-gap);
+  background: none;
 }
 .sh-rail-toggle {
   gap: var(--space-2);
@@ -128,6 +154,16 @@
 .sh-app[data-rail="mini"] .nav-section {
   margin-bottom: var(--space-4);
 }
+/* The mini rail overrules a folded section. Its headings are unreadable at this
+   width by design, so a fold here would be a run of icons that disappeared with
+   nothing on screen saying why or offering them back. The whole point of the
+   fold is to buy room for the project list, and the icon rail has room. */
+.sh-app[data-rail="mini"] .nav-section[data-shut] > .nav-item {
+  display: flex;
+}
+.sh-app[data-rail="mini"] .nav-heading-chevron {
+  display: none;
+}
 .sh-app[data-rail="mini"] .nav-heading {
   justify-content: center;
   padding-left: 0;
@@ -177,12 +213,17 @@
 
 /* ── the floating rail ───────────────────────────────────────── */
 
+/* The one mode where the rail IS a surface: floated over the content on a
+   narrow window, it has to be opaque and it has to have an edge, because there
+   is a page passing underneath it rather than the window behind it. */
 .sh-app[data-rail="overlay"] .sh-rail {
   position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
   z-index: 92; /* over the inspector's own overlay (89), under modals (100) */
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
   transform: translateX(-100%);
   visibility: hidden;
@@ -218,11 +259,15 @@
   justify-content: center;
   width: var(--row-h);
   height: var(--row-h);
-  border: 1px solid var(--border);
+  /* Floats over the panel it opens the rail onto, so it takes the float's
+     material rather than a flat tile parked in the panel's corner. */
+  border: 1px solid var(--elev-3-border);
   border-radius: var(--radius);
-  background: var(--bg-raised);
+  background: var(--elev-3-bg);
   color: var(--text-dim);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--elev-3-shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .sh-menu:hover {
@@ -293,11 +338,53 @@
 
 /* ── content ─────────────────────────────────────────────────── */
 
+/*
+ * The panel. Inset from the top by the titlebar strip and from the other three
+ * sides by --frame-gap, so it reads as a sheet laid on the window.
+ *
+ * --titlebar is redefined to nothing inside it, and that is the substantive
+ * part of this rule rather than a detail. Every pane header in the app opens
+ * with `calc(var(--titlebar) - var(--space-2))` of top padding for one reason:
+ * the traffic lights used to be drawn on top of it. They are not any more —
+ * they are on the window, above this panel's top edge — so the token that
+ * reserved room for them resolves to the panel's own top gutter instead, and
+ * ~24px of dead space comes off the top of every surface at once without a
+ * single pane header being touched.
+ */
 .sh-main {
   flex: 1 1 auto;
   min-width: 0;
   display: flex; /* a row: the inspector drawer sits beside the surface */
   overflow: hidden;
+  margin: var(--titlebar) var(--frame-gap) var(--frame-gap) var(--frame-gap);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  /* The lit top edge of the sheet. One pixel, and it is what makes the panel
+     read as catching the light coming across the window behind it rather than
+     as a rectangle cut out of it. */
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
+  /* Declared after the margin that consumes it: descendants get the gutter,
+     the frame keeps the strip. */
+  --titlebar: var(--space-5);
+}
+
+/*
+ * Every surface arrives; none of them cuts.
+ *
+ * Switching destinations swaps the entire contents of the panel in one frame,
+ * and an instant swap gives the eye nothing to follow — you land on a finished
+ * screen and have to find your place in it. A single short fade on the pane,
+ * with App.css's stagger dealing its sections in behind that, makes the change
+ * legible as a change. It costs one composited layer for 200ms.
+ *
+ * On the pane rather than on the panel because a pane genuinely remounts when
+ * the view changes, which is what restarts the animation; the panel never
+ * unmounts, and the project workspaces deliberately stay mounted so their
+ * terminals survive — neither would ever re-run this.
+ */
+.sh-pane, .main-pane {
+  animation: hq-fade var(--dur) var(--ease-enter);
 }
 
 .sh-pane {
@@ -308,27 +395,50 @@
   overflow: hidden;
 }
 
+/* The shell's header is not sticky — it is a flex sibling above a scroller, so
+   nothing passes behind it and glass would be sampling the panel's own flat
+   fill for nothing. It stays opaque, and takes the rail's *colour* so it still
+   reads as the same band of chrome as the legacy .pane-header beside it. */
 .sh-pane-head {
   flex: 0 0 auto;
   padding: calc(var(--titlebar) - var(--space-2)) var(--pane-x) var(--space-5);
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg);
 }
+/*
+ * Title on the left, actions on the right, and the actions give way first.
+ *
+ * They did not before: the row could not wrap, so a busy header — Calendar's,
+ * with a date nav, two segmented switchers and two buttons — simply crushed
+ * the title column, and on a 1180px window the calendar's own subtitle was
+ * squeezed to 183px and broke across two lines while 664px of controls sat
+ * beside it on one. The title of the surface you are on is not the part that
+ * should be losing that argument.
+ *
+ * So: the row wraps, the text column claims a real minimum before it shrinks,
+ * and the action group drops to a full-width line of its own when it cannot
+ * fit — still right-aligned, so it stays where the eye already looks for it.
+ */
 .sh-pane-head-row {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
+  flex-wrap: wrap;
 }
 .sh-pane-head-text {
+  flex: 1 1 260px;
   min-width: 0;
 }
+/* The one headline in the app. It names the surface you are standing on, it is
+   the first thing read after the window opens, and at --fs-lg it was the same
+   size as a section heading three inches below it. --fs-xl exists for this. */
 .sh-pane-title {
   margin: 0;
-  font-size: var(--fs-lg);
-  font-weight: 700;
+  font-size: var(--fs-xl);
+  font-weight: 680;
   letter-spacing: var(--ls-display);
-  line-height: 1.2;
+  line-height: 1.15;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -346,6 +456,11 @@
 }
 .sh-pane-actions {
   flex: 0 0 auto;
+  /* Right-aligned on its own line too. justify-content on the row only places
+     the group while it shares a line with the title; once it wraps, the row's
+     space-between has nothing to distribute and the group would fall to the
+     left margin — which is where the eye never looks for a primary action. */
+  margin-left: auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;

@@ -157,40 +157,9 @@
   opacity: 1;
 }
 
-/* ── the segmented switcher ───────────────────────────────────── */
-
-/* The track is the control, so it keeps its fill. What it lost is the hairline
-   around the fill, which drew the same boundary twice. */
-.ops-seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: var(--radius);
-  background: var(--bg-inset);
-}
-.ops-seg-btn {
-  min-height: 24px;
-  padding: var(--space-1) var(--space-3);
-  border-radius: calc(var(--radius) - 3px);
-  color: var(--text-dim);
-  font-size: var(--fs-xs);
-  font-weight: 550;
-  white-space: nowrap;
-  transition: var(--t-color), var(--t-press);
-}
-.ops-seg-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.ops-seg-btn:active {
-  transform: var(--press);
-}
-.ops-seg-btn.on {
-  color: var(--text);
-  background: var(--bg-raised);
-  font-weight: 650;
-  box-shadow: var(--shadow-sm);
-}
+/* The segmented switcher is App.css's shared control — track, segment, hover,
+   press, focus and selected. This sheet's copy was the closest of the four to
+   what they all became, and it is still one copy too many. */
 
 /* ── search and filter ────────────────────────────────────────── */
 
@@ -226,6 +195,8 @@
   border: 0;
   background: transparent;
   font-size: var(--fs-sm);
+  /* .ops-search is the field; this has no chrome to be recessed into. */
+  --field-recess: none;
 }
 .ops-search input:focus,
 .ops-search input:focus-visible {
@@ -350,6 +321,13 @@
   display: grid;
   grid-template-columns: minmax(232px, 292px) minmax(0, 1fr);
   min-height: 0;
+}
+/* Nothing to list: one column, one empty state. */
+.ops-split-solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ops-split-solo > .ops-list {
+  display: none;
 }
 .ops-list {
   display: flex;
@@ -716,6 +694,9 @@
   color: var(--text-dim);
   font-size: var(--fs-xs);
   transition: var(--t-color);
+  /* Reads as a value until you reach for it, so it carries no chrome at rest
+     — and therefore no recess either. */
+  --field-recess: none;
 }
 .doc-prop select {
   padding-right: var(--space-6);
@@ -1097,6 +1078,18 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 176px minmax(258px, 340px) minmax(0, 1fr);
+}
+/* Nothing to read: the reader stands down and the list takes the width, so an
+   empty inbox is one column of explanation rather than a narrow strip beside
+   a blank third of the window. */
+.mail-shell:has(.mail-reader-off) {
+  grid-template-columns: 176px minmax(0, 1fr);
+}
+/* Scoped so it outranks .mail-reader's own `display: flex` further down the
+   file — otherwise the element survives with no column to sit in and grid
+   drops it into an implicit row under the list. */
+.mail-shell .mail-reader-off {
+  display: none;
 }
 .mail-folders {
   min-height: 0;
@@ -1772,13 +1765,46 @@
   font-style: italic;
   opacity: 0.8;
 }
+/*
+ * An empty stage is a place, not a caption.
+ *
+ * All five columns start empty, so the first thing anyone sees of this board is
+ * its resting state — and that was five centred grey paragraphs floating in
+ * five identical voids, which reads as a page that failed to load rather than
+ * as a board with nothing on it yet. This is a drag surface: the one shape that
+ * says both "nothing here" and "something goes here" is a dashed well, and it
+ * doubles as the drop target the interaction already wants you to find.
+ *
+ * It fills the column, so the five wells line up as five equal places and the
+ * board has a shape before it has any content.
+ */
 .column-empty {
-  padding: var(--space-6) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  /* Sized to its own contents, not to the column. A card lands at the top of a
+     column, so the place a card will land is at the top too — five wells run
+     the full height of an empty board is 1,400px of dashed line saying the
+     same thing five times. */
+  min-height: 148px;
+  padding: var(--space-5) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
   color: var(--text-faint);
   font-size: var(--fs-xs);
   font-variant-numeric: proportional-nums;
   line-height: 1.6;
   text-align: center;
+  transition: var(--t-color);
+}
+/* The column already lights up on drag-over; the well inside it firms up its
+   own edge so the target has a boundary and not just a wash. */
+.content-column.over .column-empty {
+  border-color: var(--accent-border);
+  border-style: solid;
+  color: var(--text-dim);
 }
 /* A sentence about where this will publish. It is text, and it now looks
    like text. */
@@ -1865,7 +1891,8 @@
 /* An empty column recruits: what the stage is for, and the button that fills
    it. An empty state that only apologises is a dead end with manners. */
 .column-empty p {
-  margin: 0 0 var(--space-3);
+  margin: 0;
+  max-width: 26ch;
 }
 
 .content-detail {

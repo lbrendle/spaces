@@ -17,19 +17,21 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
-import { useStore } from "../store";
-import { getDb } from "../db";
+import { useStore, channelAgents } from "../store";
+import { triggerAgents, userTrigger } from "../agents";
+import { getDb, uid } from "../db";
 import { KIND_BY_TYPE } from "../entities";
 import { LINK_KIND_BY_ID, workloadOf } from "../links";
 import { getQueueSnapshot, subscribeQueue } from "../orchestrator";
 import { RITZ_BASE } from "../capabilities";
 import { errorText, toast } from "../toast";
 import { slug } from "../types";
-import type { AgentKind, EntityRef, EntityType, MemoryKind, TaskStatus } from "../types";
+import type { Agent, AgentKind, EntityRef, EntityType, MemoryKind, TaskStatus } from "../types";
 import {
   ghCapability,
   ghCommand,
@@ -45,7 +47,7 @@ import {
 } from "../github";
 import { EntityChip } from "./EntityChip";
 import { FirstRunChecklist } from "./SetupGuide";
-import { ActionQueue } from "./ActionQueue";
+import { ActionQueue, usePendingActionCount } from "./ActionQueue";
 import { Avatar, Field, Modal } from "./ui";
 import { IconBranch, IconGitHub, IconMemory, IconPlus, IconTasks } from "./icons";
 import "./dashboard.css";
@@ -226,12 +228,11 @@ function LiveStrip() {
         )
       }
     >
-      {live.length === 0 && (
-        <Empty>
-          Nothing is running. Agents reply when you @mention them in a channel, and each one
-          runs on whichever device hosts it.
-        </Empty>
-      )}
+      {/* The section is headed "Right now" and its meta already reads "idle".
+          A second sentence saying nothing is running is the third time, and
+          the half of it that explained @mentions was answering a question
+          nobody asks twice — on the surface you land on every launch. */}
+      {live.length === 0 && <Empty>Nothing is running.</Empty>}
 
       {live.map((run) => {
         const agent = agents.find((a) => a.id === run.agent_id);
@@ -718,6 +719,19 @@ function WorkSummary() {
 interface FeedItem {
   key: string;
   at: number;
+  /**
+   * Who did it, as its own field.
+   *
+   * It used to be the first word of `verb` — "Iris replied in #frontend",
+   * "Ada finished in 40s", "An agent linked" — which meant the one thing you
+   * scan an activity feed for was at a different horizontal position on every
+   * row, buried in a sentence set in --text-dim. Forty rows of that is a wall
+   * of grey prose with the answer hidden somewhere in each line. Split out, it
+   * gets a column and a weight, and the feed can be read down the actor.
+   *
+   * Empty for the things nobody did: a memory edit, a link the system drew.
+   */
+  actor?: string;
   verb: string;
   refs: EntityRef[];
   /** Rendered between two chips, for a link's relation. */
@@ -781,7 +795,8 @@ function ActivityFeed() {
         out.push({
           key: `m:${m.id}`,
           at: m.created_at,
-          verb: `${who} ${did}${chan ? ` in #${chan.name}` : ""}`,
+          actor: who,
+          verb: `${did}${chan ? ` in #${chan.name}` : ""}`,
           refs: [{ type: "message", id: m.id }],
         });
       }
@@ -799,7 +814,8 @@ function ActivityFeed() {
       out.push({
         key: `r:${run.id}`,
         at: run.finished_at,
-        verb: `${name} ${outcome}`,
+        actor: name,
+        verb: outcome,
         refs: [{ type: "run", id: run.id }],
       });
     }
@@ -846,6 +862,7 @@ function ActivityFeed() {
               {timeAgo(it.at)}
             </span>
             <span className="db-feed-what">
+              {it.actor && <span className="db-feed-actor">{it.actor}</span>}
               <span className="db-feed-verb">{it.verb}</span>
               {it.refs.map((ref, i) => (
                 <span className="db-feed-ref" key={`${ref.type}:${ref.id}:${i}`}>
@@ -1453,8 +1470,230 @@ function QuickActions({ onPick }: { onPick: (k: QuickKind) => void }) {
 
 /* ── the screen ───────────────────────────────────────────────── */
 
+/* ── the launcher ─────────────────────────────────────────────── */
+
+/**
+ * Ask for work, from the surface you land on.
+ *
+ * This is the thing the dashboard was missing, and it is not a small thing:
+ * the whole product is a workspace where you hand work to agents, and the
+ * screen every launch opens on was a **read-only report about that having
+ * already happened**. Every route to actually starting something ran through
+ * finding a channel in the rail first, then remembering the agent's handle,
+ * then typing an @mention. The dashboard summarised the work and offered no
+ * way to cause any.
+ *
+ * So: say what you want, pick who does it, press return. It posts into that
+ * agent's channel exactly as if you had typed it there — the same
+ * insertMessage + triggerAgents pair ChatView uses, deliberately, so there is
+ * one dispatch path in the app and this cannot drift from it — and then takes
+ * you to the channel, because the next thing you want is to watch it work.
+ */
+function Launch() {
+  const store = useStore();
+  const { agents, channels, projects } = store;
+  const setView = useStore((s) => s.setView);
+  const [text, setText] = useState("");
+  const [who, setWho] = useState("");
+  const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  /* An agent can only be handed work in a channel it is actually in, so the
+     roster here is agents that have one — not every agent on the workspace.
+     Offering a name that cannot be dispatched is worse than not offering it. */
+  const reachable = useMemo(() => {
+    const out: { agent: Agent; channelId: string; channelName: string }[] = [];
+    for (const agent of agents) {
+      const channel = channels.find((c) =>
+        channelAgents(store, c.id).some((a) => a.id === agent.id)
+      );
+      if (channel) out.push({ agent, channelId: channel.id, channelName: channel.name });
+    }
+    return out;
+  }, [agents, channels, store]);
+
+  const pick = reachable.find((r) => r.agent.id === who) ?? reachable[0];
+
+  if (!reachable.length) return null;
+
+  async function go() {
+    const content = text.trim();
+    if (!content || !pick || busy) return;
+    setBusy(true);
+    try {
+      // The handle is what routes it. resolveTargets reads the @mention out of
+      // the message body, so the mention has to be *in* the text rather than
+      // carried beside it — same as typing it by hand.
+      const handle = slug(pick.agent.name);
+      const body = content.includes(`@${handle}`) ? content : `@${handle} ${content}`;
+      const msg = await store.insertMessage({
+        id: uid(),
+        channel_id: pick.channelId,
+        author_type: "user",
+        author_id: "user",
+        author_name: store.self().name,
+        content: body,
+        status: "done",
+        meta: "",
+        parent_id: "",
+      });
+      void triggerAgents(pick.channelId, userTrigger(msg));
+      setText("");
+      setView({ type: "channel", channelId: pick.channelId });
+    } catch (e) {
+      toast.error("Could not hand that over", e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const project = projects.find((p) => p.id === channels.find((c) => c.id === pick?.channelId)?.project_id);
+
+  return (
+    <section className="db-launch">
+      <textarea
+        ref={box}
+        className="db-launch-input"
+        rows={2}
+        placeholder="What do you want done?"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // Return sends; shift-return is a newline. The same contract as the
+          // composer, so the muscle memory carries.
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void go();
+          }
+        }}
+      />
+      <div className="db-launch-foot">
+        <div className="db-launch-who" role="group" aria-label="Who does it">
+          {reachable.slice(0, 6).map((r) => (
+            <button
+              key={r.agent.id}
+              type="button"
+              className={"db-who" + (r.agent.id === pick?.agent.id ? " on" : "")}
+              onClick={() => setWho(r.agent.id)}
+              title={`${r.agent.name} — ${r.agent.role || "agent"} · #${r.channelName}`}
+            >
+              <Avatar id={r.agent.id} name={r.agent.name} kind={r.agent.kind} />
+              {r.agent.name}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="btn primary db-launch-go"
+          disabled={!text.trim() || busy}
+          onClick={() => void go()}
+        >
+          {busy ? "Handing over…" : "Hand it over"}
+        </button>
+      </div>
+      {pick && (
+        <p className="db-launch-note">
+          Goes to <strong>#{pick.channelName}</strong>
+          {project ? ` in ${project.name}` : ""} — you can watch it there.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/* ── the status band ──────────────────────────────────────────── */
+
+/**
+ * The four numbers the dashboard exists to answer, in one row.
+ *
+ * This replaces the way the page used to open. "Waiting on you" was a
+ * full-width dashed panel and "Right now" was a heading with a paragraph under
+ * it — and on the overwhelmingly common launch where both are empty, they
+ * spent the top two hundred pixels of the landing surface saying *nothing is
+ * happening* twice, at length. An empty queue is not a thing to explain; it is
+ * a zero.
+ *
+ * A band of counters is the same height whether the workspace is idle or on
+ * fire, which is the property the old opening lacked and the reason it looked
+ * broken when empty. The sections below it now render only when they have
+ * something in them, so the page grows downward from a constant header rather
+ * than starting with two apologies.
+ *
+ * Each tile is a destination. A number you cannot act on is a decoration.
+ */
+function StatusBand() {
+  const setView = useStore((s) => s.setView);
+  const tasks = useStore((s) => s.tasks);
+  const agents = useStore((s) => s.agents);
+  const activeRunIds = useStore((s) => s.activeRunIds);
+  const waiting = usePendingActionCount();
+
+  const open = tasks.filter((t) => t.status !== "done").length;
+  const running = activeRunIds.length;
+  const ready = agents.filter((a) => a.kind !== "ritz").length;
+
+  const tiles: {
+    key: string;
+    n: number;
+    label: string;
+    sub: string;
+    tone?: "accent" | "live";
+    go: () => void;
+  }[] = [
+    {
+      key: "waiting",
+      n: waiting,
+      label: waiting === 1 ? "Waiting on you" : "Waiting on you",
+      sub: waiting ? "needs a yes" : "nothing to approve",
+      tone: waiting ? "accent" : undefined,
+      go: () => setView({ type: "dashboard" }),
+    },
+    {
+      key: "running",
+      n: running,
+      label: "Running now",
+      sub: running ? "live on a machine" : "no agent is working",
+      tone: running ? "live" : undefined,
+      go: () => setView({ type: "agents" }),
+    },
+    {
+      key: "open",
+      n: open,
+      label: "Open work",
+      sub: open ? "across every project" : "the board is clear",
+      go: () => setView({ type: "tasks" }),
+    },
+    {
+      key: "roster",
+      n: ready,
+      label: ready === 1 ? "Teammate" : "Teammates",
+      sub: "on the roster",
+      go: () => setView({ type: "agents" }),
+    },
+  ];
+
+  return (
+    <div className="db-band">
+      {tiles.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          className={"db-tile" + (t.tone ? ` db-tile-${t.tone}` : "")}
+          onClick={t.go}
+        >
+          <span className="db-tile-n num">{t.n}</span>
+          <span className="db-tile-label">{t.label}</span>
+          <span className="db-tile-sub">{t.sub}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardView() {
   const [quick, setQuick] = useState<QuickKind | null>(null);
+  const waiting = usePendingActionCount();
+  const activeRunIds = useStore((s) => s.activeRunIds);
   usePrimeFeed();
 
   return (
@@ -1471,10 +1710,17 @@ export function DashboardView() {
         {/* Hides itself once the four steps are done, on this and every later launch. */}
         <FirstRunChecklist />
 
-        {/* Proposals an agent is waiting on. Above the fold on purpose: an
-            agent blocked on a human is the most time-sensitive thing here. */}
-        <ActionQueue />
-        <LiveStrip />
+        {/* Ask first, report second. */}
+        <Launch />
+        <StatusBand />
+
+        {/* Both of these used to render unconditionally and spend a band each
+            saying they were empty. The status band above carries the zero now,
+            so they appear only when they have something — which is what makes
+            the page grow from a constant header instead of opening on two
+            explanations of nothing. */}
+        {waiting > 0 && <ActionQueue />}
+        {activeRunIds.length > 0 && <LiveStrip />}
         <div className="db-cols">
           <WorkloadCard />
           <WorkSummary />

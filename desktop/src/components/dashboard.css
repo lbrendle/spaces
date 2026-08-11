@@ -114,6 +114,174 @@
   color: var(--text-faint);
 }
 
+/* ── the launcher ─────────────────────────────────────────────── */
+
+/*
+ * The one thing on this page that causes work rather than reporting it, so it
+ * is the one thing drawn as a place to put your hands: level-1 paper, the
+ * largest radius on the ladder, and the most vertical space any single element
+ * on the dashboard takes. Everything under it is a readout.
+ */
+.db-launch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+/* The whole panel is the field, so the panel is what lights up — the textarea
+   inside it keeps no chrome of its own. Same contract as the chat composer. */
+.db-launch:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
+}
+
+/*
+ * No horizontal padding, and this is the alignment fault people actually see
+ * on this screen. The card is the field — that is why the input has no border
+ * and no fill — but it kept 8px of its own inset, and so did the note beneath
+ * it. The agent pills between them have none. So the sentence you type started
+ * 8px right of the row of agents it is addressed to, and the caption 8px right
+ * of that same row: three items in one card, on two different left edges.
+ *
+ * Vertical padding stays; only the horizontal inset goes, so all three
+ * children now start on the card's content edge.
+ */
+.db-launch-input {
+  --field-recess: none;
+  border: 0;
+  background: none;
+  padding: var(--space-2) 0 0;
+  resize: none;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.db-launch-input:focus, .db-launch-input:focus-visible {
+  outline: none;
+  border: 0;
+}
+.db-launch-input::placeholder { color: var(--text-faint); }
+
+.db-launch-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.db-launch-who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Who does it. A chip rather than a select: the roster is short, the faces are
+   the fastest way to find a name, and a dropdown would hide the one decision
+   this control exists to make. */
+.db-who {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--row-h) - var(--space-2));
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  transition: var(--t-color), transform var(--dur-fast) var(--ease-spring);
+}
+.db-who:hover { background: var(--bg-hover); color: var(--text); }
+.db-who:active { transform: var(--press); }
+.db-who.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text);
+  font-weight: 650;
+}
+.db-who .avatar {
+  width: 22px; height: 22px;
+  font-size: var(--fs-micro);
+  border-radius: 999px;
+}
+
+.db-launch-go { margin-left: auto; }
+
+.db-launch-note {
+  margin: 0;
+  padding: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.db-launch-note strong { color: var(--text-dim); font-weight: 650; }
+
+/* ── the status band ──────────────────────────────────────────── */
+
+/*
+ * Four counters, one row, constant height — see StatusBand in DashboardView.
+ * They wrap to two-up before they get narrow enough to break a label, and the
+ * floor is what "Waiting on you" needs on one line.
+ */
+.db-band {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--space-4);
+}
+
+.db-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
+  text-align: left;
+  transition: var(--t-lift);
+}
+.db-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
+}
+.db-tile:active { transform: var(--press); box-shadow: var(--shadow-sm); }
+
+/* The number is the tile. It takes the display size the pane title uses, which
+   is the only other place in the app allowed to be a headline — a counter you
+   have to look for is a counter that failed. */
+.db-tile-n {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: var(--ls-display);
+  color: var(--text);
+}
+.db-tile-label {
+  margin-top: var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+.db-tile-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+
+/* A zero is not a state worth colouring. Only a tile with something in it
+   takes the accent, so colour on this row always means "there is work here"
+   rather than "this is the first tile". */
+.db-tile-accent .db-tile-n { color: var(--accent); }
+.db-tile-accent { border-color: var(--accent-border); background: var(--accent-soft); }
+.db-tile-live .db-tile-n { color: var(--green); }
+.db-tile-live { border-color: var(--green-border); }
+
 .db-empty {
   margin: 0;
   padding: var(--space-2) 2px;
@@ -694,6 +862,17 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+}
+/* Who did it, in a column of its own — see the note on FeedItem.actor. Not a
+   fixed width: names run from "You" to "An agent", and padding a 3ch name out
+   to 9ch to make a hard column puts more empty space in the row than the
+   alignment buys back. Weight and colour are what make it findable. */
+.db-feed-actor {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+  white-space: nowrap;
 }
 .db-feed-verb {
   color: var(--text-dim);

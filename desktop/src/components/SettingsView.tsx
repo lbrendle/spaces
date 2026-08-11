@@ -33,8 +33,55 @@ const PROVIDERS = [
   { id: "x", label: "X", detail: "Posts, threads, and account access", category: "social" },
 ] as const;
 
+/**
+ * Settings is six unrelated subjects, and it used to be one scroll.
+ *
+ * Pairing, integrations, appearance, calendars, the setup checklist and the
+ * CLI inventory were stacked in a single column — and one of them, the theme
+ * gallery, is thirty-eight cards tall, so "change the mode" and "see whether
+ * the gh CLI was found" were separated by several screens of artwork that had
+ * nothing to do with either. Nothing about that column was browsable: there
+ * was no way to see what settings existed without scrolling past all of them.
+ *
+ * One section at a time, with an index. The index is the contents page the
+ * scroll never had, the panel stops being taller than the theme gallery, and
+ * the section you were last in is where you come back to.
+ */
+const SECTIONS = [
+  { id: "workspace", label: "Workspace", blurb: "Pairing with Spaces web" },
+  { id: "integrations", label: "Integrations", blurb: "Google, Microsoft, social accounts" },
+  { id: "appearance", label: "Appearance", blurb: "Theme, accent, density" },
+  { id: "calendars", label: "Calendars", blurb: "Which calendars are visible" },
+  { id: "setup", label: "Setup", blurb: "What is left to finish" },
+  { id: "about", label: "About", blurb: "Version and detected CLIs" },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+const SECTION_KEY = "spaces.settings.section";
+
+function readSection(): SectionId {
+  try {
+    const raw = localStorage.getItem(SECTION_KEY) as SectionId | null;
+    return SECTIONS.some((s) => s.id === raw) ? (raw as SectionId) : "workspace";
+  } catch {
+    return "workspace";
+  }
+}
+
 export function SettingsView() {
   const tools = useStore((s) => s.tools);
+  const [section, setSectionState] = useState<SectionId>(readSection);
+
+  function setSection(id: SectionId) {
+    setSectionState(id);
+    try {
+      localStorage.setItem(SECTION_KEY, id);
+    } catch {
+      /* a locked-down webview just always opens on Workspace */
+    }
+  }
+
   const [portal, setPortal] = useState<PortalConnection | null>(null);
   const [portalUrl, setPortalUrl] = useState(
     config().portalUrl || "https://your-workspace.example.com"
@@ -108,13 +155,29 @@ export function SettingsView() {
         <div>
           <div className="pane-title">Settings</div>
           <div className="pane-sub">
-            Appearance, themes and the CLI tools Spaces drives.
+            {SECTIONS.find((s) => s.id === section)?.blurb}
           </div>
         </div>
       </div>
 
-      <div className="dash-body">
-        <section className="dash-card connected-spaces-card">
+      <div className="set-split">
+        <nav className="set-index" aria-label="Settings sections">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={"set-index-btn" + (s.id === section ? " on" : "")}
+              aria-current={s.id === section ? "page" : undefined}
+              onClick={() => setSection(s.id)}
+            >
+              <span className="set-index-label">{s.label}</span>
+              <span className="set-index-blurb">{s.blurb}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="dash-body set-body">
+        <section className="dash-card connected-spaces-card" hidden={section !== "workspace"}>
           <h3>
             Connected workspace
             {portal && (
@@ -217,9 +280,14 @@ export function SettingsView() {
           {portalMessage && <div className="portal-message">{portalMessage}</div>}
         </section>
 
-        <section className="dash-card">
+        <section className="dash-card" hidden={section !== "integrations"}>
           <h3>
-            Connections
+            {/* "Integrations", not "Connections". The rail already has a
+                destination called Connections — the link graph between tasks,
+                people and repos — and two unrelated things under one name in
+                one product is a name that has to go. These are third-party
+                accounts, which is what integrations are. */}
+            Integrations
             <span className="set-count">
               {integrations.filter((account) => account.status === "connected").length}
             </span>
@@ -276,13 +344,13 @@ export function SettingsView() {
         {/* Appearance, the theme gallery and every per-user override live in
             their own component: this file is already the settings *page*, and
             the gallery alone is bigger than the rest of it put together. */}
-        <AppearanceSettings />
+        {section === "appearance" && <AppearanceSettings />}
 
-        <CalendarSettings />
+        {section === "calendars" && <CalendarSettings />}
 
-        <SetupGuide />
+        {section === "setup" && <SetupGuide />}
 
-        <section className="dash-card">
+        <section className="dash-card" hidden={section !== "about"}>
           <h3>About {appVersion ? `· ${appVersion}` : ""}</h3>
           <div className="set-hint about-hint">
             Spaces runs your agents locally. These CLIs are looked up on your
@@ -305,6 +373,7 @@ export function SettingsView() {
             })}
           </div>
         </section>
+        </div>
       </div>
     </div>
   );

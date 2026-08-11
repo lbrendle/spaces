@@ -488,8 +488,12 @@
 .swimlane-cols .kanban-col {
   flex: 1 1 0;
   width: auto;
-  min-width: 208px;
-  max-width: 340px;
+  /* Widened with the type. At 208px and a 13.5px title a card title ran to two
+     lines; at 208px and a 16px title it runs to four, and a column of
+     four-line titles is a column you read rather than scan. The floor is what
+     the widest realistic title needs for two lines at the new size. */
+  min-width: 244px;
+  max-width: 380px;
   max-height: none;
   padding: 0;
   background: none;
@@ -526,7 +530,26 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-1);
+  /* Opaque, deliberately, and this is where the glass stops.
+     Cards do scroll behind it, so the material would be describing something
+     true — but there is one of these per column and a board is four or five
+     columns wide. That is four or five extra blurred compositing layers on the
+     surface you are most likely to be dragging across, for a 30px band. The
+     pane header and the composer are one layer each per screen and keep
+     theirs; this is where the cost stops being worth it. */
   background: var(--bg);
+  /* The edge the band was missing. Opaque and borderless, this header cut every
+     card that scrolled under it clean in half, mid-word, against nothing — and
+     with the scrollbars hidden there is no other thing on screen saying the
+     column continues. So the slice read as a rendering fault rather than as
+     content passing behind a header. Same hairline, same reason, as the one the
+     composer draws on the side its content arrives from.
+
+     --border, not --border-soft: the soft tone is pitched to read against the
+     panel canvas, and what passes under this edge is cards, whose fill is
+     lighter than the canvas on both sides of it. A line the eye has to hunt
+     for is not doing the job this one exists to do. */
+  border-bottom: 1px solid var(--border);
   font-size: var(--fs-sm);
   font-weight: 700;
   line-height: 1.3;
@@ -659,25 +682,35 @@
  * children: a title, a line, a row. It used to have five, two of which existed
  * only to hold two other things side by side.
  */
+/* Paper on the canvas, and it rests there rather than being drawn on it: the
+   column around it is empty space, so the card's own contact shadow is the
+   only thing that puts it on a surface. It used to be --surface-2 — a fill
+   with no shadow, which reads as a *hole in* the canvas rather than a card on
+   it, and on light themes lands within a couple of values of the canvas so
+   that only the hairline separated them. Level 1 is the rung the comment above
+   already said this was. */
 .kanban-col .task-card {
   position: relative;
-  background: var(--surface-2);
+  background: var(--surface-1);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   padding: var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight);
   cursor: grab;
   transition:
-    transform var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-enter),
     opacity var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease-enter),
     background var(--dur-fast) var(--ease),
     border-color var(--dur-fast) var(--ease);
 }
 
+/* Under the pointer it comes up off the page — the gesture this card affords
+   is being picked up, so the hover is a rehearsal of it. */
 .kanban-col .task-card:hover {
   border-color: var(--border-strong);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
 }
 .kanban-col .task-card:active { cursor: grabbing; }
 
@@ -691,7 +724,7 @@
   cursor: grabbing;
   border-color: var(--accent-border);
   border-style: dashed;
-  background: var(--surface-1);
+  background: var(--surface-2);
   transform: scale(0.98);
   box-shadow: none;
 }
@@ -785,7 +818,13 @@
   align-items: center;
   gap: var(--space-3);
   flex-wrap: nowrap;
-  overflow: hidden;
+  /* Clip sideways only. The avatar cluster is a 26px pill riding a 20px line
+     on negative block margins, so plain `overflow: hidden` was shaving 3px off
+     its rounded top and bottom every time it lit up on hover. `clip` is what
+     allows one axis to stay visible — `hidden` on one axis silently promotes
+     the other to `auto` and turns this footer into a scroll container. */
+  overflow-x: clip;
+  overflow-y: visible;
   margin-top: var(--space-3);
   min-width: 0;
   color: var(--text-faint);

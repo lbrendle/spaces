@@ -352,13 +352,33 @@
 
 /* Nothing has been proposed, so there is nothing to put a surface under: the
    dashed edge is the shape of what would be here. */
+/* This is the dashboard's top slot and it is empty nearly all the time, so its
+   resting shape is the one the app is judged on. It used to be a single column
+   inside a full-width dashed box: two paragraphs capped at 62ch stacked under
+   a lead, which on a laptop meant ~280px of height with the right 45% of the
+   box blank. The box was the widest thing on the screen and the emptiest.
+
+   Same words, laid out across the width it already occupies. The glyph and the
+   lead take one row; the explanation runs in two columns beneath it, each at a
+   readable measure, so the panel is a little over half as tall and has no dead
+   right-hand side. The columns collapse to one before the measure does, since
+   two 30ch columns are worse than one 62ch paragraph. */
 .aq-blank {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3) var(--space-6);
   padding: var(--space-5);
   border: 1px dashed var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
+  /* The panel measures ITSELF, not the window: the same component renders in
+     the side panel at ~320px, where two columns would be two ragged strips. */
+  container-type: inline-size;
+}
+
+.aq-blank-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 /* The mark itself, at the size it wants to be read at. The tinted tile behind
@@ -366,16 +386,26 @@
 .aq-blank-glyph {
   display: inline-flex;
   align-items: center;
-  margin-bottom: var(--space-1);
   color: var(--accent);
+  flex-shrink: 0;
 }
 
 .aq-blank-lead {
   margin: 0;
   color: var(--text);
-  font-size: var(--fs);
+  font-size: var(--fs-md);
   font-weight: 650;
   letter-spacing: var(--ls-title);
+}
+
+.aq-blank-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3) var(--space-6);
+}
+
+@container (min-width: 640px) {
+  .aq-blank-body { grid-template-columns: 1fr 1fr; }
 }
 
 .aq-blank-text {
@@ -385,6 +415,32 @@
   font-size: var(--fs-sm);
   line-height: 1.65;
 }
+
+/* The rest of the model, folded. A disclosure rather than a link because the
+   answer is four lines long and belongs where the question was asked. */
+.aq-blank-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  padding: var(--space-1) var(--space-3);
+  margin-left: calc(var(--space-3) * -1);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  list-style: none;
+  transition: var(--t-color);
+}
+.aq-blank-more > summary::-webkit-details-marker { display: none; }
+.aq-blank-more > summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform var(--dur) var(--ease);
+}
+.aq-blank-more[open] > summary::before { transform: rotate(90deg); }
+.aq-blank-more > summary:hover { color: var(--text); background: var(--bg-hover); }
+.aq-blank-more[open] .aq-blank-body { margin-top: var(--space-3); }
 
 /* ── the badge ────────────────────────────────────────────────── */
 
@@ -402,12 +458,16 @@
   line-height: 1.6;
 }
 
+/* --accent-hover, not brightness(1.1). Brightening is only ever right on one
+   appearance: a light theme's accent is dark and saturated, so lifting its
+   luminance washes the badge out instead of deepening it. The token moves
+   toward the light source on dark and away from it on light. */
 .aq-badge-btn {
   border: none;
-  transition: filter var(--dur-fast) var(--ease);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 .aq-badge-btn:hover {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
 }
 
 /* ── the log ──────────────────────────────────────────────────── */

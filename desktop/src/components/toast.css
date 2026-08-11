@@ -65,6 +65,15 @@
 
 /* ── Card ────────────────────────────────────────────────────── */
 
+/*
+ * Level 3 — a float over the page, which is what glass.css lists a toast as
+ * and what it had never actually been given. It was --surface-2 (the token for
+ * a fill *inside* a card) under --shadow-lg (the token reserved for a modal),
+ * so it borrowed the fill of the lowest rung and the shadow of the highest:
+ * on light themes a near-white card sitting on the window with a modal's
+ * shadow under it, which is why a toast always read as heavier than the thing
+ * it was reporting on. Now it samples what it covers, like every other float.
+ */
 .tst {
   position: relative;
   display: flex;
@@ -72,11 +81,13 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border-radius: var(--radius-md);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  background: var(--elev-3-bg);
+  border: 1px solid var(--elev-3-border);
+  box-shadow: var(--elev-3-shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   overflow: hidden;
-  animation: tst-in var(--dur) var(--ease);
+  animation: tst-in var(--dur) var(--ease-enter);
 }
 
 .tst-glyph {

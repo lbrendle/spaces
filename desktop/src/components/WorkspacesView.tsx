@@ -19,6 +19,7 @@ import {
 } from "../workspaces";
 import type { WorkspaceStatus } from "../workspaces";
 import { Avatar, Modal, Spinner } from "./ui";
+import { IconMoreHorizontal } from "./icons";
 import "./workspaces.css";
 
 type OpenDiff = (title: string, dir: string) => void;
@@ -394,41 +395,59 @@ function MainCheckoutCard({
         </div>
       )}
 
+      {/* Same three tiers as an agent's card below — see the note there. A
+          checkout mid-merge is the one state where the destructive action is
+          also the obvious one, so aborting a merge stays in the open. */}
       <div className="ws-actions">
-        <button
-          className="btn tiny"
-          disabled={busy}
-          onClick={() => openDiff(`${project.name} — main checkout diff`, dir)}
-        >
-          View diff
-        </button>
-        {main.merging && (
+        {main.merging ? (
           <button
-            className="btn tiny danger"
+            className="btn primary"
             disabled={busy}
             onClick={() => void run(() => abortMerge(dir))}
           >
             Abort merge
           </button>
-        )}
-        <button
-          className="btn tiny"
-          disabled={busy || !dirty}
-          onClick={() => setCommitOpen((o) => !o)}
-        >
-          Commit…
-        </button>
-        {!main.hasCommits && !dirty && (
+        ) : dirty ? (
           <button
-            className="btn tiny"
+            className="btn primary"
             disabled={busy}
-            onClick={() => void doInitialCommit()}
+            onClick={() => setCommitOpen((o) => !o)}
           >
+            Commit…
+          </button>
+        ) : !main.hasCommits ? (
+          <button className="btn primary" disabled={busy} onClick={() => void doInitialCommit()}>
             Create first commit
           </button>
+        ) : (
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={() => openDiff(`${project.name} — main checkout diff`, dir)}
+          >
+            View diff
+          </button>
         )}
+        {(main.merging || dirty || !main.hasCommits) && (
+          <button
+            className="btn quiet"
+            disabled={busy}
+            onClick={() => openDiff(`${project.name} — main checkout diff`, dir)}
+          >
+            View diff
+          </button>
+        )}
+        <details className="ws-more">
+          <summary
+            className="icon-btn"
+            title="Destructive actions"
+            aria-label="Destructive actions for the main checkout"
+          >
+            <IconMoreHorizontal size={14} />
+          </summary>
+          <div className="ws-more-pop glass">
         <button
-          className="btn tiny danger"
+          className="ws-more-item danger"
           disabled={busy || !dirty}
           onClick={() => {
             if (confirm(`Discard all uncommitted changes in ${dir}? This cannot be undone.`)) {
@@ -436,8 +455,10 @@ function MainCheckoutCard({
             }
           }}
         >
-          Discard changes
+          Discard uncommitted changes
         </button>
+          </div>
+        </details>
         {busy && <Spinner />}
       </div>
 
@@ -524,38 +545,83 @@ function AgentWorkspaceCard({
         </div>
       )}
 
+      {/*
+        Six buttons of identical weight, two of them irreversible, was not a
+        set of choices — it was a shelf. Nothing said which one you were meant
+        to press, and "Remove workspace" (which force-deletes unmerged commits)
+        sat at exactly the same weight as "View diff".
+
+        Three tiers now, decided by what the workspace is actually in a state
+        to do:
+          primary    the one obvious next step, and it MOVES — a dirty
+                     workspace wants committing, a clean branch that is ahead
+                     wants merging, and one that is neither just wants reading
+          secondary  the other legitimate operations, quiet
+          overflow   the two that destroy work, behind a deliberate extra
+                     click, where they cannot be hit by accident
+      */}
       <div className="ws-actions">
+        {dirty ? (
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={() => {
+              setCommitOpen((o) => !o);
+              setPrOpen(false);
+            }}
+          >
+            Commit…
+          </button>
+        ) : canMerge ? (
+          <button
+            className="btn primary"
+            disabled={busy}
+            title={`Merge ${status.branch} into the main checkout`}
+            onClick={() => void run(() => mergeWorkspace(project, agent))}
+          >
+            Merge into main
+          </button>
+        ) : (
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={() => openDiff(`${project.name} — ${agent.name}'s workspace diff`, status.path)}
+          >
+            View diff
+          </button>
+        )}
+
+        {/* Whatever the primary is not. Each one is still one click away — the
+            demotion is in weight, not in depth. */}
+        {!dirty && (
+          <button
+            className="btn quiet"
+            disabled={busy}
+            onClick={() => openDiff(`${project.name} — ${agent.name}'s workspace diff`, status.path)}
+          >
+            View diff
+          </button>
+        )}
+        {dirty && (
+          <button
+            className="btn quiet"
+            disabled={busy}
+            onClick={() => openDiff(`${project.name} — ${agent.name}'s workspace diff`, status.path)}
+          >
+            View diff
+          </button>
+        )}
+        {!canMerge && !dirty && (
+          <button
+            className="btn quiet"
+            disabled
+            title="Commit workspace changes first, then merge — enabled once there are no uncommitted changes and the branch is ahead of base."
+          >
+            Merge into main
+          </button>
+        )}
         <button
-          className="btn tiny"
-          disabled={busy}
-          onClick={() => openDiff(`${project.name} — ${agent.name}'s workspace diff`, status.path)}
-        >
-          View diff
-        </button>
-        <button
-          className="btn tiny"
-          disabled={busy || !dirty}
-          onClick={() => {
-            setCommitOpen((o) => !o);
-            setPrOpen(false);
-          }}
-        >
-          Commit…
-        </button>
-        <button
-          className="btn tiny"
-          disabled={busy || !canMerge}
-          title={
-            canMerge
-              ? `Merge ${status.branch} into the main checkout`
-              : "Commit workspace changes first, then merge — enabled once there are no uncommitted changes and the branch is ahead of base."
-          }
-          onClick={() => void run(() => mergeWorkspace(project, agent))}
-        >
-          Merge into main
-        </button>
-        <button
-          className="btn tiny"
+          className="btn quiet"
           disabled={busy}
           onClick={() => {
             setPrOpen((o) => !o);
@@ -564,38 +630,50 @@ function AgentWorkspaceCard({
         >
           Push + PR
         </button>
-        <button
-          className="btn tiny danger"
-          disabled={busy || !dirty}
-          onClick={() => {
-            if (
-              confirm(
-                `Discard all uncommitted changes in ${agent.name}'s workspace? This cannot be undone.`
-              )
-            ) {
-              void run(() => discardAll(status.path));
-            }
-          }}
-        >
-          Discard
-        </button>
-        <button
-          className="btn tiny danger"
-          disabled={busy}
-          onClick={() => {
-            if (
-              confirm(
-                `Remove ${agent.name}'s workspace and force-delete branch ${status.branch}? ` +
-                  `This permanently deletes uncommitted changes AND any commits on ${status.branch} ` +
-                  `that haven't been merged or pushed.`
-              )
-            ) {
-              void run(() => removeWorkspace(project, agent));
-            }
-          }}
-        >
-          Remove workspace
-        </button>
+
+        <details className="ws-more">
+          <summary
+            className="icon-btn"
+            title="Destructive actions"
+            aria-label={`Destructive actions for ${agent.name}'s workspace`}
+          >
+            <IconMoreHorizontal size={14} />
+          </summary>
+          <div className="ws-more-pop glass">
+            <button
+              className="ws-more-item danger"
+              disabled={busy || !dirty}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Discard all uncommitted changes in ${agent.name}'s workspace? This cannot be undone.`
+                  )
+                ) {
+                  void run(() => discardAll(status.path));
+                }
+              }}
+            >
+              Discard uncommitted changes
+            </button>
+            <button
+              className="ws-more-item danger"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Remove ${agent.name}'s workspace and force-delete branch ${status.branch}? ` +
+                      `This permanently deletes uncommitted changes AND any commits on ${status.branch} ` +
+                      `that haven't been merged or pushed.`
+                  )
+                ) {
+                  void run(() => removeWorkspace(project, agent));
+                }
+              }}
+            >
+              Remove workspace and branch
+            </button>
+          </div>
+        </details>
         {busy && <Spinner />}
       </div>
 
