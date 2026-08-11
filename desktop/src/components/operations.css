@@ -1072,6 +1072,18 @@
   display: grid;
   grid-template-columns: 176px minmax(258px, 340px) minmax(0, 1fr);
 }
+/* Nothing to read: the reader stands down and the list takes the width, so an
+   empty inbox is one column of explanation rather than a narrow strip beside
+   a blank third of the window. */
+.mail-shell:has(.mail-reader-off) {
+  grid-template-columns: 176px minmax(0, 1fr);
+}
+/* Scoped so it outranks .mail-reader's own `display: flex` further down the
+   file — otherwise the element survives with no column to sit in and grid
+   drops it into an implicit row under the list. */
+.mail-shell .mail-reader-off {
+  display: none;
+}
 .mail-folders {
   min-height: 0;
   overflow-y: auto;

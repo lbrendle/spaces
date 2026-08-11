@@ -2033,7 +2033,8 @@ export function MailView() {
   return (
     <Pane
       title={<><IconMail size={19} /> Mail</>}
-      subtitle="One shared inbox, with agents able to draft and summarise on request."
+      /* No subtitle: it described the product rather than the screen, and the
+       * screen is a mail client — it does not need to introduce itself. */
       actions={
         <div className="ops-header-right">
           <span className={"provider-state" + (connected.length ? " connected" : "")}>
@@ -2064,15 +2065,11 @@ export function MailView() {
           <button className="icon-btn" aria-label="Dismiss" onClick={() => setNotice("")}>✕</button>
         </div>
       )}
-      {accounts && !connected.length && (
-        <div className="banner warn ops-notice">
-          <span>
-            No mail account is connected, so nothing arrives here and nothing can leave. You can
-            still write and keep drafts — they are stored in {config().brand} on this device.
-            Connect Google Workspace or Microsoft 365 in Settings to send and receive.
-          </span>
-        </div>
-      )}
+      {/* The "no account" banner that used to sit here said, at length, what
+       * three other things on this screen already say: the state chip, the
+       * Connect button beside it, and the inbox's own empty state, which also
+       * carried the same call to action. One statement is enough, and the
+       * empty state is where somebody looking at an empty inbox is looking. */}
 
       <div className="mail-shell">
         <aside className="mail-folders" aria-label="Mailboxes">
@@ -2245,13 +2242,16 @@ export function MailView() {
               {narrowed
                 ? "Nothing in this folder matches what you asked for."
                 : folder === "inbox" && !connected.length
-                  ? "Mail arrives here once an account is connected."
+                  ? "Mail arrives once an account is connected. Drafts work without one — they stay on this device."
                   : folderSpec?.blank ?? "Nothing in this folder."}
             </OpsEmpty>
           )}
         </section>
 
-        <section className="mail-reader">
+        {/* With no threads the reader renders nothing, and a third of the
+         * screen went to holding that nothing while the list beside it stayed
+         * capped at 340px. It gives the column back instead. */}
+        <section className={"mail-reader" + (threads && !threads.length ? " mail-reader-off" : "")}>
           {!threads ? (
             <OpsSkeleton rows={4} label="Loading the conversation…" />
           ) : selected ? (

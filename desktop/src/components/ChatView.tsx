@@ -646,18 +646,18 @@ export function ChatView({ channelId }: { channelId: string }) {
             }}
           >
             {msgs.length === 0 && (
-              <div className="center-note chat-blank">
-                <p><strong>#{channel.name}</strong> is quiet.</p>
+              /* On the message column, left-aligned, like everything else in
+               * this scroller. It used to be centred prose in the middle of an
+               * empty pane — the one thing on the screen that did not share an
+               * edge with the composer directly beneath it. */
+              <div className="chat-blank">
+                <h2>#{channel.name} is quiet</h2>
                 {agents.length === 0 ? (
                   <>
-                    <p>
-                      No agents or teams are in this channel yet, so a message here reaches
-                      nobody.
-                    </p>
+                    <p>No agents or teams are here yet, so a message would reach nobody.</p>
                     <p className="chat-blank-rule">
-                      Once one joins, <span className="mention">@name</span> routes a message
-                      to that agent and <span className="mention">@all</span> reaches
-                      everyone in the channel. {meta.blurb}
+                      Once one joins, <span className="mention">@name</span> routes to that
+                      agent and <span className="mention">@all</span> reaches the channel.
                     </p>
                     <button className="btn" onClick={() => setShowMembers(true)}>
                       <IconAgents size={14} /> Add members
