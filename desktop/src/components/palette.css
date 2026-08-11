@@ -93,6 +93,7 @@
   font-size: var(--fs-md);
   padding: var(--space-5) var(--space-5) var(--space-5) 44px;
   flex-shrink: 0;
+  --field-recess: none;
 }
 .palette-input::placeholder { color: var(--text-faint); }
 .palette-input:focus {
@@ -317,10 +318,22 @@
   background: none;
   font-size: var(--fs-md);
   padding: var(--space-5) 0;
+  /* The header row is the field; this has no chrome to be recessed into. */
+  --field-recess: none;
 }
 .pal-input::placeholder { color: var(--text-faint); }
+/* The one input in the app that suppresses the shared ring, and it is not an
+   exception to the focus rule so much as the rule reaching its limit: this
+   field is focused from the instant the palette opens, it is the only
+   focusable thing in the header, and the panel's own edge already says where
+   the typing goes. Drawn, the ring is a 2px accent rectangle around the whole
+   header with nothing to distinguish — every other row in the palette is
+   reached with the arrow keys and shows selection as a fill.
+   The two lines below it were already trying to say this and could not: they
+   cleared the border and the box-shadow, but the ring is an outline. */
 .pal-input:focus,
 .pal-input:focus-visible {
+  outline: none;
   border-color: transparent;
   box-shadow: none;
 }

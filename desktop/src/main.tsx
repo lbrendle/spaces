@@ -1,6 +1,10 @@
 import React, { type ErrorInfo, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
-// Base design system first, so per-component stylesheets layer on top of it.
+// The typeface first: @font-face has to be registered before any rule that
+// names the family, or the first paint measures against the fallback and
+// reflows when the real metrics arrive.
+import "./fonts.css";
+// Base design system second, so per-component stylesheets layer on top of it.
 import "./App.css";
 // Material layer second: it and a component rule have equal specificity, so
 // loading it here lets a component overrule one part of a treatment.

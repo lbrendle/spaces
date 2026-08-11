@@ -345,6 +345,10 @@
 }
 
 /* Floats over the map, so it takes the overlay surface and a neutral shadow. */
+/* Level 3 — it floats over the graph, and the graph is the one surface in the
+   app where what is behind a control is genuinely worth seeing: nodes and
+   edges pass under this cluster as you pan. It was an opaque --bg-overlay tile
+   punched through the canvas. */
 .gr-zoom {
   position: absolute;
   left: var(--space-4);
@@ -352,8 +356,11 @@
   display: flex;
   flex-direction: column;
   border-radius: var(--radius);
-  background: var(--bg-overlay);
-  box-shadow: var(--shadow-md);
+  background: var(--elev-3-bg);
+  border: 1px solid var(--elev-3-border);
+  box-shadow: var(--elev-3-shadow);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
   overflow: hidden;
 }
 .gr-zoom-btn {

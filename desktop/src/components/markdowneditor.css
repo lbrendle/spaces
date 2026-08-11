@@ -86,6 +86,10 @@
      selection and the spellcheck underline, and nothing else. */
   color: transparent;
   caret-color: var(--text);
+  /* .mde is the field; this is a transparent sheet lying on top of the rendered
+     text. App.css's inner top edge belongs to the wrapper's chrome — drawn here
+     it would be a shadow cast across the first line of the document. */
+  --field-recess: none;
 }
 .mde .mde-input:focus,
 .mde .mde-input:focus-visible {

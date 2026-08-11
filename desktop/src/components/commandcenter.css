@@ -35,30 +35,62 @@
 
 /* ── Utility rail ────────────────────────────────────────────── */
 
+/*
+ * The tool strip, and it says what the tools are.
+ *
+ * It was 42px of three unlabelled glyphs, and it is the *only* route to the
+ * three surfaces that make this a coding workspace rather than a chat window:
+ * a terminal in the project checkout, the live agent processes, and a browser
+ * scoped to the same workspace. Three of the product's headline capabilities,
+ * behind icons you had to hover to identify, in a strip narrow enough to read
+ * as a scrollbar. An icon-only rail is a fair pattern in an editor you use for
+ * eight hours and learn; it is a bad one for three tools you reach for
+ * occasionally and have to recognise each time.
+ *
+ * Wide enough for the word, then — in the same --fs-micro caps every other
+ * piece of navigation in the app labels itself with.
+ */
 .cc-rail {
-  width: 42px;
-  flex: 0 0 42px;
-  padding: calc(var(--titlebar) + 5px) 6px 8px;
+  width: 76px;
+  flex: 0 0 76px;
+  padding: calc(var(--titlebar) + 5px) var(--space-2) var(--space-3);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 5px;
+  align-items: stretch;
+  gap: var(--space-1);
   border-left: 1px solid var(--border-soft);
+  /* A tool strip recessed into the panel's right edge — --bg-raised, the same
+     token every secondary column inside the panel takes: the documents and
+     mail lists, the knowledge sources rail, the setup spine. The rail outside
+     the panel gave that token up when it became bare window; what it means now
+     is "a column inside the sheet that is not the sheet". */
   background: var(--bg-raised);
 }
 
 .cc-rail button {
-  width: 30px;
-  height: 30px;
   position: relative;
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  gap: var(--space-1);
+  min-height: 56px;
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius);
   color: var(--text-faint);
   transition:
     color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease);
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease-spring);
+}
+.cc-rail button:active { transform: var(--press); }
+
+.cc-rail-label {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  line-height: 1;
 }
 
 .cc-rail button:hover {
@@ -73,10 +105,14 @@
   background: var(--accent-soft);
 }
 
-.cc-rail button > span {
+/* The count badge — and it has to say which span it means. This was
+   `.cc-rail button > span`, written when the only span in the button was the
+   count; the moment the button gained a label that rule absolutely positioned
+   the word "TERMINAL" into the corner as though it were a number. */
+.cc-rail button > span:not(.cc-rail-label) {
   position: absolute;
-  right: -2px;
-  top: -2px;
+  right: var(--space-2);
+  top: var(--space-1);
   min-width: 14px;
   height: 14px;
   padding: 0 3px;

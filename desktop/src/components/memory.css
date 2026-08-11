@@ -46,10 +46,22 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* Two columns, two roles, and the app has one way of saying which is which:
+   the list you scan is recessed, the thing you read is paper. Same ladder as
+   Knowledge, Documents and Mail — see the note in knowledge.css. Only while a
+   detail is actually beside it: with nothing picked there is no second column
+   for the distinction to be about, and the entries take the pane. */
+.mem[data-wide]:has(.mem-detail-col) .mem-list-col {
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border-soft);
+}
+.mem[data-wide] .mem-detail-col {
+  background: var(--surface-1);
+}
 /* The floor is 400px and not 330px because that is what one row of filters
    actually measures. A column narrower than its own toolbar does not save
    space — it spends it, on a second row of chrome above every entry. */
-.mem[data-wide] .mem-list-col {
+.mem[data-wide]:has(.mem-detail-col) .mem-list-col {
   flex: 0 0 clamp(410px, 36%, 470px);
   border-right: 1px solid var(--border-soft);
 }
@@ -295,10 +307,19 @@
  * flags and the time used to sit in a strip *above* the title, so the first
  * thing the eye met on every row was bookkeeping.
  */
+/*
+ * A grid, because these entries are things you scan and compare, not a queue
+ * you work down — and because full-width rows on a 1500px panel set the body
+ * text about ninety-five characters to the line, which is roughly a third
+ * wider than anyone reads comfortably. A ~360px track puts it back near fifty
+ * and, as a side effect, brings each entry's timestamp back beside the entry
+ * it belongs to instead of stranding it at the far edge of the pane.
+ */
 .mem-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  align-items: start;
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -308,17 +329,29 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-3);
-  border-radius: var(--radius);
-  transition: background var(--dur-fast) var(--ease);
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-xs);
+  transition: background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    translate var(--dur) var(--ease-spring);
 }
 .mem-card:hover {
-  background: var(--bg-hover);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+  translate: 0 -2px;
 }
+/* Selected keeps the paper and takes a ring — a flat accent fill would drop
+   this card out of the grid's material and read as a different kind of thing. */
 .mem-card-on,
 .mem-card-on:hover {
+  border-color: var(--accent);
   background: var(--accent-soft);
+  box-shadow: var(--focus-halo);
 }
 /* Past the cutoff: written, stored, and never read by an agent. */
 .mem-card-out .mem-card-open,
@@ -462,18 +495,25 @@
   padding: 0 1px;
 }
 
+/* Clamped now that the cards sit in a grid: unbounded, a long entry stretches
+   its own row and leaves the cards beside it stranded over dead space. */
 .mem-card-snip {
   margin: 0;
   font-size: var(--fs-sm);
   line-height: 1.55;
   color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
 }
 
 /* Clamped by height rather than by character count, so a preview never cuts a
    fenced block open. It used to fade out under a mask gradient; the clamp says
    the same thing without one, and gradients are not how this app draws. */
 .mem-card-md {
-  max-height: 7.4em;
+  max-height: 6.2em;
   overflow: hidden;
   font-size: var(--fs-sm);
   line-height: 1.55;

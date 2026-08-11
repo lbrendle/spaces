@@ -117,23 +117,64 @@ export function normalizeHex(v: unknown): string {
 /* ── themes ────────────────────────────────────────────────── */
 
 export const THEMES: ThemeSpec[] = [
+  /*
+   * The product's own dark theme, and the one almost everyone will see.
+   *
+   * It was a cool blue-grey: every neutral sat on the blue side of the accent,
+   * which made the whole app read as a screen rather than as a surface. The
+   * greys are near-neutral now with a trace of warmth in them — a couple of
+   * points of red and green over blue, which is not enough to read as brown
+   * and is exactly enough to stop reading as cold. Nothing about the hierarchy
+   * moved; every step is the same distance from its neighbour as before.
+   */
   {
     id: "spaces-midnight",
     name: "Spaces Midnight",
     author: "Spaces",
     appearance: "dark",
-    bg: "#0f1219", bgRaised: "#0a0d12", bgOverlay: "#171b24",
-    bgHover: "#191e29", bgActive: "#222a3a", border: "#242c3b",
-    text: "#e6ebf4", textDim: "#98a4ba", textFaint: "#64718b",
-    accent: "#4d8dff",
-    red: "#f87171", green: "#4ade80", yellow: "#fbbf24",
-    blue: "#4d8dff", purple: "#a78bfa", cyan: "#22d3ee", orange: "#fb923c",
+    bg: "#16141b", bgRaised: "#110f16", bgOverlay: "#201d28",
+    bgHover: "#232030", bgActive: "#302b3f", border: "#322d40",
+    text: "#efecf5", textDim: "#a9a3b8", textFaint: "#746d85",
+    accent: "#7c6cff",
+    red: "#ff7a7a", green: "#5fd39a", yellow: "#f5c469",
+    blue: "#8a92ff", purple: "#a78bfa", cyan: "#4fd6d6", orange: "#ff9d6b",
     syntax: {
-      keyword: "#a78bfa", string: "#4ade80", number: "#fb923c",
-      comment: "#5c6a85", func: "#4d8dff", type: "#22d3ee", punct: "#98a4ba",
+      keyword: "#a78bfa", string: "#5fd39a", number: "#ff9d6b",
+      comment: "#6c6678", func: "#7c6cff", type: "#4fd6d6", punct: "#a8a3b4",
     },
-    avatars: ["#4d8dff", "#4ade80", "#fb923c", "#a78bfa", "#f87171", "#22d3ee", "#fbbf24", "#f472b6"],
-    tags: ["cool", "vibrant", "high-contrast"],
+    avatars: ["#7c6cff", "#5fd39a", "#ff9d6b", "#e07be0", "#ff7a7a", "#4fd6d6", "#f5c469", "#6f9bff"],
+    tags: ["warm", "vibrant", "high-contrast"],
+  },
+  /*
+   * The product's own light theme, and the default one.
+   *
+   * The default used to be GitHub Light — a fine theme, and a borrowed one:
+   * pure #ffffff paper with cool grey neutrals and a set of identity colours
+   * chosen for text contrast, which as avatar fills came out as a row of muddy
+   * browns. This is the same palette family as Midnight, inverted: warm paper,
+   * near-neutral greys with a trace of red in them, and identity colours that
+   * are meant to be *filled* rather than set as type.
+   */
+  {
+    id: "spaces-daylight",
+    name: "Spaces Daylight",
+    author: "Spaces",
+    appearance: "light",
+    bg: "#fdfaf5", bgRaised: "#f3eee4", bgOverlay: "#fffefb",
+    bgHover: "#efe9dd", bgActive: "#e3dbcb", border: "#ddd4c4",
+    text: "#241f19", textDim: "#6b6155", textFaint: "#988d7d",
+    accent: "#6c5ce7",
+    red: "#e0524f", green: "#2f9e6e", yellow: "#c58a1e",
+    /* Pulled toward the accent's hue. "To do" on the work bars is --blue, and
+       a straight cobalt sitting a centimetre from a violet accent is a near
+       miss — two colours close enough to look like one of them is wrong. */
+    blue: "#5b63d6", purple: "#8257d9", cyan: "#1d9096", orange: "#d4703a",
+    syntax: {
+      keyword: "#8257d9", string: "#2f9e6e", number: "#d4703a",
+      comment: "#8b8593", func: "#6c5ce7", type: "#1d9096", punct: "#5f5a68",
+    },
+    avatars: ["#6c5ce7", "#2f9e6e", "#d4703a", "#b04bb0", "#e0524f", "#1d9096", "#c58a1e", "#3d6fd4"],
+    tags: ["warm", "soft", "minimal"],
   },
   {
     id: "tokyo-night",
@@ -824,7 +865,7 @@ export const THEME_BY_ID: Record<string, ThemeSpec> = Object.fromEntries(
 );
 
 export const DEFAULT_DARK = "spaces-midnight";
-export const DEFAULT_LIGHT = "github-light";
+export const DEFAULT_LIGHT = "spaces-daylight";
 
 /** Canonical vocabulary, in the order a filter row should render it. */
 export const THEME_TAGS: readonly string[] = [
@@ -907,22 +948,61 @@ export function monoStack(id: string | undefined): string {
 }
 
 /** Base type ladder, in px — must mirror :root in App.css at fontScale 1. */
+/**
+ * Type.
+ *
+ * The whole ladder moved up about a point, and the gaps between the rungs
+ * opened. 13.5px body with 12.5px secondary and 11.5px meta is three sizes
+ * inside one point of each other — a scale that fine reads as one flat grey
+ * size at a glance, which is a large part of why the app felt like a form.
+ * 14.5 / 13 / 12 with a 16px card title and a 21px section heading gives each
+ * rung somewhere to be.
+ */
 const FONT_SIZES: [string, number][] = [
-  ["--fs-micro", 10.5], ["--fs-xs", 11.5], ["--fs-sm", 12.5],
-  ["--fs", 13.5], ["--fs-md", 15], ["--fs-lg", 20],
+  ["--fs-micro", 11], ["--fs-xs", 12], ["--fs-sm", 13],
+  ["--fs", 14.5], ["--fs-md", 16], ["--fs-lg", 21],
+  // Display. One size above the ladder, for the name of the surface you are
+  // on — the only piece of type in the app allowed to be a headline.
+  ["--fs-xl", 28],
 ];
 
+/**
+ * Shape.
+ *
+ * The default rung moved up hard — 6/9/12/16 to 10/15/22/30 — and it is the
+ * single biggest lever on how the whole app feels, because nearly every box in
+ * it resolves through one of these four. At 9px a card is a rectangle with the
+ * corners taken off; at 15px it is an object. The app is a place you keep your
+ * work in rather than a form you fill in, and the shape should say so before
+ * any of the type does.
+ *
+ * `sharp` moved up with it rather than staying where it was: it is the option
+ * for someone who wants less of this, not a different design language, and the
+ * gap between 2px and 10px was large enough to be exactly that.
+ */
 const RADIUS_SCALES: Record<RadiusScale, [number, number, number, number]> = {
-  sharp: [2, 3, 5, 7],
-  default: [6, 9, 12, 16],
-  round: [10, 14, 19, 26],
+  sharp: [4, 6, 9, 12],
+  default: [10, 15, 22, 30],
+  round: [14, 22, 30, 999],
 };
 
-/** space-1..6 plus the height of a one-line row (nav item, list row). */
+/**
+ * Space, and the height of a one-line row.
+ *
+ * Every step went up. `cozy` — the default, and what most people will ever
+ * see — went from a 30px row on a 3/6/9/13/18/26 ladder to a 36px row on
+ * 4/8/12/17/24/34, which is what `comfortable` used to be. Density was tuned
+ * for fitting thirty rows on a laptop screen, and that is a real thing to want,
+ * but it is what `compact` is for. The default should be the one that feels
+ * good, not the one that fits most.
+ *
+ * The knock-on is deliberate and large: --row-h is the app's hit-area floor,
+ * so every button, nav row, chip and list row grows with it.
+ */
 const DENSITY_SCALES: Record<Density, { space: number[]; row: number }> = {
-  compact: { space: [2, 4, 7, 10, 14, 20], row: 26 },
-  cozy: { space: [3, 6, 9, 13, 18, 26], row: 30 },
-  comfortable: { space: [4, 8, 12, 17, 24, 34], row: 36 },
+  compact: { space: [3, 5, 8, 12, 16, 24], row: 30 },
+  cozy: { space: [4, 8, 12, 17, 24, 34], row: 36 },
+  comfortable: { space: [5, 10, 15, 21, 30, 42], row: 42 },
 };
 
 export const DENSITIES: { id: Density; label: string; help: string }[] = [
@@ -963,9 +1043,20 @@ function px(n: number): string {
  */
 export function cssVarsFor(t: ThemeSpec, o?: AppearanceOverrides): Record<string, string> {
   const dark = t.appearance === "dark";
+
+  /* Every shadow in the app is two lights, never one.
+     A single blur is the tell of a generated interface: it puts the whole
+     penumbra at one distance, so a card either floats with no contact or sits
+     with no ambience. Real depth needs a tight, dark *contact* shadow directly
+     under the element and a wide, faint *ambient* one spreading past it — and
+     the ratio between them is what the eye reads as height, more than either
+     layer's opacity. Authored here rather than per component so the three
+     levels stay in proportion to each other. */
   const shadowColor = dark ? "0, 0, 0" : "16, 24, 40";
-  const sh = (y: number, blur: number, a: number) =>
-    `0 ${y}px ${blur}px rgba(${shadowColor}, ${a})`;
+  const sh = (layers: [y: number, blur: number, a: number][]) =>
+    layers
+      .map(([y, blur, a]) => `0 ${y}px ${blur}px rgba(${shadowColor}, ${a})`)
+      .join(", ");
 
   // A bad override must never take the app down with it.
   const accent = normalizeHex(o?.accent) || t.accent;
@@ -976,23 +1067,77 @@ export function cssVarsFor(t: ThemeSpec, o?: AppearanceOverrides): Record<string
   const motion = o?.reduceMotion ? 0 : 1;
 
   const vars: Record<string, string> = {
-    "--bg": t.bg,
-    "--bg-raised": t.bgRaised,
-    "--bg-overlay": t.bgOverlay,
+    /* ── Canvas and paper ────────────────────────────────────
+       A dark theme lifts by getting lighter. A light theme lifts by getting
+       *whiter* — which only works if the canvas has somewhere to lift from,
+       and most light palettes leave it none: they are authored for an editor,
+       where the canvas IS the paper and nothing sits above it, so bg is
+       #ffffff and anything painted on it can only go darker.
 
-    /* Elevation ladder. Cards must read as *lifted off* the canvas, which in a
-       dark theme means lighter than --bg and in a light theme means a tinted
-       panel against near-white. --bg-raised stays the sidebar (most IDE themes
-       author it darker than the editor). */
-    "--surface-1": dark ? mix(t.bg, "#ffffff", 0.042) : t.bgRaised,
-    "--surface-2": dark ? mix(t.bg, "#ffffff", 0.08) : mix(t.bg, "#ffffff", 0.75),
-    "--edge-highlight": dark ? "rgba(255, 255, 255, 0.05)" : "rgba(255, 255, 255, 0.75)",
+       Drawn that way the whole app read as recessed. On GitHub Light the
+       kanban columns, the cards inside them, the sidebar and the popovers all
+       resolved to #f6f8fa on white, separated by one hairline and a shadow at
+       6% that no display renders.
+
+       So on light the ladder shifts down a rung. The canvas takes a measured
+       amount of the theme's own border colour — its darkest neutral, so the
+       tint stays in the palette's family and Solarized stays warm where Latte
+       stays cool — and paper goes back to near-white. Nothing is recoloured;
+       the same neutrals are re-assigned one step lower, and the elevation the
+       app has always described in its comments finally has room to exist. */
+    /* Level 0 — the window itself, behind everything.
+
+       The shell floats the content pane as a panel with the rail sitting on
+       the bare window beside it, so there has to be a rung BELOW the canvas
+       for both of them to sit on. It is the deepest neutral either appearance
+       has: on dark, the theme's background taken most of the way to black; on
+       light, taken half way to the palette's own border colour, which keeps
+       the tint in family the same way the canvas does. The traffic lights land
+       here rather than on a surface, which is the point of the whole layout —
+       macOS chrome should sit on the window, not on the page. */
+    "--app-bg": dark ? mix(t.bg, "#000000", 0.5) : mix(t.bg, t.border, 0.6),
+    /* The window is lit, not painted. A flat fill behind a floating panel is a
+       colour; a very slight gradient is a room the panel is standing in — and
+       it is what gives the translucent chrome inside the panel something worth
+       sampling. Two stops, both derived: the lift carries a trace of the accent
+       so the light has the theme's own colour temperature rather than a generic
+       cool cast, and it is small enough (6–9%) to stay a light source rather
+       than becoming a decorative wash. */
+    "--app-bg-lift": dark
+      ? mix(mix(t.bg, "#000000", 0.5), accent, 0.09)
+      : mix(mix(t.bg, t.border, 0.6), accent, 0.06),
+    "--bg": dark ? t.bg : mix(t.bg, t.border, 0.2),
+    /* One step recessed from the canvas — and no longer the navigation rail,
+       which gave this up when it became bare window. What it means now is "a
+       column inside the panel that is not the panel": the documents and mail
+       lists, the knowledge sources rail, the chat tool strip, the setup spine,
+       a sticky footer. Every palette already authors it away from the editor
+       background; on light it goes one step further so it cannot resolve to
+       the same value as the canvas.
+
+       Distinct from --bg-inset, which is a *well* — code, terminals, fields.
+       A column is recessed; a well is cut into the surface. */
+    "--bg-raised": dark ? t.bgRaised : mix(t.bgRaised, t.border, 0.3),
+    "--bg-overlay": dark ? t.bgOverlay : mix(t.bgOverlay, "#ffffff", 0.5),
+
+    /* Level 1 — paper resting on the canvas: dashboard card, kanban column.
+       Level 2 — a fill *inside* level 1. On dark it steps further from the
+       canvas; on light it steps back toward it, because on paper a nested
+       panel reads as recessed rather than raised and going whiter than white
+       is not available. Both are one visible step, in the direction that
+       reads as "inside this". */
+    "--surface-1": dark ? mix(t.bg, "#ffffff", 0.05) : mix(t.bg, "#ffffff", 0.62),
+    "--surface-2": dark ? mix(t.bg, "#ffffff", 0.09) : mix(t.bg, t.border, 0.1),
+    "--edge-highlight": dark ? "rgba(255, 255, 255, 0.055)" : "rgba(255, 255, 255, 0.8)",
     "--bg-hover": t.bgHover,
     "--bg-active": t.bgActive,
-    "--bg-input": dark ? mix(t.bg, "#000000", 0.22) : mix(t.bg, "#ffffff", 0.6),
-    "--bg-inset": dark ? mix(t.bg, "#000000", 0.35) : mix(t.bgRaised, "#000000", 0.03),
+    "--bg-input": dark ? mix(t.bg, "#000000", 0.22) : mix(t.bg, "#ffffff", 0.75),
+    "--bg-inset": dark ? mix(t.bg, "#000000", 0.35) : mix(t.bgRaised, t.border, 0.3),
     "--border": t.border,
-    "--border-soft": mix(t.border, t.bg, 0.55),
+    /* Softened toward the canvas rather than toward the palette's bg: on light
+       those are now different values, and a hairline drawn on paper has to be
+       mixed against what it is actually sitting on or it disappears. */
+    "--border-soft": mix(t.border, dark ? t.bg : mix(t.bg, t.border, 0.2), dark ? 0.55 : 0.4),
     "--border-strong": mix(t.border, t.text, 0.25),
 
     "--text": t.text,
@@ -1001,10 +1146,22 @@ export function cssVarsFor(t: ThemeSpec, o?: AppearanceOverrides): Record<string
 
     "--accent": accent,
     "--accent-fg": readableOn(accent),
+    /* The primary button's hover used to be `filter: brightness(1.08)`, which
+       is only ever right on one appearance: a light theme's accent is dark and
+       saturated, so brightening it washes the fill out toward its own tint
+       instead of deepening it. Hover moves *toward the light source* on dark
+       and *away from it* on light; active goes one step further either way, so
+       a press always reads as pressed rather than as a second hover. */
+    "--accent-hover": dark ? mix(accent, "#ffffff", 0.14) : mix(accent, "#000000", 0.12),
+    "--accent-active": dark ? mix(accent, "#ffffff", 0.04) : mix(accent, "#000000", 0.22),
     "--accent-soft": alpha(accent, dark ? 0.16 : 0.12),
     "--accent-soft-strong": alpha(accent, dark ? 0.28 : 0.2),
     "--accent-border": alpha(accent, 0.45),
     "--accent-glow": alpha(accent, dark ? 0.35 : 0.25),
+    /* The halo behind the keyboard ring. Weak enough to stay a hint of the
+       accent rather than a second ring, and the only reason the focus
+       treatment survives being drawn on top of an accent fill. */
+    "--focus-halo": alpha(accent, dark ? 0.24 : 0.18),
 
     "--red": t.red,
     "--green": t.green,
@@ -1028,7 +1185,7 @@ export function cssVarsFor(t: ThemeSpec, o?: AppearanceOverrides): Record<string
     "--syn-type": t.syntax.type,
     "--syn-punct": t.syntax.punct,
 
-    "--code-bg": dark ? mix(t.bg, "#000000", 0.3) : mix(t.bgRaised, "#ffffff", 0.35),
+    "--code-bg": dark ? mix(t.bg, "#000000", 0.3) : mix(t.bgRaised, t.border, 0.18),
     "--code-border": mix(t.border, t.bg, 0.4),
     "--inline-code-bg": dark ? alpha(t.text, 0.08) : alpha(t.text, 0.06),
 
@@ -1037,41 +1194,34 @@ export function cssVarsFor(t: ThemeSpec, o?: AppearanceOverrides): Record<string
     "--diff-add-fg": t.green,
     "--diff-del-fg": t.red,
 
-    /* ── glass ───────────────────────────────────────────────
-       Derived per theme rather than painted over them, so all 38 keep their
-       identity: Synthwave's glass is violet-tinted and Solarized Light's is
-       warm, because both are built from that theme's own overlay colour.
-
-       Opacity differs sharply by appearance and this is the part that decides
-       whether it looks expensive or broken. On a dark theme a translucent
-       surface gains contrast against the content behind it, so it can go quite
-       transparent. On a light theme it LOSES contrast — text on 60% white over
-       white is unreadable — so light glass stays much more opaque and leans on
-       blur and the hairline edge to read as a surface at all. */
-    "--glass-bg": alpha(t.bgOverlay, dark ? 0.72 : 0.86),
-    "--glass-rail-bg": alpha(t.bgRaised, dark ? 0.68 : 0.82),
-    "--glass-inset-bg": alpha(dark ? mix(t.bg, "#000000", 0.35) : mix(t.bg, "#ffffff", 0.5), 0.9),
-    // Small enough to stay crisp; a large blur reads as frosted plastic and
-    // costs real frames on a non-retina display.
-    "--glass-blur": "14px",
-    "--glass-saturate": dark ? "1.35" : "1.15",
-    "--glass-border": alpha(t.border, dark ? 0.8 : 0.9),
-    // The hairline that makes a translucent surface read as glass rather than
-    // as a washed-out panel. Barely visible by design.
-    "--glass-highlight": dark ? "rgba(255, 255, 255, 0.07)" : "rgba(255, 255, 255, 0.9)",
-    // What every glass surface falls back to when backdrop-filter is missing
-    // or disabled. Fully opaque: a surface that becomes unreadable without
-    // blur is a bug, not a degraded experience.
-    "--glass-fallback": t.bgOverlay,
-    "--glass-rail-fallback": t.bgRaised,
+    /* Glass is NOT derived here. components/glass.css owns the whole material
+       — tint, blur, the contrast/brightness band and the light-theme inversion
+       of it — and derives all of it from the tokens above with color-mix.
+       There used to be a second, older set of glass variables in this object,
+       and because applyTheme writes these as INLINE style on <html> they beat
+       every :root rule in that file: the light-appearance tuning and the
+       non-retina blur reduction were both silently dead. One owner, and the
+       one that can respond to a media query. */
 
     "--backdrop": dark ? "rgba(0, 0, 0, 0.62)" : "rgba(16, 24, 40, 0.35)",
-    "--scrollbar": alpha(t.textFaint, 0.4),
-    "--scrollbar-hover": alpha(t.textFaint, 0.7),
+    /* A scrollbar is chrome for a surface, not an element of it: quiet at rest
+       so a long list is a list rather than a list with a bar down the side,
+       and unmistakable the moment the pointer is near it. */
+    "--scrollbar": alpha(t.textFaint, dark ? 0.28 : 0.32),
+    "--scrollbar-hover": alpha(t.textFaint, dark ? 0.62 : 0.66),
 
-    "--shadow-sm": sh(2, 6, dark ? 0.3 : 0.06),
-    "--shadow-md": sh(8, 24, dark ? 0.4 : 0.1),
-    "--shadow-lg": sh(20, 56, dark ? 0.55 : 0.16),
+    /* Contact layer + ambient layer at each level. The contact stays tight and
+       relatively opaque; the ambient widens and softens roughly 3x per step,
+       which is what separates "resting on the page" from "held above it". */
+    "--shadow-sm": sh(dark
+      ? [[1, 2, 0.24], [2, 6, 0.2]]
+      : [[1, 1.5, 0.05], [2, 6, 0.06]]),
+    "--shadow-md": sh(dark
+      ? [[2, 4, 0.26], [10, 28, 0.36]]
+      : [[2, 4, 0.05], [10, 28, 0.1]]),
+    "--shadow-lg": sh(dark
+      ? [[4, 8, 0.3], [28, 68, 0.5]]
+      : [[6, 12, 0.07], [28, 68, 0.16]]),
 
     // Avatar colors are pastel on dark themes and saturated on light ones, so
     // the theme background is the readable foreground in both cases.

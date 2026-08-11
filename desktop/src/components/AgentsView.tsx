@@ -481,7 +481,19 @@ export function AgentsView() {
   }
 
   const showRoster = wide || !sel;
-  const showDetail = wide || !!sel;
+  /*
+   * The detail column appears when there is a detail — not merely when the
+   * window is wide enough to hold one.
+   *
+   * `wide || !!sel` meant that on any normal window the right two thirds of
+   * this screen were permanently occupied, and with nothing selected they held
+   * a "Pick a teammate" heading, four role presets and four paragraphs
+   * explaining what an agent is. The roster of an agent-native product was the
+   * narrow strip beside an explanation of the concept. Now the roster owns the
+   * pane until you actually pick somebody, and the presets and the explainer
+   * live under it where they read as help rather than as the subject.
+   */
+  const showDetail = !!sel;
 
   const detail = (() => {
     if (sel?.kind === "agent" && selAgent) {
@@ -645,6 +657,15 @@ export function AgentsView() {
                 ))}
               </ul>
             </section>
+
+            {/* The presets and the explainer, under the roster instead of
+                instead of it. Only when nothing is picked — once you are
+                reading a teammate, help about the concept is noise. */}
+            {!sel && (
+              <div className="ag-help">
+                <RosterBlank hasAgents={rows.length > 0} onPreset={(p) => openNewAgent(p)} />
+              </div>
+            )}
           </div>
         )}
 

@@ -1,0 +1,23 @@
+Both font files in this directory are licensed under the
+SIL Open Font License, Version 1.1.
+
+  PlusJakartaSans-Variable.woff2
+    Plus Jakarta Sans — Copyright (c) 2020 The Plus Jakarta Sans Project Authors
+    https://github.com/tokotype/PlusJakartaSans
+    Latin subset, variable weight axis 200–800.
+
+  JetBrainsMono-Variable.woff2
+    JetBrains Mono — Copyright (c) 2020 The JetBrains Mono Project Authors
+    https://github.com/JetBrains/JetBrainsMono
+    Latin subset, variable weight axis 100–800.
+
+Full licence text:
+https://openfontlicense.org/open-font-license-official-text/
+
+The OFL permits bundling and redistribution, including in commercial
+products, provided the fonts are not sold on their own and this notice
+travels with them. Neither file has been renamed or modified beyond
+subsetting, which the licence allows.
+
+If this repository ships a THIRD_PARTY_NOTICES file, these two entries
+belong in it as well.

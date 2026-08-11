@@ -638,6 +638,15 @@ button.chip.ga-toggle {
   max-width: 28ch;
   overflow: hidden;
 }
+/* Past 28ch the chips have to give, or the cap slices the last one down the
+   middle — half a rounded pill with its label cut mid-word. Letting them
+   shrink hands the truncation to the ellipsis already inside .ec-title, which
+   is the one that can say it truncated. */
+.ga-row-links > .ec-wrap,
+.ga-row-links > .ec-wrap > .ec {
+  min-width: 0;
+  flex-shrink: 1;
+}
 
 .ga-tags {
   display: inline-flex;

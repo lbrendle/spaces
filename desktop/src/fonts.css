@@ -1,0 +1,60 @@
+/* ═══════════════════════════════════════════════════════════
+   Spaces — the typeface.
+
+   The app shipped on `-apple-system, BlinkMacSystemFont, "Inter",
+   "Segoe UI"` — the system stack, which means it rendered as SF on a
+   Mac, Segoe on Windows and Roboto on Linux. Three different products,
+   none of them this one. Letterforms are the part of a brand people
+   actually recognise, and borrowing the operating system's is the
+   single largest reason an interface reads as generic no matter how
+   well the rest of it is drawn.
+
+   Two faces, both variable, both SIL Open Font License 1.1, both
+   subset to latin. 58KB for the entire type system — less than one
+   screenshot, and no network call at runtime.
+
+   Plus Jakarta Sans   display and text. Geometric-humanist: round
+                       bowls, a tall x-height that keeps a 13px row
+                       legible, and enough character in the details
+                       (the tail on the a, the flat-sided o) to be
+                       recognisable without being a costume.
+   JetBrains Mono      code, diffs, terminals, shas and durations.
+                       Drawn for reading code at small sizes, with
+                       unambiguous zero, one and l.
+
+   Both are declared with the full weight axis rather than as separate
+   files per weight, so a heading at 750 and a label at 550 cost the
+   same as a page that only uses 400 and 700 — which is what makes the
+   fine-grained weight ladder in App.css affordable.
+
+   A fork that wants its own face overrides --font / --font-display /
+   --mono; nothing in the app names a family directly. See config.ts on
+   why this product is meant to be rebrandable.
+   ═══════════════════════════════════════════════════════════ */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  /* The axis, not a weight. One file answers every weight the app asks
+     for, so `font-weight: 550` is a real value rather than a rounding
+     to the nearest cut. */
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("./assets/fonts/PlusJakartaSans-Variable.woff2") format("woff2");
+  /* Latin only, and stated so the browser never blocks on a glyph this
+     subset does not carry — it falls straight through to the stack. */
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("./assets/fonts/JetBrainsMono-Variable.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}

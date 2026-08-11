@@ -803,27 +803,62 @@ function QueueRow({
 function QueueBlank({ ready }: { ready: boolean }) {
   return (
     <div className="aq-blank">
-      <span className="aq-blank-glyph" aria-hidden="true">
-        <IconBolt size={18} />
-      </span>
-      <p className="aq-blank-lead">
-        {ready ? "Nothing is waiting on you." : "Reading the action log…"}
-      </p>
+      <div className="aq-blank-head">
+        <span className="aq-blank-glyph" aria-hidden="true">
+          <IconBolt size={18} />
+        </span>
+        <p className="aq-blank-lead">
+          {ready ? "Nothing is waiting on you." : "Reading the action log…"}
+        </p>
+      </div>
+      {/* The model, in one line, with the detail folded away.
+          It used to be two full paragraphs explaining which agent operations
+          apply on their own and which stop for a yes — genuinely useful, and
+          on the dashboard, above the fold, on every single launch forever. It
+          is the answer to a question you ask once. One sentence carries the
+          rule; the disclosure carries the rest for the launch where you
+          actually want it. */}
       <p className="aq-blank-text">
-        Agents file tasks, draw links, record memory and put things on calendars
-        on their own — additive work lands straight on the board, and undoing a
-        wrong one is a click.
+        Agents file work on their own. Anything that overwrites or reassigns
+        what is already there stops here first.
       </p>
-      <p className="aq-blank-text">
-        Anything that reassigns, removes or overwrites what is already there
-        stops here first and waits for a yes. Either way it is recorded in the
-        log, whether it applied, you turned it down, or it failed.
-      </p>
+      <details className="aq-blank-more">
+        <summary>How that is decided</summary>
+        <div className="aq-blank-body">
+          <p className="aq-blank-text">
+            Additive work — filing a task, drawing a link, recording memory,
+            putting something on a calendar — lands straight on the board, and
+            undoing a wrong one is a click.
+          </p>
+          <p className="aq-blank-text">
+            Anything that reassigns, removes or overwrites waits for a yes.
+            Either way it is recorded in the log, whether it applied, you turned
+            it down, or it failed.
+          </p>
+        </div>
+      </details>
     </div>
   );
 }
 
 /* ── 2. the badge ─────────────────────────────────────────────── */
+
+/**
+ * How many proposals are waiting, without rendering anything.
+ *
+ * The dashboard's status band needs the count to decide whether the queue is
+ * worth a section at all, and the badge component could only answer by being
+ * drawn. Both read the same shared snapshot, so asking twice costs one query.
+ */
+export function usePendingActionCount(projectId?: string): number {
+  const { pending } = useFeed();
+  return useMemo(
+    () =>
+      pending.filter((r) => r.status === "pending" && (!projectId || r.project_id === projectId))
+        .length,
+    [pending, projectId]
+  );
+}
 
 export interface ActionQueueBadgeProps {
   /** Narrow to one project; omit to count everything. */

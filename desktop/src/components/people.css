@@ -193,6 +193,57 @@
 }
 
 /*
+ * The slot the next person will occupy. Same track, same radius, same padding
+ * as a real card — it has to read as one of them, one step before it is. The
+ * edge is dashed because that is this app's one shape for "there is nothing
+ * behind this yet", and the whole tile is the button: an invite tile with a
+ * button inside it would be a target inside a target.
+ */
+.pe-add {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  min-width: 0;
+  text-align: left;
+  color: var(--text-dim);
+  transition: var(--t-color);
+}
+.pe-add:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text-dim);
+}
+.pe-add-glyph {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-bottom: var(--space-1);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pe-add:hover .pe-add-glyph {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.pe-add-title {
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: var(--ls-title);
+}
+.pe-add-blurb {
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  max-width: 42ch;
+}
+
+/*
  * This one earns its boundary: a person is a portrait, a name, what they bring,
  * their machines and an editor, and in a wrapping grid there is nothing else to
  * say where one person ends and the next begins. It no longer lifts on hover —

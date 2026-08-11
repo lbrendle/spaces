@@ -2972,6 +2972,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           </button>
         </header>
 
+        {/* The steps and the step. A row of seven pills above the content read
+            as a toolbar — something to operate — rather than as a spine you are
+            moving down, and at seven steps it wrapped. Beside the content it is
+            a contents page: where you are, what is behind you, what is left.
+            It folds back to a row when the window is too narrow to carry both. */}
+        <div className="ob-split">
         <ol className="ob-rail">
           {steps.map((s, i) => (
             <li
@@ -2998,6 +3004,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           ))}
         </ol>
 
+        <div className="ob-main">
         {/* The fork, still visible and still cheap. Hidden on the welcome
             screen, where the choice *is* the screen. */}
         {id !== "welcome" && (
@@ -3038,6 +3045,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         )}
 
         <div className="ob-body">{body}</div>
+        </div>
+        </div>
 
         <footer className="ob-foot">
           <IconArrowRight size={11} />

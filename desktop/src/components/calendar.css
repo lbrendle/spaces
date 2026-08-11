@@ -61,10 +61,8 @@
   align-items: center;
 }
 
-.cal-view .sh-pane-head-text {
-  flex: 0 1 auto;
-  min-width: 0;
-}
+/* No override: the shell's header now wraps its action group rather than
+   crushing the title column, which is what this was working around. */
 
 .cal-range {
   font-variant-numeric: tabular-nums;
@@ -89,10 +87,18 @@
   flex-wrap: wrap;
 }
 
+/* Sits in the subtitle line now, so it reads at the subtitle's weight rather
+   than competing with the primary action. Margin-right rather than relying on
+   the subtitle's gap: the step arrows are optically narrower than their boxes
+   and the range wants to sit close to them. */
 .cal-nav {
   display: inline-flex;
   align-items: center;
   gap: calc(var(--space-1) / 2);
+  margin-right: var(--space-1);
+}
+.btn.tiny.cal-today {
+  margin-top: 0;
 }
 
 .icon-btn.cal-step {
@@ -110,39 +116,10 @@
   color: var(--text);
 }
 
-/* segmented switcher */
-.cal-seg {
-  display: inline-flex;
-  padding: calc(var(--space-1) / 2);
-  gap: calc(var(--space-1) / 2);
-  background: var(--bg-inset);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-}
-
-.cal-seg-btn {
-  padding: var(--space-1) var(--space-4);
-  border-radius: calc(var(--radius) - 3px);
-  font-size: var(--fs-sm);
-  font-weight: 550;
-  color: var(--text-dim);
-  white-space: nowrap;
-  transition: var(--t-color), var(--t-press);
-}
-.cal-seg-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-.cal-seg-btn:active {
-  transform: var(--press);
-}
-/* The app's one selected treatment. It used to be a raised fill with a
-   --shadow-sm under it: a 30px-tall button does not float. */
-.cal-seg-btn.on {
-  background: var(--accent-soft);
-  color: var(--text);
-  font-weight: 650;
-}
+/* The segmented switcher is App.css's shared control now — track, segment,
+   hover, press, focus and selected all live there. Nothing in the calendar's
+   copy of it was calendar-specific, and keeping a copy is what let it drift
+   two pixels and a font size away from the identical control in Documents. */
 
 /* ── body: rail + surface ────────────────────────────────────── */
 
@@ -161,34 +138,70 @@
   min-height: 0;
 }
 
+/*
+ * Two panels on one column, left-aligned. Centred body copy was the whole
+ * problem here: a ragged edge on both sides of two paragraphs, and a provider
+ * list centred as a group so its labels ran right and its buttons ran left
+ * around an axis nothing else on the page used. Left-aligning gives every row
+ * in both panels one shared edge, which is the only thing the old layout was
+ * actually missing.
+ */
 .cal-empty {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
-  max-width: 62ch;
-  margin: 0 auto;
-}
-.cal-empty p {
-  margin: 0;
-  max-width: 58ch;
-}
-.cal-empty .btn {
-  margin-top: var(--space-3);
-}
-
-.cal-empty-accounts {
   width: 100%;
-  max-width: 34ch;
-  margin-top: var(--space-4);
-  border-top: 1px solid var(--border-soft);
-  padding-top: var(--space-4);
+  max-width: 54ch;
+  margin: auto;
+  padding: var(--space-6) var(--pane-x);
+  text-align: left;
 }
-
-.cal-empty-or {
-  display: block;
-  margin-bottom: var(--space-2);
+.cal-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-xs);
+}
+.cal-empty-card h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: var(--ls-title);
+  line-height: 1.25;
+  color: var(--text);
+}
+.cal-empty-card h3 {
+  margin: 0;
   font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
   color: var(--text-faint);
 }
+.cal-empty-card p {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+.cal-empty-card .btn {
+  margin-top: var(--space-2);
+}
 
+/* The second panel is the quieter of the two: it holds a list, not a pitch. */
+.cal-empty-bring {
+  gap: var(--space-3);
+  background: var(--bg-raised);
+  box-shadow: none;
+}
+.cal-empty-bring .cal-acct-list {
+  align-self: stretch;
+}
 .cal-empty .cal-acct .btn {
   margin-top: 0;
 }

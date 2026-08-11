@@ -84,33 +84,9 @@
   gap: var(--space-3);
 }
 
-/* The track is the control: one fill, no hairline around the fill. */
-.rd-seg {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-inset);
-}
-.rd-segbtn {
-  min-height: 24px;
-  padding: 0 var(--space-3);
-  color: var(--text-dim);
-  background: none;
-  border: 0;
-  border-radius: calc(var(--radius-sm) - 2px);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--t-color);
-}
-.rd-segbtn:hover {
-  color: var(--text);
-  background: var(--bg-hover);
-}
-.rd-segbtn.on {
-  color: var(--text);
-  background: var(--accent-soft);
-}
+/* The unified/split switcher is App.css's shared segmented control. This copy
+   was a fourth variant of it — radius-sm rather than radius, 600 rather than
+   550, and --accent-soft where the operations one used a raised thumb. */
 
 .rd-toggle {
   min-height: 26px;

@@ -39,6 +39,18 @@
 
 /* ── sources rail ─────────────────────────────────────────────── */
 
+/*
+ * The three columns are three different kinds of thing, and until now they
+ * were three identical surfaces separated by two full-height hairlines — the
+ * only thing distinguishing "which sources am I searching", "what did it find"
+ * and "the note itself" was which third of the panel they were in.
+ *
+ * They read as a ladder now, and the ladder means something:
+ *   rail    recessed  — controls. Chrome you set and stop looking at.
+ *   centre  canvas    — results. The list you scan.
+ *   reader  paper     — the document. The one thing here you actually read.
+ * Same three tokens the rest of the app uses, in the order the surface implies.
+ */
 .kb-rail {
   flex: 0 0 258px;
   display: flex;
@@ -46,6 +58,7 @@
   gap: var(--space-6);
   padding: var(--space-5) var(--space-4) var(--space-6);
   border-right: 1px solid var(--border-soft);
+  background: var(--bg-raised);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -636,6 +649,7 @@ button.kb-vis:disabled {
   flex-direction: column;
   min-height: 0;
   border-left: 1px solid var(--border-soft);
+  background: var(--surface-1);
 }
 /* Narrow pane: the reader takes the whole centre instead of squeezing both. */
 .kb[data-narrow] .kb-reader {

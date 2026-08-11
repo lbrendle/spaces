@@ -37,7 +37,15 @@
      edge as the unread badges above. Without that second term this is a
      box parked under the nav rather than the last row of it. */
   padding: var(--space-2) calc(var(--am-bleed) + var(--rail-pad, var(--space-3)));
-  background: var(--bg-raised);
+  /* No fill: the rail is bare window, so a filled strip across the bottom of
+     it would be the only panel-shaped thing out here.
+
+     The hairline is back, though, and the note that used to sit here saying
+     the rail had stopped scrolling is no longer true — .nav-scroll scrolls
+     again, and on a short window it has more rows than room. That put this row
+     back under a moving list, where its top edge is where the last nav item
+     gets cut mid-glyph. With the scrollbars hidden, this line is the only
+     thing on that edge saying the list continues rather than ends badly. */
   border-top: 1px solid var(--border-soft);
 
   display: flex;

@@ -17,6 +17,134 @@
 .chat-body { flex: 1; display: flex; min-height: 0; }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
+/* ── the channel's context ──────────────────────────────────── */
+
+/*
+ * A recessed column beside the transcript — see ChannelContext in ChatView.
+ * Same rung as every other secondary column in the app.
+ *
+ * It disappears below 1080px rather than shrinking: at that width the
+ * transcript is the thing, and a 200px strip of truncated names is worse than
+ * no strip. And it never appears inside the command centre, which already has
+ * a dock on that edge — two context columns beside one conversation is the
+ * layout saying it does not know what the screen is for.
+ */
+.chat-context {
+  flex: 0 0 272px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5) var(--space-4) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  border-left: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+@media (max-width: 1080px) { .chat-context { display: none; } }
+/*
+ * Inside the command centre it yields to the dock — but only when the dock is
+ * actually open.
+ *
+ * The first version of this rule was `.cc-primary .chat-context`, on the
+ * assumption that a channel opened in the command centre was the exception.
+ * It is the opposite: a channel belonging to a project ALWAYS renders inside
+ * the command centre, so that rule hid the column in every case it was built
+ * for. With the dock closed the space is there and unused, which is the whole
+ * argument for the column; with the dock open it is not, and two context
+ * columns beside one conversation would be the layout admitting it does not
+ * know what the screen is for.
+ */
+.cc-stage.dock-open .chat-context { display: none; }
+
+.cx-sec { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.cx-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+/* The action on a section heading is a word, not a button: at this size and
+   this frequency a bordered control per section would out-weigh the content
+   under it. */
+.cx-add {
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--accent);
+  transition: var(--t-color);
+}
+.cx-add:hover { color: var(--text); }
+
+.cx-none {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.cx-people, .cx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cx-person, .cx-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--text-dim);
+  transition: var(--t-color);
+}
+.cx-person:hover, .cx-item:hover { background: var(--bg-hover); color: var(--text); }
+
+.cx-person .avatar { width: 26px; height: 26px; font-size: var(--fs-micro); }
+.cx-person-text { display: flex; flex-direction: column; min-width: 0; }
+.cx-person-name {
+  font-size: var(--fs-sm); font-weight: 650; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cx-person-role {
+  font-size: var(--fs-micro); color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.cx-item-text {
+  flex: 1; min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cx-item-tail { flex-shrink: 0; font-size: var(--fs-micro); color: var(--text-faint); }
+
+/* Status as a dot, because at this width a word would be the whole row. */
+.cx-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.cx-dot-todo { background: var(--blue); }
+.cx-dot-doing { background: var(--yellow); }
+.cx-dot-backlog { background: var(--text-faint); }
+.cx-run-done { background: var(--green); }
+.cx-run-error { background: var(--red); }
+.cx-run-cancelled { background: var(--text-faint); }
+
 /* ── Channel mode chip in the header ──────────────────────────
    The mode changes what happens when you press Send, so it is
    stated next to the roster rather than buried in settings.    */
@@ -59,17 +187,37 @@
   from { opacity: 0; transform: translateY(4px); }
 }
 
-/* Agent turns sit one step back in the surface ladder. That is the whole
-   distinction: no rail, no border, no glow. ChatView marks them with
-   `.msg-agent` when it can; until it does, the AGENT tag identifies the first
-   message of a run and its grouped continuations inherit the tint. */
+/* ── no bubbles, anywhere ────────────────────────────────────────
+ *
+ * A channel is a transcript, not a set of objects. Every message — human or
+ * agent — sits directly on the canvas with nothing behind it: no fill, no
+ * card, no tint band. The only background a message ever takes is the hover
+ * fill, and that is a pointer state rather than a property of the message.
+ *
+ * This replaces two earlier attempts in the opposite direction: a --bg-inset
+ * band behind agent turns, and then a full card with a border and a shadow.
+ * Both made a reading surface into a stack of containers, and both were
+ * answering a real question — how do you tell an agent's work from a person's
+ * sentence? — with the wrong instrument. That distinction is carried by the
+ * things that already carry it: the AGENT tag, the agent's own colour on its
+ * name, and the run footer under the prose. None of those needs a box.
+ *
+ * The one structural line kept from the card is the footer's top rule, because
+ * it divides a paragraph from the facts about the run that produced it, and
+ * that division is real.
+ */
 .msg:is(.msg-agent, :has(.bot-tag)),
 .msg:has(.bot-tag) + .msg.grouped,
 .msg:has(.bot-tag) + .msg.grouped + .msg.grouped,
 .msg:has(.bot-tag) + .msg.grouped + .msg.grouped + .msg.grouped {
-  background: var(--bg-inset);
-  --reply-ring: var(--bg-inset);
+  background: none;
+  --reply-ring: var(--bg);
 }
+
+/* A run still in flight, said without a container: the accent moves to the
+   streaming dot and the agent's name, which are the two things already
+   pointing at who is working. */
+.msg:has(.running-note) .msg-author { color: var(--accent); }
 
 /* Streaming state: one breathing dot, never a spinning ring. */
 :is(.messages, .thread-msgs) .running-note .spinner {
@@ -293,26 +441,72 @@
 .msg-meta-btn:hover, .msg-meta-btn:focus-visible { color: var(--accent); }
 .msg-meta-btn:hover::after { transform: translateX(2px); }
 
-/* Footer strip under a message: run meta on the left, the diff
-   affordance beside it. Only rendered when there is something in it. */
+/*
+ * What the turn did, along the bottom of its card.
+ *
+ * This strip carries the diff, whatever the run wrote to the workspace, and
+ * the cost line — the three things that make an agent turn different from a
+ * paragraph. It used to be a loose row of small grey text under the prose,
+ * indistinguishable from a timestamp. It is now the card's footer: divided
+ * from the body by the card's own hairline, running the full width of it, and
+ * inset to the body's column so the whole thing reads as one object.
+ */
+/* Aligned to the message body's column rather than bled to the pane edge —
+   there is no card to hang off any more, so the rule sits under the prose it
+   describes and starts where that prose starts. */
 :is(.messages, .thread-msgs) .msg-foot {
-  display: flex; align-items: center; gap: var(--space-4);
-  flex-wrap: wrap; margin-top: var(--space-2);
+  display: flex; align-items: center; gap: var(--space-2) var(--space-4);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  margin-left: calc(var(--row-h) - var(--space-2) + var(--space-3));
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+/* Only a turn that actually ran gets the rule; a person's message with a
+   reaction or a link under it is not being divided from anything. */
+:is(.messages, .thread-msgs) .msg:not(.msg-agent, :has(.bot-tag), .grouped) .msg-foot {
+  border-top: 0;
+  padding-top: 0;
 }
 :is(.messages, .thread-msgs) .msg-foot .msg-meta { margin-top: 0; }
+
+/* The diff. The loudest thing in the strip, because it is the one that changed
+   files on a real machine — everything else in a run is recoverable. */
 .msg-changes {
   display: inline-flex; align-items: center; gap: var(--space-2);
-  min-height: 24px;
-  padding: 0 var(--space-3); border-radius: 999px;
-  background: var(--bg-active); color: var(--text-dim);
-  font-size: var(--fs-xs); font-weight: 600; white-space: nowrap;
+  min-height: calc(var(--row-h) - var(--space-3));
+  padding: 0 var(--space-3) 0 var(--space-3); border-radius: 999px;
+  background: var(--green-soft); color: var(--text);
+  border: 1px solid var(--green-border);
+  font-size: var(--fs-xs); font-weight: 650; white-space: nowrap;
   cursor: pointer;
-  transition: var(--t-color);
+  transition: var(--t-color), transform var(--dur-fast) var(--ease-spring);
 }
 .msg-changes svg { color: var(--green); flex-shrink: 0; }
-.msg-changes-count { color: var(--text-faint); font-weight: 500; }
-.msg-changes:hover { color: var(--text); background: var(--green-soft); }
+.msg-changes-count {
+  color: var(--text-dim); font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.msg-changes:hover { background: var(--surface-1); border-color: var(--green); }
+.msg-changes:active { transform: var(--press); }
 .msg-changes:hover .msg-changes-count { color: var(--text-dim); }
+
+/* Both are pushed to the trailing end, and the order there is deliberate: the
+   cost line first, the diff last. What you can act on takes the terminal
+   position — the place the eye stops — and what you merely check sits before
+   it. They are a pair rather than opposite ends of the strip, because a run's
+   price and a run's output are read together. */
+:is(.messages, .thread-msgs) .msg-foot .msg-meta,
+:is(.messages, .thread-msgs) .msg-foot .msg-meta-btn {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+/* Anything after the cost line stays beside it rather than claiming its own
+   auto-margin, or the two would spread to opposite edges. */
+:is(.messages, .thread-msgs) .msg-foot .msg-meta ~ *,
+:is(.messages, .thread-msgs) .msg-foot .msg-meta-btn ~ * {
+  margin-left: 0;
+}
 
 /* ── Run inspector ────────────────────────────────────────── */
 .run-loading {

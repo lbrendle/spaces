@@ -4,13 +4,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { useStore, channelAgents } from "../store";
 import { useTheme } from "../themeStore";
 import {
-  IconDashboard, IconTasks, IconBranch, IconMemory, IconAgents, IconHash, IconPlus, IconLogo, IconSun, IconMoon, IconGitHub, IconCheck, IconInfo,
+  IconDashboard, IconTasks, IconMemory, IconAgents, IconHash, IconPlus, IconLogo, IconSun, IconMoon, IconGitHub, IconCheck, IconInfo,
   IconTerminal,
   IconDocument,
   IconMail,
   IconCalendar,
-  IconMegaphone, IconGlobe,
   IconMoreVertical,
+  IconChevronDown,
+  IconContent,
+  IconGraph,
+  IconKnowledge,
+  IconPerson,
+  IconWorkspace,
 } from "./icons";
 import { Modal, Field, Spinner } from "./ui";
 import { AccountMenu } from "./AccountMenu";
@@ -20,6 +25,82 @@ import { slug } from "../types";
 import "./newproject.css";
 import { config } from "../config";
 import { GitHubRepoPicker } from "./GitHubRepoPicker";
+
+type NavType =
+  | "dashboard" | "tasks" | "documents" | "mail" | "calendar" | "content"
+  | "memory" | "agents" | "workspaces" | "settings" | "git" | "graph"
+  | "knowledge" | "people";
+
+/**
+ * The rail's information architecture.
+ *
+ * It used to be thirteen destinations in one undifferentiated column, which is
+ * a list you read rather than a structure you learn: nothing said that Tasks
+ * and Calendar are the same *kind* of thing, or that Workspaces and Git
+ * activity belong to each other, so finding anything meant scanning all
+ * thirteen labels every time. Grouped, the scan is two steps — which group,
+ * then which row in it — and the groups are small enough that the second step
+ * is a glance.
+ *
+ * Dashboard stays outside every group on purpose. It is the way back, not a
+ * peer of the surfaces it summarises, and a heading over a section of one is
+ * a heading that means nothing.
+ *
+ * The groups are by *kind of object*, not by feature area: what you work on
+ * this week, what the code is doing, what the company knows, and who does the
+ * work. Content Studio sits in Work rather than in a publishing group of its
+ * own for the same reason Dashboard has no heading.
+ */
+const NAV_GROUPS: { id: string; label: string; items: [string, ReactNode, NavType][] }[] = [
+  {
+    id: "work",
+    label: "Work",
+    items: [
+      ["Tasks", <IconTasks />, "tasks"],
+      ["Calendar", <IconCalendar />, "calendar"],
+      ["Mail", <IconMail />, "mail"],
+      ["Documents", <IconDocument />, "documents"],
+      ["Content Studio", <IconContent />, "content"],
+    ],
+  },
+  {
+    id: "code",
+    label: "Code",
+    items: [
+      ["Workspaces", <IconWorkspace />, "workspaces"],
+      ["Git activity", <IconGitHub />, "git"],
+    ],
+  },
+  {
+    id: "knowledge",
+    label: "Knowledge",
+    items: [
+      ["Knowledge", <IconKnowledge />, "knowledge"],
+      ["Memory", <IconMemory />, "memory"],
+      ["Connections", <IconGraph />, "graph"],
+    ],
+  },
+  {
+    id: "roster",
+    label: "Roster",
+    items: [
+      ["People", <IconPerson />, "people"],
+      ["Agents & Teams", <IconAgents />, "agents"],
+    ],
+  },
+];
+
+const SECTION_KEY = "spaces.sidebar.shut";
+
+function readShut(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SECTION_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    /* a hand-edited value must not cost anyone their navigation */
+    return new Set();
+  }
+}
 
 export function Sidebar() {
   const store = useStore();
@@ -31,6 +112,21 @@ export function Sidebar() {
   const [removeTarget, setRemoveTarget] = useState<
     { kind: "project" | "channel"; id: string } | null
   >(null);
+  const [shut, setShut] = useState<Set<string>>(readShut);
+
+  function toggleSection(id: string) {
+    setShut((was) => {
+      const next = new Set(was);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(SECTION_KEY, JSON.stringify([...next]));
+      } catch {
+        /* a locked-down webview just forgets which sections were folded */
+      }
+      return next;
+    });
+  }
 
   const activeChannels = new Set(
     activeRunIds.map((id) => runs[id]?.channel_id).filter(Boolean)
@@ -45,25 +141,13 @@ export function Sidebar() {
   const navItem = (
     label: string,
     icon: ReactNode,
-    type:
-      | "dashboard"
-      | "tasks"
-      | "documents"
-      | "mail"
-      | "calendar"
-      | "content"
-      | "memory"
-      | "agents"
-      | "workspaces"
-      | "settings"
-      | "git"
-      | "graph"
-      | "knowledge"
-      | "people"
+    type: NavType,
   ) => (
     <div
+      key={type}
       className={"nav-item" + (view.type === type ? " active" : "")}
       onClick={() => setView({ type })}
+      title={label}
     >
       <span className="nav-icon">{icon}</span> {label}
     </div>
@@ -83,21 +167,53 @@ export function Sidebar() {
           onClick={toggleAppearance}
         >{theme.appearance === "dark" ? <IconMoon /> : <IconSun />}</button>
       </div>
+      {/* One scroller for the whole of the navigation.
+          It used to be only the project list, on the reasoning that a
+          workspace with many projects must never push the top-level rows off
+          the top of the rail. That reasoning was right and the fix was in the
+          wrong place: with grouped sections and a 36px row the *nav itself* no
+          longer fits a short window, so the part that got pushed off was the
+          account footer instead. The footer is now outside the scroller and
+          pinned, the brand is above it, and everything between them scrolls —
+          which is the only arrangement where nothing can be lost off an edge. */}
+      <div className="nav-scroll">
       <div className="nav-section">
         {navItem("Dashboard", <IconDashboard />, "dashboard")}
-        {navItem("Tasks", <IconTasks />, "tasks")}
-        {navItem("Documents", <IconDocument />, "documents")}
-        {navItem("Mail", <IconMail />, "mail")}
-        {navItem("Calendar", <IconCalendar />, "calendar")}
-        {navItem("Content Studio", <IconMegaphone />, "content")}
-        {navItem("Workspaces", <IconBranch />, "workspaces")}
-        {navItem("Git activity", <IconGitHub />, "git")}
-        {navItem("Memory", <IconMemory />, "memory")}
-        {navItem("People", <IconAgents />, "people")}
-        {navItem("Agents & Teams", <IconAgents />, "agents")}
-        {navItem("Knowledge", <IconDocument />, "knowledge")}
-        {navItem("Connections", <IconGlobe />, "graph")}
       </div>
+
+      {NAV_GROUPS.map((group) => {
+        // A group is never collapsed away from the surface you are on: the row
+        // you are looking at has to stay visible in the rail that says where
+        // you are. Folding a section that holds the current view would make the
+        // rail claim you are nowhere.
+        const holdsView = group.items.some(([, , type]) => type === view.type);
+        const open = holdsView || !shut.has(group.id);
+        return (
+          <div className="nav-section" key={group.id} data-shut={open ? undefined : "1"}>
+            <button
+              type="button"
+              className="nav-heading nav-heading-btn"
+              aria-expanded={open}
+              onClick={() => toggleSection(group.id)}
+              // Collapsing the group you are standing in would hide the
+              // selected row, so the control says so rather than doing it.
+              disabled={holdsView}
+              title={holdsView ? `${group.label} — holds the current view` : undefined}
+            >
+              {group.label}
+              <span className="nav-heading-chevron" aria-hidden="true">
+                <IconChevronDown size={11} />
+              </span>
+            </button>
+            {/* Always rendered, hidden by CSS. A collapsed section on the mini
+                rail would be a run of icons that silently vanished under a
+                heading whose label is not drawn at that width — so the mini
+                rail overrules the fold and shows everything. That override is
+                only possible if the rows are in the DOM to be shown. */}
+            {group.items.map(([label, icon, type]) => navItem(label, icon, type))}
+          </div>
+        );
+      })}
 
       <div className="nav-section grow">
         <div className="nav-heading">
@@ -203,6 +319,7 @@ export function Sidebar() {
               })}
           </div>
         ))}
+      </div>
       </div>
 
       <AccountMenu />

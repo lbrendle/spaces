@@ -378,6 +378,7 @@ export function ProjectWorkspaceView({
             onClick={() => toggleUtility("terminal")}
           >
             <IconTerminal size={16} />
+            <span className="cc-rail-label">Terminal</span>
             {!!terminals.length && <span>{terminals.length}</span>}
           </button>
           <button
@@ -387,6 +388,7 @@ export function ProjectWorkspaceView({
             onClick={() => toggleUtility("processes")}
           >
             <IconBolt size={16} />
+            <span className="cc-rail-label">Agents</span>
             {!!activeProjectRuns && <span>{activeProjectRuns}</span>}
           </button>
           <button
@@ -396,6 +398,7 @@ export function ProjectWorkspaceView({
             onClick={() => toggleUtility("browser")}
           >
             <IconGlobe size={16} />
+            <span className="cc-rail-label">Browser</span>
           </button>
         </nav>
       </div>

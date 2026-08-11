@@ -2340,12 +2340,16 @@ export function MailView() {
                 ))}
               </div>
             </>
-          ) : (
+          ) : threads.length ? (
             <OpsEmpty icon={<IconMail size={28} />} title="Nothing selected">
               Pick a conversation on the left. Agents can draft a reply or summarise a thread — and
               you see the exact text they are given before it goes.
             </OpsEmpty>
-          )}
+          ) : null /* An empty folder has nothing to pick, so "pick a conversation
+              on the left" is an instruction that cannot be followed — and it was
+              sitting next to the list that had just finished saying there is
+              nothing there. Two empty states side by side, one of them wrong.
+              With no threads the reader is simply blank and the list speaks. */}
         </section>
       </div>
 
