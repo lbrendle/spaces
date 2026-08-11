@@ -1152,7 +1152,8 @@ export function DocumentsView() {
   return (
     <Pane
       title={<><IconDocument size={19} /> Documents</>}
-      subtitle="Write it once, share it deliberately, and let the agents who need it read it."
+      /* No subtitle: with documents on screen it restated the obvious, and with
+       * none it was the third copy of the empty state's own sentence. */
       actions={
         <div className="ops-header-right">
           <input
@@ -1180,7 +1181,13 @@ export function DocumentsView() {
       className="ops"
       onKeyDown={onPaneKeyDown}
     >
-      <div className="ops-split">
+      {/* Nothing written: the rail stands down and the editor's empty state
+       * speaks alone. With both up, this screen showed two empty states side
+       * by side — "Nothing written yet" and "Your shared working memory" —
+       * each with a button that called the same function under a different
+       * name, over a search field and a project filter with nothing to
+       * search or filter. */}
+      <div className={"ops-split" + (docs && !all.length ? " ops-split-solo" : "")}>
         <aside className="ops-list" aria-label="Documents">
           <div className="ops-rail-head">
             <div className="ops-search">
@@ -2552,35 +2559,43 @@ interface ContentStage {
   cta: string;
 }
 
+/*
+ * The blanks are phrases, not sentences. On a board where every column starts
+ * empty, a full line of prose per column meant five stacked paragraphs across
+ * one screen — and each was setting that prose in a 228px track, so the board
+ * read as a wall of text with a button under each block. The column label says
+ * what the stage is; the button says what to do; the blank only has to say
+ * that the column is empty.
+ */
 const CONTENT_STAGES: ContentStage[] = [
   {
     id: "idea",
     label: "Idea",
-    empty: "Everything starts as a line you did not want to lose.",
+    empty: "Nothing captured yet.",
     cta: "Add an idea",
   },
   {
     id: "drafting",
     label: "Drafting",
-    empty: "Nothing is being written. Pull an idea across, or brief an agent.",
+    empty: "Nothing being written.",
     cta: "Start a draft",
   },
   {
     id: "review",
     label: "Review",
-    empty: "Nothing is waiting on a human read.",
+    empty: "Nothing to read.",
     cta: "Add something to read",
   },
   {
     id: "scheduled",
     label: "Scheduled",
-    empty: "Nothing is queued. A piece here has a time and a target.",
+    empty: "Nothing queued.",
     cta: "Queue a piece",
   },
   {
     id: "published",
     label: "Published",
-    empty: "Nothing has gone out from here yet.",
+    empty: "Nothing published yet.",
     cta: "Log one you posted by hand",
   },
 ];

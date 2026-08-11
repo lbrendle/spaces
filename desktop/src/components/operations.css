@@ -322,6 +322,13 @@
   grid-template-columns: minmax(232px, 292px) minmax(0, 1fr);
   min-height: 0;
 }
+/* Nothing to list: one column, one empty state. */
+.ops-split-solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ops-split-solo > .ops-list {
+  display: none;
+}
 .ops-list {
   display: flex;
   flex-direction: column;
