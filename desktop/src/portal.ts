@@ -735,11 +735,33 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       sortOrder: task.sort_order,
       createdAt: task.created_at,
     }));
-  const liveIds = new Map<string, Set<string>>([
-    ["project", new Set(state.projects.map((project) => project.id))],
-    ["channel", new Set(state.channels.map((channel) => channel.id))],
-    ["task", new Set(state.tasks.map((task) => task.id))],
-  ]);
+  /*
+   * Asking the portal to delete something is irreversible, so the evidence has
+   * to be the database, not the store.
+   *
+   * This used to read `state.projects` / `state.channels` / `state.tasks` — a
+   * Zustand snapshot, which is a cache of whatever has been loaded. Anything
+   * mapped in `portal_links` but missing from that snapshot was reported to
+   * the portal as deleted, and the portal wrote a tombstone that came back and
+   * removed it here for good. A snapshot that lagged the links table by one
+   * sync was therefore enough to destroy a live project: every project created
+   * in this session was mapped, then tombstoned minutes later, taking its
+   * channels and its memory with it.
+   *
+   * The rows below are the same question asked of the source of truth. A
+   * project the user really did delete is genuinely absent here, so the intent
+   * is unchanged — what goes away is the window where "not loaded yet" and
+   * "deleted" were indistinguishable.
+   */
+  const liveIds = new Map<string, Set<string>>();
+  for (const [entity, table] of [
+    ["project", "projects"],
+    ["channel", "channels"],
+    ["task", "tasks"],
+  ] as const) {
+    const rows = await localDb.select<Array<{ id: string }>>(`SELECT id FROM ${table}`);
+    liveIds.set(entity, new Set(rows.map((row) => row.id)));
+  }
   const deleteRequests = mirrorRows
     .filter(
       (row) =>

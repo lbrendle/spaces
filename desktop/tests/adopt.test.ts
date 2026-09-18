@@ -170,6 +170,33 @@ test("context is read before it is overwritten, and nothing is ever deleted", as
 });
 
 /*
+ * The ledger is what makes adoption skip a section it has already brought in.
+ * If it outlives the memory it describes, adoption refuses to restore context
+ * that is no longer there — a silent failure, and the exact opposite of what
+ * this layer exists for. Both paths that delete a project must clear it: the
+ * one in the app, and the one a portal tombstone takes.
+ */
+test("deleting a project takes its adoption ledger with it", async () => {
+  const [store, portal] = await Promise.all([
+    readFile(new URL("../src/store.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/portalContent.ts", import.meta.url), "utf8"),
+  ]);
+
+  for (const [name, src, from] of [
+    ["deleteProject", store, "async deleteProject(id)"],
+    ["removeRemoteMirror", portal, "async function removeRemoteMirror("],
+  ] as const) {
+    const body = src.slice(src.indexOf(from));
+    const memoryAt = body.indexOf("DELETE FROM memory WHERE project_id");
+    const ledgerAt = body.indexOf("DELETE FROM adopted_context WHERE project_id");
+    assert.ok(memoryAt > 0, `${name} does not clear memory`);
+    assert.ok(ledgerAt > 0, `${name} leaves the adoption ledger behind`);
+    // Near the memory it belongs to, not somewhere else in the file.
+    assert.ok(ledgerAt - memoryAt > 0 && ledgerAt - memoryAt < 400, `${name} clears the ledger somewhere unrelated`);
+  }
+});
+
+/*
  * Adoption used to run only at startup and on agent runs, so a project created
  * mid-session — the exact moment somebody points Spaces at a folder that
  * already has a CLAUDE.md — sat un-adopted until something unrelated happened
