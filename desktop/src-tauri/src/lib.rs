@@ -612,7 +612,8 @@ fn iso_millis(text: &str) -> i64 {
     if y < 1970 || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
         return 0;
     }
-    if h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 60 {
+    // 60 seconds is allowed: a leap second is a real timestamp, not a typo.
+    if !(0..=23).contains(&h) || !(0..=59).contains(&mi) || !(0..=60).contains(&s) {
         return 0;
     }
     // Days from the civil calendar, by Howard Hinnant's algorithm: exact for
@@ -664,10 +665,8 @@ fn jsonl_files(root: &Path, out: &mut Vec<PathBuf>, depth: usize) {
         let path = entry.path();
         match entry.file_type() {
             Ok(t) if t.is_dir() => jsonl_files(&path, out, depth + 1),
-            Ok(t) if t.is_file() => {
-                if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                    out.push(path);
-                }
+            Ok(t) if t.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") => {
+                out.push(path);
             }
             _ => {}
         }
@@ -928,7 +927,7 @@ async fn scan_agent_sessions() -> Result<Vec<SessionSummary>, String> {
 
         // Newest first: the sessions somebody wants are the recent ones, and
         // this is the order every caller would otherwise impose itself.
-        found.sort_by(|a, b| b.ended_at.cmp(&a.ended_at));
+        found.sort_by_key(|s| std::cmp::Reverse(s.ended_at));
         Ok(found)
     })
     .await
@@ -1321,7 +1320,7 @@ unsafe fn find_composer(window: &core_foundation::base::CFType) -> Option<Compos
         seen += 1;
         // Checked every 32 nodes: reading the clock is cheap, but not as cheap
         // as the arithmetic it would otherwise dominate.
-        if seen > WALK_NODES || (seen % 32 == 0 && Instant::now() > deadline) {
+        if seen > WALK_NODES || (seen.is_multiple_of(32) && Instant::now() > deadline) {
             break;
         }
 
