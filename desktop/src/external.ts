@@ -73,6 +73,22 @@ export function handoffPath(agent: Agent): string {
   return `${dir}/${slug(agent.name) || agent.id.slice(0, 8)}.md`;
 }
 
+/**
+ * Where the agent writes an answer that is words rather than code.
+ *
+ * Spaces could ask an external teammate anything and could only hear one kind
+ * of answer: a commit. Ask Muse for the status of a training run and it does
+ * exactly the right thing — reads the run state, changes no files, reports in
+ * its own window — and Spaces waits for a commit that is never coming, while
+ * the brief has told it plainly that it need not report back by hand.
+ *
+ * A sibling of the brief, so the two halves of the conversation sit together
+ * and an agent that can read one path can write the other.
+ */
+export function replyPath(agent: Agent): string {
+  return handoffPath(agent).replace(/\.md$/, "") + ".reply.md";
+}
+
 async function safe(fn: () => Promise<string>): Promise<string> {
   try {
     return await fn();
@@ -248,8 +264,24 @@ export async function handOff(req: HandOffRequest): Promise<HandOffResult> {
     result.baselineSha ? `- **tree handed over** ${result.baselineSha.slice(0, 12)}` : "",
     "",
     "> Spaces does not launch this agent. This file is the hand-off: open it in " +
-      `${config.app || "the agent's app"}, do the work in the directory above, and commit. ` +
-      "Spaces reads the result out of git — you do not need to report back by hand.",
+      `${config.app || "the agent's app"} and do the work in the directory above. ` +
+      "Spaces reads code changes straight out of git, so commit them and you need not " +
+      "list them by hand.",
+    "",
+    /*
+     * The other half of the return path.
+     *
+     * Saying only "Spaces reads the result out of git" is a promise that holds
+     * for a commit and fails for everything else. Asked a question, a good
+     * agent reads, answers, and changes nothing — and the answer had nowhere
+     * to go, so the hand-off stayed open for ever and the person was told
+     * nothing at all.
+     */
+    `> If any part of your answer is words rather than code — a status, a finding, a ` +
+      `recommendation, a reason you did nothing — write it to \`${replyPath(req.agent)}\` ` +
+      "in the project root. Spaces posts that file back into the channel as your reply. " +
+      "Markdown, no front matter, and write the answer itself rather than a note saying " +
+      "where to look.",
     "",
     "---",
     "",
@@ -274,6 +306,24 @@ export async function handOff(req: HandOffRequest): Promise<HandOffResult> {
     result.path = `${root}/${relativePath}`;
   } catch (e) {
     result.error = String(e);
+  }
+
+  /*
+   * Empty the reply before handing over, for the same reason the brief is
+   * overwritten rather than appended: an answer to the last question, sitting
+   * where the answer to this one goes, would be posted as though it were the
+   * reply to what was just asked. Emptied rather than deleted so the path the
+   * brief names always exists to be opened.
+   */
+  try {
+    await invoke("write_text_file", {
+      root,
+      relativePath: replyPath(req.agent),
+      contents: "",
+    });
+  } catch {
+    // A brief that was delivered is worth more than a guaranteed-clean reply
+    // slot; the staleness guard below is what actually keeps this honest.
   }
   return result;
 }
@@ -464,8 +514,36 @@ export interface HandOffOutcome {
   commits: ExternalActivity["commits"];
   /** Paths dirty now that were not dirty at hand-off. */
   newlyDirty: string[];
+  /** What the agent wrote back in prose, if anything. */
+  reply: string;
   /** True when nothing at all has happened since. */
   untouched: boolean;
+}
+
+/** How much of a written reply is worth carrying into a channel message. */
+const REPLY_LIMIT = 6000;
+
+/**
+ * The agent's written answer, if it left one.
+ *
+ * Read from the project root rather than the agent's working directory: the
+ * brief names one path and this reads that same path, so there is never a
+ * question of which copy is the real one.
+ */
+async function readReply(project: Project | undefined, agent: Agent): Promise<string> {
+  const root = (project?.local_path ?? "").replace(/\/+$/, "");
+  if (!root) return "";
+  try {
+    const text = await invoke<string>("read_text_file", {
+      root,
+      relativePath: replyPath(agent),
+    });
+    const body = (text ?? "").trim();
+    return body.length > REPLY_LIMIT ? `${body.slice(0, REPLY_LIMIT)}\n\n…truncated.` : body;
+  } catch {
+    // No reply file is the ordinary case, not a failure.
+    return "";
+  }
 }
 
 /**
@@ -484,11 +562,16 @@ export async function settleHandOff(
   // last ten commits on the branch — which were there before the brief was
   // written. Reporting those as this agent's work is worse than reporting
   // nothing, so only the working tree is compared.
+  // An answer counts as much as a commit. An agent asked a question does the
+  // right thing by changing nothing, and that used to read as having done
+  // nothing at all.
+  const reply = await readReply(project, agent);
+
   if (!baseline.sha) {
     const activity = await activityOf(project, agent);
     const was = new Set(baseline.dirty);
     const newlyDirty = activity.dirtyFiles.filter((f) => !was.has(f));
-    return { commits: [], newlyDirty, untouched: newlyDirty.length === 0 };
+    return { commits: [], newlyDirty, reply, untouched: newlyDirty.length === 0 && !reply };
   }
 
   const activity = await activityOf(project, agent, { since: baseline.sha });
@@ -497,13 +580,37 @@ export async function settleHandOff(
   return {
     commits: activity.commits,
     newlyDirty,
-    untouched: activity.commits.length === 0 && newlyDirty.length === 0,
+    reply,
+    untouched: activity.commits.length === 0 && newlyDirty.length === 0 && !reply,
   };
+}
+
+/**
+ * Forget a reply that has been posted.
+ *
+ * Reporting is per run, but the reply file is per agent — so a second open
+ * hand-off, or a later one that never gets a fresh brief, would otherwise see
+ * the same answer still sitting there and post it again. Emptied once it has
+ * been said out loud.
+ */
+export async function consumeReply(project: Project | undefined, agent: Agent): Promise<void> {
+  const root = (project?.local_path ?? "").replace(/\/+$/, "");
+  if (!root) return;
+  try {
+    await invoke("write_text_file", { root, relativePath: replyPath(agent), contents: "" });
+  } catch {
+    // Already gone, or read-only: the run's own meta still stops it repeating.
+  }
 }
 
 /** One-line summary of a hand-off outcome, for a channel message. */
 export function describeOutcome(agent: Agent, outcome: HandOffOutcome): string {
   if (outcome.untouched) return `${agent.name} has not touched the repository since the hand-off.`;
+  // An answer with no code behind it is a complete outcome, and saying "0
+  // commits" over the top of it would bury the thing actually being reported.
+  if (outcome.reply && !outcome.commits.length && !outcome.newlyDirty.length) {
+    return `${agent.name} replied:`;
+  }
   const bits: string[] = [];
   if (outcome.commits.length) {
     bits.push(`${outcome.commits.length} commit${outcome.commits.length === 1 ? "" : "s"}`);

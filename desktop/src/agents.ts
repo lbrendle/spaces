@@ -32,6 +32,7 @@ import {
   externalWorkdir,
   handOff,
   handoffPath,
+  consumeReply,
   settleHandOff,
 } from "./external";
 import { checkpointAfter, checkpointBefore, runDiff } from "./gitflow";
@@ -2154,6 +2155,10 @@ export async function reportHandOffs(projectId: string): Promise<number> {
         content: [
           `✅ ${describeOutcome(agent, outcome)}`,
           "",
+          // The agent's own words first: when it answered a question, this is
+          // the reply, and the commit list is supporting detail.
+          outcome.reply,
+          outcome.reply && outcome.commits.length ? "" : "",
           ...outcome.commits.slice(0, 5).map((c) => `- \`${c.sha.slice(0, 8)}\` ${c.subject}`),
           outcome.newlyDirty.length
             ? `\nStill uncommitted: ${outcome.newlyDirty.slice(0, 10).join(", ")}`
@@ -2162,15 +2167,75 @@ export async function reportHandOffs(projectId: string): Promise<number> {
           .filter((l) => l !== "")
           .join("\n"),
         status: "done",
-        meta: "picked up from git",
+        // Where it came from, because the two are read differently: git is
+        // observed fact, a written reply is the agent's own account.
+        meta: outcome.reply
+          ? outcome.commits.length || outcome.newlyDirty.length
+            ? "written reply and git"
+            : "written reply"
+          : "picked up from git",
         parent_id: "",
       });
       // Mark it settled so the same work is never reported twice.
       await store.patchRun(row.id, { meta: "external work landed" });
+      if (outcome.reply) await consumeReply(project, agent);
       reported += 1;
     }
   }
   return reported;
+}
+
+/** How often to look for external teammates that have answered. */
+const HANDOFF_POLL_MS = 45_000;
+
+/**
+ * Notice when an external teammate answers, without being asked to look.
+ *
+ * `reportHandOffs` was only ever called by the shared-workspace view opening,
+ * which made an answer conditional on the person navigating to the right
+ * screen for the right project. Ask Muse a question from #general, stay in
+ * #general, and the reply lands in a place nothing is reading — which is
+ * indistinguishable, from the channel, from an agent that ignored you.
+ *
+ * The common case is that nothing is outstanding, and that case costs one
+ * indexed query and no subprocesses: only projects with an open hand-off are
+ * settled, and git is touched only for those.
+ */
+export function initHandOffWatch(): () => void {
+  let stopped = false;
+  let running = false;
+
+  const tick = async () => {
+    // Overlapping sweeps would run git against the same tree twice and could
+    // report the same work in both.
+    if (stopped || running) return;
+    running = true;
+    try {
+      const db = await getDb();
+      const rows = await db.select<Array<{ project_id: string }>>(
+        `SELECT DISTINCT channels.project_id AS project_id
+           FROM runs
+           INNER JOIN channels ON channels.id = runs.channel_id
+          WHERE runs.meta LIKE '%awaiting external agent%'`
+      );
+      for (const row of rows) {
+        if (stopped) return;
+        await reportHandOffs(row.project_id).catch(() => 0);
+      }
+    } catch {
+      // Best effort: a sweep that fails is retried on the next tick, and the
+      // shared-workspace view still settles hand-offs the way it always did.
+    } finally {
+      running = false;
+    }
+  };
+
+  void tick();
+  const timer = window.setInterval(() => void tick(), HANDOFF_POLL_MS);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
+  };
 }
 
 /**

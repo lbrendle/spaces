@@ -4,6 +4,7 @@ import { IconLogo } from "./components/icons";
 import {
   initAgentListener,
   ensureNotifyPermission,
+  initHandOffWatch,
   initRemoteAgentJobs,
 } from "./agents";
 import { initOrchestrator } from "./orchestrator";
@@ -114,10 +115,12 @@ export default function App() {
     void syncAllProjects();
     const stopPortal = initPortalSync();
     const stopRemoteJobs = initRemoteAgentJobs();
+    const stopHandOffs = initHandOffWatch();
     const refreshAgentMirrors = () => void syncAllProjects(100);
     window.addEventListener("hq:content-change", refreshAgentMirrors);
     return () => {
       window.removeEventListener("hq:content-change", refreshAgentMirrors);
+      stopHandOffs();
       stopRemoteJobs();
       stopPortal();
     };
