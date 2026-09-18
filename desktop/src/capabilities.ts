@@ -834,6 +834,34 @@ function asText(v: OptionValue | undefined): string {
 /* ── Serialize / parse ────────────────────────────────────────── */
 
 /**
+ * `cli_args` as argv, with Spaces' own settings taken out.
+ *
+ * `cli_args` carries two different things: tokens meant for the harness's
+ * command line, and `key=value` settings for options whose `kind` is `"json"`
+ * — which are Spaces' own and mean nothing to a CLI. The adapters tokenized
+ * the whole string straight into argv, so a setting of the second sort was
+ * handed to the program as an argument.
+ *
+ * That is not cosmetic. `reach=false` landed in the `[PROMPT]` position of
+ * `codex exec`, which pushed the trailing `-` into a second positional and
+ * failed the run outright with "unexpected argument '-' found" — every Codex
+ * turn, for as long as the switch existed. Claude was given it too.
+ */
+export function cliTokens(kind: string, cliArgs: string): string[] {
+  const ours = new Set(
+    optionsFor(kind)
+      .filter((opt) => opt.kind === "json")
+      .map((opt) => opt.key)
+  );
+  if (!ours.size) return tokenize(cliArgs);
+  return tokenize(cliArgs).filter((token) => {
+    const eq = token.indexOf("=");
+    // `=` at 0 is not a key, and a token without one is an ordinary argument.
+    return eq <= 0 || !ours.has(token.slice(0, eq));
+  });
+}
+
+/**
  * Values → the string stored in `agents.cli_args`.
  *
  * Flag options emit `--flag value`; settings emit `field=value` tokens for

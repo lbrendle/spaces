@@ -38,8 +38,8 @@ import {
 } from "./external";
 import { checkpointAfter, checkpointBefore, runDiff } from "./gitflow";
 import {
+  cliTokens,
   configuredEffort,
-  tokenize,
   resumeArgs,
 } from "./capabilities";
 import { registerCanceller, trackRun, untrackRun } from "./runbus";
@@ -227,7 +227,7 @@ const claudeAdapter: AgentAdapter = {
   program: "claude",
 
   buildArgs(agent, resumeSession, runtimeContractPath) {
-    const extra = parseArgs(agent.cli_args ?? "");
+    const extra = cliTokens(agent.kind, agent.cli_args ?? "");
     let hasPermissionMode = false;
     for (let index = 0; index < extra.length; index++) {
       const value = extra[index];
@@ -307,11 +307,11 @@ const codexAdapter: AgentAdapter = {
       // equivalent -c sandbox_mode="X", which resume does accept.
       const args = ["exec", "resume", resumeSession, "--json"];
       if (agent.model) args.push("-c", `model="${agent.model}"`);
-      return [...args, ...tokenize(resumeArgs("codex", agent.cli_args ?? "")), "-"];
+      return [...args, ...cliTokens(agent.kind, resumeArgs("codex", agent.cli_args ?? "")), "-"];
     }
     const args = ["exec", "--json"];
     if (agent.model) args.push("-m", agent.model);
-    return [...args, ...tokenize(agent.cli_args ?? ""), "-"];
+    return [...args, ...cliTokens(agent.kind, agent.cli_args ?? ""), "-"];
   },
 
   extractSessionId(obj) {
@@ -365,7 +365,7 @@ const cursorAdapter: AgentAdapter = {
     const args = ["-p", "--output-format", "stream-json"];
     if (resumeSession) args.push("--resume", resumeSession);
     if (agent.model) args.push("--model", agent.model);
-    return [...args, ...tokenize(agent.cli_args ?? "")];
+    return [...args, ...cliTokens(agent.kind, agent.cli_args ?? "")];
   },
 
   extractSessionId(obj) {
@@ -741,11 +741,6 @@ function renderContent(run: RunState): string {
   return run.raw.join("\n");
 }
 
-/** Shared with the agent editor so quoting round-trips: capabilities.quoteArg
- *  is the exact inverse of tokenize. */
-function parseArgs(s: string): string[] {
-  return tokenize(s);
-}
 
 /* ------------------------------------------------------------------ *
  * Prompt composition
