@@ -33,10 +33,35 @@ test("an answer in words is an outcome, not silence", async () => {
   const body = settle.slice(0, settle.indexOf("\n}\n"));
   assert.match(body, /const reply = await readReply\(project, agent\)/);
   const untouched = body.match(/untouched:[^,}]*/g) ?? [];
-  assert.ok(untouched.length >= 2, "settleHandOff no longer reports both baseline cases");
+  assert.ok(untouched.length >= 1, "settleHandOff no longer decides untouched");
   for (const clause of untouched) {
     assert.match(clause, /!reply/, `a reply must defeat untouched: ${clause}`);
   }
+});
+
+/*
+ * `reportHandOffs` treats a thrown settle as "nothing happened". So if git
+ * throws — a checkout gone missing, a permission problem — an answer sitting
+ * readable on disk would be discarded, which is the very failure this path
+ * exists to end. The two sources are independent and must fail independently.
+ */
+test("a broken checkout cannot swallow a written answer", async () => {
+  const src = await external();
+  const fn = src.slice(src.indexOf("export async function settleHandOff"));
+  const body = fn.slice(0, fn.indexOf("\n}\n"));
+
+  // The reply is read before git is touched, and git failing is not fatal.
+  assert.ok(
+    body.indexOf("readReply(project, agent)") < body.indexOf("activityOf("),
+    "the reply must be read before git can throw"
+  );
+  assert.match(body, /activityOf\([\s\S]*?\)\s*\.catch\(\(\) => null\)/);
+  // And an absent activity reads as no commits, not as an exception.
+  assert.match(body, /activity\?\.dirtyFiles \?\? \[\]/);
+  assert.match(body, /activity\?\.commits \?\? \[\]/);
+
+  // A baseline-less settle still refuses to claim pre-existing commits.
+  assert.match(body, /const commits = baseline\.sha \? activity\?\.commits \?\? \[\] : \[\]/);
 });
 
 test("the brief stops promising a return path it does not have", async () => {

@@ -573,30 +573,39 @@ export async function settleHandOff(
   agent: Agent,
   baseline: { sha: string; dirty: readonly string[] }
 ): Promise<HandOffOutcome> {
-  // Without a baseline there is no "since", and activityOf would hand back the
-  // last ten commits on the branch — which were there before the brief was
-  // written. Reporting those as this agent's work is worse than reporting
-  // nothing, so only the working tree is compared.
   // An answer counts as much as a commit. An agent asked a question does the
   // right thing by changing nothing, and that used to read as having done
   // nothing at all.
   const reply = await readReply(project, agent);
 
-  if (!baseline.sha) {
-    const activity = await activityOf(project, agent);
-    const was = new Set(baseline.dirty);
-    const newlyDirty = activity.dirtyFiles.filter((f) => !was.has(f));
-    return { commits: [], newlyDirty, reply, untouched: newlyDirty.length === 0 && !reply };
-  }
+  /*
+   * Git must not be able to swallow the reply.
+   *
+   * The caller treats a thrown `settleHandOff` as "nothing happened", so a
+   * repository that has gone missing, or a checkout nobody can read, would
+   * discard an answer that is sitting on disk and perfectly readable. That is
+   * the same failure this whole path exists to end: the agent said something
+   * and the person was told nothing. The two sources are independent, so a
+   * failure in one reports as an absence in that one alone.
+   *
+   * Without a baseline there is no "since", and activityOf would hand back the
+   * last ten commits on the branch — which were there before the brief was
+   * written. Reporting those as this agent's work is worse than reporting
+   * nothing, so only the working tree is compared.
+   */
+  const activity = await (baseline.sha
+    ? activityOf(project, agent, { since: baseline.sha })
+    : activityOf(project, agent)
+  ).catch(() => null);
 
-  const activity = await activityOf(project, agent, { since: baseline.sha });
   const was = new Set(baseline.dirty);
-  const newlyDirty = activity.dirtyFiles.filter((f) => !was.has(f));
+  const newlyDirty = (activity?.dirtyFiles ?? []).filter((f) => !was.has(f));
+  const commits = baseline.sha ? activity?.commits ?? [] : [];
   return {
-    commits: activity.commits,
+    commits,
     newlyDirty,
     reply,
-    untouched: activity.commits.length === 0 && newlyDirty.length === 0 && !reply,
+    untouched: commits.length === 0 && newlyDirty.length === 0 && !reply,
   };
 }
 

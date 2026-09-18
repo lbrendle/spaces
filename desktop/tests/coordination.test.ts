@@ -283,8 +283,10 @@ test("a hand-off with no baseline claims no commits", async () => {
   // Without a "since" git log returns the last N commits on the branch, which
   // predate the brief. Reporting those as the agent's work is worse than
   // reporting nothing.
-  assert.match(settle, /if \(!baseline\.sha\)/);
-  assert.match(settle, /return \{ commits: \[\], newlyDirty/);
+  // Stated as the guarantee rather than one shape of it: commits are only ever
+  // reported when there is a baseline to measure them from.
+  assert.match(settle, /const commits = baseline\.sha \? activity\?\.commits \?\? \[\] : \[\]/);
+  assert.match(settle, /commits,\n\s*newlyDirty,/);
 });
 
 test("a blocked branch is not called clean-on-its-own without testing that", async () => {
