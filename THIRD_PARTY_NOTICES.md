@@ -20,11 +20,11 @@ Inventory: 977 locked package records across 40 license expressions.
 
 ## Apache-2.0
 
-- `@cloudflare/workerd-darwin-64@1.20260722.1` — npm:portal
-- `@cloudflare/workerd-darwin-arm64@1.20260722.1` — npm:portal
-- `@cloudflare/workerd-linux-64@1.20260722.1` — npm:portal
-- `@cloudflare/workerd-linux-arm64@1.20260722.1` — npm:portal
-- `@cloudflare/workerd-windows-64@1.20260722.1` — npm:portal
+- `@cloudflare/workerd-darwin-64@1.20260918.1` — npm:portal
+- `@cloudflare/workerd-darwin-arm64@1.20260918.1` — npm:portal
+- `@cloudflare/workerd-linux-64@1.20260918.1` — npm:portal
+- `@cloudflare/workerd-linux-arm64@1.20260918.1` — npm:portal
+- `@cloudflare/workerd-windows-64@1.20260918.1` — npm:portal
 - `@eslint/config-array@0.23.5` — npm:portal
 - `@eslint/config-helpers@0.7.0` — npm:portal
 - `@eslint/core@1.2.1` — npm:portal
@@ -47,7 +47,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `@img/sharp-linuxmusl-arm64@0.35.3` — npm:portal
 - `@img/sharp-linuxmusl-x64@0.35.3` — npm:portal
 - `@img/sharp-webcontainers-wasm32@0.35.3` — npm:portal
-- `@swc/helpers@0.5.15` — npm:portal
+- `@swc/helpers@0.5.23` — npm:portal
 - `@webassemblyjs/leb128@1.13.2` — npm:portal
 - `@xtuc/long@4.2.2` — npm:portal
 - `baseline-browser-mapping@2.11.1` — npm:desktop
@@ -63,7 +63,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `typescript@5.8.3` — npm:desktop
 - `typescript@5.9.3` — npm:portal
 - `web-vitals@4.2.4` — npm:portal
-- `workerd@1.20260722.1` — npm:portal
+- `workerd@1.20260918.1` — npm:portal
 
 ## Apache-2.0 / MIT
 
@@ -225,7 +225,7 @@ Inventory: 977 locked package records across 40 license expressions.
 
 ## CC0-1.0
 
-- `@speed-highlight/core@1.2.17` — npm:portal
+- `@speed-highlight/core@1.2.24` — npm:portal
 
 ## CC0-1.0 OR MIT-0 OR Apache-2.0
 
@@ -315,7 +315,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `@babel/traverse@7.29.7` — npm:portal
 - `@babel/types@7.29.7` — npm:desktop
 - `@babel/types@7.29.7` — npm:portal
-- `@cloudflare/vite-plugin@1.47.0` — npm:portal
+- `@cloudflare/vite-plugin@1.56.0` — npm:portal
 - `@cspotcode/source-map-support@0.8.1` — npm:portal
 - `@emnapi/core@1.11.1` — npm:portal
 - `@emnapi/core@1.8.1` — npm:portal
@@ -393,15 +393,15 @@ Inventory: 977 locked package records across 40 license expressions.
 - `@jridgewell/trace-mapping@0.3.9` — npm:portal
 - `@napi-rs/wasm-runtime@1.1.1` — npm:portal
 - `@napi-rs/wasm-runtime@1.1.6` — npm:portal
-- `@next/env@16.2.12` — npm:portal
-- `@next/swc-darwin-arm64@16.2.12` — npm:portal
-- `@next/swc-darwin-x64@16.2.12` — npm:portal
-- `@next/swc-linux-arm64-gnu@16.2.12` — npm:portal
-- `@next/swc-linux-arm64-musl@16.2.12` — npm:portal
-- `@next/swc-linux-x64-gnu@16.2.12` — npm:portal
-- `@next/swc-linux-x64-musl@16.2.12` — npm:portal
-- `@next/swc-win32-arm64-msvc@16.2.12` — npm:portal
-- `@next/swc-win32-x64-msvc@16.2.12` — npm:portal
+- `@next/env@16.3.5` — npm:portal
+- `@next/swc-darwin-arm64@16.3.5` — npm:portal
+- `@next/swc-darwin-x64@16.3.5` — npm:portal
+- `@next/swc-linux-arm64-gnu@16.3.5` — npm:portal
+- `@next/swc-linux-arm64-musl@16.3.5` — npm:portal
+- `@next/swc-linux-x64-gnu@16.3.5` — npm:portal
+- `@next/swc-linux-x64-musl@16.3.5` — npm:portal
+- `@next/swc-win32-arm64-msvc@16.3.5` — npm:portal
+- `@next/swc-win32-x64-msvc@16.3.5` — npm:portal
 - `@nodelib/fs.scandir@2.1.5` — npm:portal
 - `@nodelib/fs.stat@2.0.5` — npm:portal
 - `@nodelib/fs.walk@1.2.8` — npm:portal
@@ -646,7 +646,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `merge2@1.4.1` — npm:portal
 - `micromatch@4.0.8` — npm:portal
 - `mime-db@1.54.0` — npm:portal
-- `miniflare@4.20260722.0` — npm:portal
+- `miniflare@5.20260918.0-alpha` — npm:portal
 - `minisign-verify@0.2.5` — cargo:desktop
 - `mio@1.2.2` — cargo:desktop
 - `ms@2.1.3` — npm:desktop
@@ -656,7 +656,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `natural-compare@1.4.0` — npm:portal
 - `neo-async@2.6.2` — npm:portal
 - `new_debug_unreachable@1.0.6` — cargo:desktop
-- `next@16.2.12` — npm:portal
+- `next@16.3.5` — npm:portal
 - `nix@0.28.0` — cargo:desktop
 - `node-releases@2.0.51` — npm:desktop
 - `node-releases@2.0.56` — npm:portal
@@ -751,7 +751,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `turbo-stream@3.2.0` — npm:portal
 - `type-check@0.4.0` — npm:portal
 - `typescript-eslint@8.59.3` — npm:portal
-- `undici@7.28.0` — npm:portal
+- `undici@7.29.0` — npm:portal
 - `undici-types@6.21.0` — npm:portal
 - `undici-types@8.3.0` — npm:desktop
 - `unenv@2.0.0-rc.24` — npm:portal
@@ -788,7 +788,7 @@ Inventory: 977 locked package records across 40 license expressions.
 
 - `@cloudflare/kv-asset-handler@0.5.0` — npm:portal
 - `@cloudflare/unenv-preset@2.16.1` — npm:portal
-- `@cloudflare/workers-types@5.20260726.1` — npm:portal
+- `@cloudflare/workers-types@5.20260918.1` — npm:portal
 - `@tauri-apps/plugin-dialog@2.7.2` — npm:desktop
 - `@tauri-apps/plugin-notification@2.3.3` — npm:desktop
 - `@tauri-apps/plugin-opener@2.5.4` — npm:desktop
@@ -978,7 +978,7 @@ Inventory: 977 locked package records across 40 license expressions.
 - `unicode-segmentation@1.13.3` — cargo:desktop
 - `url@2.5.8` — cargo:desktop
 - `web_atoms@0.2.5` — cargo:desktop
-- `wrangler@4.114.0` — npm:portal
+- `wrangler@4.135.0` — npm:portal
 - `xattr@1.6.1` — cargo:desktop
 
 ## MIT OR Apache-2.0 OR Zlib
