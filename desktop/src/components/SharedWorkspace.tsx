@@ -136,6 +136,7 @@ export function SharedWorkspace({
   const active = map.lanes.filter(
     (l) => l.ahead > 0 || l.dirtyFiles.length > 0 || l.kind === "external"
   );
+  // The lane scale ignores lanes with nothing to measure.
   const widest = Math.max(1, ...map.lanes.map((l) => l.adds + l.dels));
 
   return (
@@ -320,6 +321,14 @@ function Lane({
               // it can be pointed somewhere better.
               `Spaces cannot read ${lane.workdir || "this agent's directory"} — set its working directory so its work shows up here.`
             : "No workspace yet. It gets its own worktree the first time it runs on this project."}
+        </div>
+      )}
+      {lane.indistinguishable && (
+        // Without this the lane reads as "did nothing", when what is true is
+        // "Spaces cannot tell what it did".
+        <div className="sw-lane-subject">
+          Works in the shared checkout, so Spaces can&apos;t tell its uncommitted changes from
+          yours. Give it a directory of its own to see them.
         </div>
       )}
     </div>

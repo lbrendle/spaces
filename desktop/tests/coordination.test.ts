@@ -234,3 +234,34 @@ test("a blocked branch is not called clean-on-its-own without testing that", asy
   const tested = plan.indexOf("!alone.clean");
   assert.ok(tested !== -1 && tested < optimistic, "the base check must gate the optimistic note");
 });
+
+test("every harness option can be written and read back", async () => {
+  const capabilities = await readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8");
+
+  // Caught live: the External app options were declared `kind: "flag"` with no
+  // flag token, so serializeArgs wrote bare values — `com.meta.endo .hq/inbox`
+  // — that parseArgs has nothing to key on. Every setting was silently lost the
+  // next time the agent loaded. A flag option needs a flag; anything else has
+  // to go through the key=value form.
+  const manifestStart = capabilities.indexOf("/* ── Manifest ─");
+  const manifestEnd = capabilities.indexOf("export const HARNESSES");
+  const body = capabilities.slice(manifestStart, manifestEnd);
+
+  // Split into individual option object literals.
+  const options = body.split(/\n  \{\n/).slice(1);
+  assert.ok(options.length > 20, `expected the option manifests, found ${options.length}`);
+
+  for (const opt of options) {
+    const key = /key: "([a-z_]+)"/.exec(opt)?.[1];
+    if (!key) continue;
+    const isFlag = /kind: "flag"/.test(opt);
+    const hasFlagToken = /\n    flag: "/.test(opt);
+    const storedInModel = /storage: "model"/.test(opt);
+    // The model column is keyed by position, not by name, so it needs no token.
+    if (isFlag && !hasFlagToken && !storedInModel) {
+      assert.fail(
+        `option "${key}" is kind:"flag" with no flag token — it will serialize as a bare value and never parse back. Use kind:"json" for a setting that is not a CLI flag.`
+      );
+    }
+  }
+});

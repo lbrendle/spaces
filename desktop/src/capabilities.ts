@@ -796,13 +796,19 @@ const OPENCODE_OPTIONS: readonly HarnessOption[] = [
 
 /* ── External (an agent Spaces does not launch) ───────────────── */
 
+/**
+ * Settings, not flags — Spaces never builds a command for these, so they are
+ * stored as `key=value` (the `json` wire form) in the one text column agents
+ * have. Declared as flags they would serialize as bare values with nothing to
+ * key them by, and every setting would be lost the next time the agent loaded.
+ */
 const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
   {
     key: "model",
     label: "App",
     help: "The app this teammate runs in — used for the roster, and to check it is installed.",
     control: "text",
-    kind: "flag",
+    kind: "json",
     storage: "model",
     suggestions: ["Muse", "Cursor", "Zed", "Claude", "Windsurf"],
     placeholder: "Muse",
@@ -814,7 +820,7 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
     label: "Bundle id",
     help: "macOS bundle identifier, so Spaces can tell whether the app is installed and running. Blank skips that check.",
     control: "text",
-    kind: "flag",
+    kind: "json",
     placeholder: "com.meta.endo",
     suggestions: ["com.meta.endo", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed", "com.anthropic.claudefordesktop"],
     group: "App",
@@ -825,7 +831,7 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
     help:
       "Where this agent edits code. A directory of its own — a second checkout or a worktree — is what lets Spaces tell its commits from everyone else's. Blank means the shared project checkout, where it can only be credited with uncommitted changes.",
     control: "text",
-    kind: "flag",
+    kind: "json",
     placeholder: "/Users/you/code/project",
     group: "Git",
   },
@@ -835,7 +841,7 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
     help:
       "Substring matched against commit author name or email. Use it when this agent shares a checkout but commits under its own identity — most local agents commit as you, so check `git log` before relying on it. With neither this nor a working directory of its own set, Spaces will not attribute any commit to this agent rather than guess.",
     control: "text",
-    kind: "flag",
+    kind: "json",
     placeholder: "muse",
     group: "Git",
     chip: true,
@@ -845,7 +851,7 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
     label: "Hand-off file",
     help: "Where Spaces writes a brief when this agent is addressed. Relative to the project root.",
     control: "text",
-    kind: "flag",
+    kind: "json",
     default: ".hq/inbox",
     placeholder: ".hq/inbox",
     group: "Hand-off",

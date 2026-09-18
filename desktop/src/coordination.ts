@@ -113,6 +113,13 @@ export interface AgentLane {
    * merely worth knowing.
    */
   sharesCheckout: boolean;
+  /**
+   * True when Spaces cannot tell this agent's work from anybody else's: an
+   * external agent pointed at the shared checkout, where the uncommitted
+   * changes are as likely to be the user's own. Its lane is shown, and its
+   * dirty files are deliberately left empty rather than claimed.
+   */
+  indistinguishable: boolean;
 }
 
 export interface Overlap {
@@ -164,11 +171,19 @@ async function laneFor(project: Project, agent: Agent, base: string): Promise<Ag
     adds: 0,
     dels: 0,
     sharesCheckout: workdir.replace(/\/+$/, "") === root.replace(/\/+$/, ""),
+    indistinguishable: false,
   };
+  // A spawned agent in the shared checkout was put there by Spaces, so what is
+  // uncommitted there is its turn's work. An *external* agent pointed at the
+  // same directory is just an app someone opened on the project: the dirty
+  // files are as likely to be the user's own, and crediting them to the agent
+  // would put somebody else's work under its name and manufacture overlaps
+  // that are not real.
+  lane.indistinguishable = external && lane.sharesCheckout;
 
   const usable = workdir !== "" && (await isGitRepo(workdir).catch(() => false));
   lane.readable = usable;
-  if (usable) {
+  if (usable && !lane.indistinguishable) {
     lane.dirtyFiles = parsePorcelainPaths(
       await safe(() => git(workdir, "status", "--porcelain"))
     ).slice(0, MAX_FILES_PER_LANE);
