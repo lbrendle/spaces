@@ -26,6 +26,7 @@ import { collaborationBlock, handoffNote } from "./collab";
 import { isExternal } from "./capabilities";
 import {
   composerMessage,
+  replyPath,
   deliverToApp,
   describeOutcome,
   externalConfig,
@@ -2035,6 +2036,11 @@ async function runHandOff(opts: {
           ask: trigger.content,
           workdir: where,
           briefPath: result.path,
+          // Absolute, like the other two paths in this message: the agent is
+          // being told where to put a file, not where it sits in the repo.
+          replyFile: project?.local_path
+            ? `${project.local_path.replace(/\/+$/, "")}/${replyPath(agent)}`
+            : "",
           channelName: channel.name,
           authorName: trigger.authorName,
         })

@@ -397,6 +397,7 @@ export function composerMessage(opts: {
   ask: string;
   workdir: string;
   briefPath: string;
+  replyFile: string;
   channelName: string;
   authorName: string;
 }): string {
@@ -405,7 +406,21 @@ export function composerMessage(opts: {
     `${ask}`,
     "",
     `— from ${opts.authorName} in #${opts.channelName} via Spaces.`,
-    opts.workdir ? `Work in ${opts.workdir} and commit when you're done.` : "",
+    opts.workdir ? `Work in ${opts.workdir} and commit code changes there.` : "",
+    /*
+     * This line has to be here and not only in the brief.
+     *
+     * The composer message is the one thing the agent is certain to read —
+     * everything else is a path it may or may not open. The return path was
+     * documented in the brief, and Muse answered the question straight into
+     * its own chat window without ever opening the file, which is exactly what
+     * a chat app should do when asked something it can already answer. The
+     * answer was perfect and unreachable.
+     */
+    opts.replyFile
+      ? `Write your answer to ${opts.replyFile} — that file is how a reply reaches #${opts.channelName}. ` +
+        "Answering here only reaches this window."
+      : "",
     opts.briefPath ? `Full context: ${opts.briefPath}` : "",
   ]
     .filter((line) => line !== "")

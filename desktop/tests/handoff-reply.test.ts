@@ -111,3 +111,31 @@ test("an answer arrives without anyone going to look for it", async () => {
   assert.match(app, /const stopHandOffs = initHandOffWatch\(\);/);
   assert.match(app, /stopHandOffs\(\);/);
 });
+
+/*
+ * The brief is a file the agent may never open.
+ *
+ * The return path was documented there, and Muse answered straight into its
+ * own chat window without opening it — the right instinct for a chat app asked
+ * something it can already answer, and the reason a perfect answer stayed
+ * unreachable through three separate attempts. The composer message is the one
+ * thing an agent driven this way is certain to read, so the return path has to
+ * be in it.
+ */
+test("the message typed into the app says where a reply goes", async () => {
+  const [src, caller] = await Promise.all([
+    external(),
+    agents(),
+  ]);
+
+  const fn = src.slice(src.indexOf("export function composerMessage"));
+  const body = fn.slice(0, fn.indexOf("\n}\n"));
+  assert.match(body, /replyFile: string/);
+  assert.match(body, /Write your answer to \$\{opts\.replyFile\}/);
+  // And says plainly that answering in the window does not reach anyone.
+  assert.match(body, /Answering here only reaches this window/);
+
+  // The call site actually supplies it, as an absolute path like the others.
+  assert.match(caller, /replyFile: project\?\.local_path/);
+  assert.match(caller, /\$\{replyPath\(agent\)\}/);
+});
