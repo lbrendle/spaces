@@ -327,10 +327,31 @@ test("an agent Spaces cannot launch is still actually sent to", async () => {
   // Focus is stolen because macOS only delivers input to the frontmost app,
   // but it has to be given back.
   assert.match(rust, /previous_app/);
-  assert.match(rust, /set frontmost of process/);
+  assert.match(rust, /fn frontmost_pid/);
 
-  // A denied Accessibility permission does not error, it hangs — so every
-  // call is capped and the timeout says what to do about it.
-  assert.match(rust, /Duration::from_secs\(20\)/);
+  /*
+   * The one that cost an afternoon: none of this may go through a child
+   * process. macOS attributes an Accessibility check to whoever makes the
+   * call, so `osascript` gets refused with -25211 however thoroughly Spaces
+   * itself has been granted the permission — and the error names osascript,
+   * which points at nothing the user can fix.
+   *
+   * Scoped to this module: the Calendar commands elsewhere in lib.rs use
+   * osascript legitimately, under a different TCC service.
+   */
+  const driving = rust.slice(
+    rust.indexOf("/* ── Driving an app Spaces cannot launch ─"),
+    rust.indexOf("/// Which agent/GitHub CLIs are available on this machine.")
+  );
+  assert.ok(driving.length > 500, "could not isolate the app-driving module");
+  assert.doesNotMatch(driving, /Command::new\("\/usr\/bin\/osascript"\)/);
+  assert.doesNotMatch(driving, /tell application "System Events"/);
+  assert.match(driving, /AXUIElementCreateApplication/);
+  assert.match(driving, /CGEvent/);
+  assert.match(driving, /lsappinfo/);
+
+  // And the permission is checked in-process, where the answer is about Spaces.
+  assert.match(rust, /fn AXIsProcessTrusted/);
+  assert.match(driving, /AXIsProcessTrusted\(\)/);
   assert.match(rust, /Privacy & Security/);
 });
