@@ -27,12 +27,13 @@ import "./autosend.css";
 /** How often to look again while waiting for the grant to land. */
 const POLL_MS = 1500;
 /**
- * Five minutes. Granting this means leaving Spaces, finding a System Settings
- * window macOS may have put on another desktop, and flipping a switch — a
- * minute's timeout expires while somebody is still looking for it, and a panel
- * that gave up is worse than one that never started.
+ * Long enough to walk to System Settings and back, not long enough to keep
+ * spinning at somebody who has already done it. Past this, waiting stops and
+ * the panel changes what it asks for — see `stalled`.
  */
-const POLL_LIMIT = 200;
+const POLL_PATIENT = 14;
+/** Give up entirely; by now the grant is not simply in flight. */
+const POLL_LIMIT = 60;
 
 export function AutoSend({ agent }: { agent: Agent }) {
   const config = externalConfig(agent);
@@ -40,6 +41,14 @@ export function AutoSend({ agent }: { agent: Agent }) {
   const [waiting, setWaiting] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<Delivery | null>(null);
+  /*
+   * True once waiting has gone on longer than a grant takes to land. It means
+   * something different from "not granted yet": almost always the switch is
+   * already on and the entry no longer matches the app, which needs the
+   * opposite instruction. Telling somebody to do the thing they have just done
+   * is how a permission dialog becomes a loop.
+   */
+  const [stalled, setStalled] = useState(false);
   const polls = useRef(0);
 
   const check = useCallback(async () => {
@@ -85,8 +94,10 @@ export function AutoSend({ agent }: { agent: Agent }) {
         if (ok) {
           setTrusted(true);
           setWaiting(false);
-        } else if (polls.current >= POLL_LIMIT) {
-          setWaiting(false);
+          setStalled(false);
+        } else {
+          if (polls.current >= POLL_PATIENT) setStalled(true);
+          if (polls.current >= POLL_LIMIT) setWaiting(false);
         }
       });
     }, POLL_MS);
@@ -95,6 +106,7 @@ export function AutoSend({ agent }: { agent: Agent }) {
 
   async function grant() {
     setResult(null);
+    setStalled(false);
     // Returns the state as it is now, which is almost always false — the
     // dialog outlives the call. The poll above is what actually answers.
     const already = await requestAutomation();
@@ -124,22 +136,31 @@ export function AutoSend({ agent }: { agent: Agent }) {
             ? "Checking whether Spaces may control other apps…"
             : trusted
               ? "Spaces has Accessibility permission, so it can type into other apps."
-              : waiting
-                ? "Waiting for the toggle. Turn Spaces on in the Accessibility list macOS just opened — it may be on another desktop. This notices on its own, and again whenever you come back to Spaces."
-                : "macOS reports no Accessibility permission. If you have already granted it, that report can be stale — try the test below anyway, and if it fails, switch Spaces off and on again in the list."}
+              : stalled
+                ? "Spaces is probably already switched on in that list, and macOS still is not honouring it — which happens when the entry was recorded against an older build. Select Spaces there, remove it with the − button, then add this app again with +."
+                : waiting
+                  ? "Waiting for the toggle. Turn Spaces on in the Accessibility list macOS just opened — it may be on another desktop."
+                  : "macOS reports no Accessibility permission for Spaces."}
         </span>
-        {trusted === false && !waiting && (
+        {trusted === false && (!waiting || stalled) && (
           <button type="button" className="btn tiny primary" onClick={() => void grant()}>
-            Grant permission
+            {stalled ? "Ask again" : "Grant permission"}
           </button>
         )}
-        {waiting && <Spinner />}
+        {waiting && !stalled && <Spinner />}
       </div>
 
-      {trusted === false && !waiting && (
+      {trusted === false && !waiting && !stalled && (
         <p className="as-why">
           macOS asks once, and the prompt puts Spaces in the list for you — all that is left is the
           switch. Nothing else on this Mac changes.
+        </p>
+      )}
+      {stalled && (
+        <p className="as-why">
+          A rebuild replaces the whole app bundle, and an entry bound to the old one keeps its
+          switch but stops counting. Removing and re-adding re-records it against the app as it is
+          now.
         </p>
       )}
 
