@@ -44,7 +44,7 @@ agent credentials off the computer that owns them.
 
 | Work together | Build with agents | Keep the company memory |
 | --- | --- | --- |
-| Shared channels, mentions, reactions, projects, issues, boards, people, roles, teams, inbox, and calendars | Claude Code and Codex runtimes, model/effort controls, resumable project chat, live process output, approval queues, worktrees, terminals, and browser panes | Nested Knowledge folders, imported vaults, native notes, wikilinks, backlinks, full-text search, stable agent citations, documents, decisions, and project memory |
+| Shared channels, mentions, reactions, projects, issues, boards, people, roles, teams, inbox, and calendars | Claude Code, Codex, Cursor Agent and any other CLI agent, plus GUI agents like Muse that Spaces never launches; model/effort controls, resumable project chat, live process output, approval queues, worktrees, terminals, and browser panes | Nested Knowledge folders, imported vaults, native notes, wikilinks, backlinks, full-text search, stable agent citations, documents, decisions, and project memory |
 
 | Operate the company | Connect each person | Ship from the same source |
 | --- | --- | --- |
@@ -57,7 +57,14 @@ Every project keeps its conversation and runtime state attached to the project:
 - terminal panes persist while you move between chat, browser, Git, and editor
   surfaces;
 - an embedded browser stays scoped to the same project workspace;
-- Claude Code and Codex can run in isolated worktrees or the project checkout;
+- Claude Code, Codex, Cursor Agent or any other local CLI agent can run in
+  isolated worktrees or the project checkout;
+- agents Spaces cannot launch — Muse, the Cursor app, a terminal you drive
+  yourself — join the same project as real teammates: Spaces reads their branch
+  and diff out of git, briefs them through a hand-off file, and reports what
+  they did by diffing against the tree they were handed;
+- the shared workspace shows which files more than one agent is holding, and
+  simulates the order today's branches land in before anything is merged;
 - live stdout/stderr, elapsed time, diffs, changed files, session continuity,
   model, effort, and cancellation are inspectable in Spaces;
 - Git activity uses the account authenticated on that member’s Mac—never a
