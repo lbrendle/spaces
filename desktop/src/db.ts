@@ -750,6 +750,27 @@ UPDATE messages SET author_id = 'imported:claude'
  WHERE import_key LIKE 'imported:claude:%' AND author_type <> 'user' AND author_id = '';
 `;
 
+/**
+ * v27 — what Spaces has already taken in from a project's own context files.
+ *
+ * One row per section adopted, keyed by a digest of its title and body, so
+ * running adoption again adopts nothing and an *edited* section arrives as
+ * something new rather than as a duplicate. `memory_id` is empty for a section
+ * recognised but deliberately not added — same heading, different wording —
+ * which still has to be remembered or it would be offered forever.
+ */
+const MIGRATION_V27 = `
+CREATE TABLE IF NOT EXISTS adopted_context (
+  project_id TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  memory_id TEXT NOT NULL DEFAULT '',
+  adopted_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, digest)
+);
+`;
+
 async function importLegacyHqData(db: Database): Promise<void> {
   const legacyPath = await invoke<string | null>("legacy_hq_database_path");
   if (!legacyPath) return;
@@ -1194,6 +1215,10 @@ export async function getDb(): Promise<Database> {
       if (at < 26) {
         await applyStatements(db, MIGRATION_V26, true);
         await db.execute("PRAGMA user_version = 26");
+      }
+      if (at < 27) {
+        await applyStatements(db, MIGRATION_V27, true);
+        await db.execute("PRAGMA user_version = 27");
       }
       return db;
     })().catch((e) => {

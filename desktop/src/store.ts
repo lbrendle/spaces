@@ -359,6 +359,26 @@ export const useStore = create<SpacesState>((set, get) => ({
     );
     await get().refreshAll();
     requestPortalSync();
+    /*
+     * A project pointed at an existing folder should arrive knowing what is in
+     * it. The blackboard adopts `CLAUDE.md`, `AGENTS.md` and any previous
+     * `.hq/CONTEXT.md` into memory before it renders the database back out over
+     * them — but it only ran at startup and on agent runs, so a project created
+     * mid-session sat there un-adopted until something else happened to trigger
+     * a sync. Whatever context is already on disk is most wanted in the minute
+     * after you point Spaces at the folder, not whenever the next run lands.
+     *
+     * Imported dynamically because `blackboard` reaches back into this store
+     * through `adopt`; deferring the import to call time keeps that cycle from
+     * having to resolve while this module is still being evaluated.
+     */
+    if (proj.local_path.trim()) {
+      void import("./blackboard")
+        .then(({ syncBlackboard }) => syncBlackboard(proj.id))
+        .catch(() => {
+          // best-effort: a project is still a project without its mirror
+        });
+    }
     return proj;
   },
 
