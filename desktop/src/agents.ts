@@ -24,6 +24,8 @@ import { ensureWorkspace, isGitRepo } from "./workspaces";
 import { collaborationBlock, handoffNote } from "./collab";
 import { isExternal } from "./capabilities";
 import {
+  composerMessage,
+  deliverToApp,
   describeOutcome,
   externalConfig,
   externalWorkdir,
@@ -1905,36 +1907,67 @@ async function runHandOff(opts: {
     runId: msgId,
   });
 
+  const config = externalConfig(agent);
+  const where = externalWorkdir(project, agent);
+
+  // The brief is on disk either way — it is the durable record and the
+  // fallback. Auto-send is what turns it from a note somebody has to notice
+  // into work the agent is actually holding.
+  const delivery = result.error
+    ? { delivered: false, problem: "", previousApp: "" }
+    : await deliverToApp(
+        agent,
+        composerMessage({
+          agent,
+          ask: trigger.content,
+          workdir: where,
+          briefPath: result.path,
+          channelName: channel.name,
+          authorName: trigger.authorName,
+        })
+      );
+
   runs.delete(msgId);
   untrackRun(msgId);
   store.markRunActive(msgId, false);
 
-  const config = externalConfig(agent);
-  const where = externalWorkdir(project, agent);
   const content = result.error
     ? `⚠️ Couldn't leave a brief for ${agent.name}: ${result.error}`
-    : [
-        `📋 **Handed off to ${agent.name}.** Spaces does not launch ${config.app || "this agent"}, so nothing has run yet.`,
-        "",
-        `- brief: \`${result.relativePath}\``,
-        where ? `- working directory: \`${where}\`` : "",
-        result.baselineSha ? `- tree at hand-off: \`${result.baselineSha.slice(0, 12)}\`` : "",
-        "",
-        `Open ${config.app || "the app"} and point it at that brief. Spaces watches this repository — when ${agent.name} commits, its work shows up in the shared workspace and in every other agent's next turn, with no reporting back by hand.`,
-      ]
-        .filter((l) => l !== "")
-        .join("\n");
+    : delivery.delivered
+      ? [
+          `📤 **Sent to ${agent.name}.** Typed into ${config.app || "the app"} and sent.`,
+          "",
+          `- brief: \`${result.relativePath}\``,
+          where ? `- working directory: \`${where}\`` : "",
+          result.baselineSha ? `- tree at hand-off: \`${result.baselineSha.slice(0, 12)}\`` : "",
+          "",
+          `Spaces watches this repository — when ${agent.name} commits, its work appears in the shared workspace and in every other agent's next turn.`,
+        ]
+          .filter((l) => l !== "")
+          .join("\n")
+      : [
+          `📋 **Handed off to ${agent.name}.** Spaces does not launch ${config.app || "this agent"}, so nothing has run yet.`,
+          "",
+          `- brief: \`${result.relativePath}\``,
+          where ? `- working directory: \`${where}\`` : "",
+          result.baselineSha ? `- tree at hand-off: \`${result.baselineSha.slice(0, 12)}\`` : "",
+          delivery.problem ? `\n⚠️ ${delivery.problem}` : "",
+          "",
+          config.autosend
+            ? `Open ${config.app || "the app"} and point it at that brief in the meantime.`
+            : `Open ${config.app || "the app"} and point it at that brief. Turn on **Send it automatically** in this agent's settings and Spaces will type it in for you.`,
+          `Spaces watches this repository — when ${agent.name} commits, its work shows up in the shared workspace and in every other agent's next turn, with no reporting back by hand.`,
+        ]
+          .filter((l) => l !== "")
+          .join("\n");
 
   const status: "done" | "error" = result.error ? "error" : "done";
-  store.patchMessageLocal(channelId, msgId, {
-    content,
-    status,
-    meta: result.error ? "" : "awaiting external agent",
-  });
-  void store.persistMessage(msgId, { content, status, meta: result.error ? "" : "awaiting external agent" });
+  const meta = result.error ? "" : delivery.delivered ? "sent · awaiting external agent" : "awaiting external agent";
+  store.patchMessageLocal(channelId, msgId, { content, status, meta });
+  void store.persistMessage(msgId, { content, status, meta });
   await store.patchRun(msgId, {
     status,
-    meta: result.error ? "" : "awaiting external agent",
+    meta,
     // The baseline lives in the ordinary checkpoint columns, so a hand-off is
     // inspectable and diffable with exactly the same machinery as a real run.
     commit_before: result.baselineSha,

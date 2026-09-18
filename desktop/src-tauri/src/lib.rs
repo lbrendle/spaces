@@ -493,6 +493,222 @@ async fn run_git_ex(
 /// its executable list, and tests/coordination.test.ts fails if the two drift.
 const HARNESS_BINS: [&str; 5] = ["claude", "codex", "cursor-agent", "gh", "node"];
 
+/* ── Driving an app Spaces cannot launch ───────────────────────── */
+
+/// Run one AppleScript with a hard wall-clock cap.
+///
+/// Every call here needs macOS Accessibility permission, and the failure mode
+/// when it is missing is not an error — `System Events` simply never returns.
+/// A timeout is therefore the *normal* way to discover the permission is not
+/// granted, which is why it is a result rather than a panic.
+fn osascript(script: &str, limit: Duration) -> Result<String, String> {
+    let mut cmd = Command::new("/usr/bin/osascript");
+    cmd.arg("-")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("could not run osascript: {e}"))?;
+    {
+        use std::io::Write;
+        let mut sink = child.stdin.take().ok_or("no stdin pipe")?;
+        sink.write_all(script.as_bytes())
+            .map_err(|e| format!("could not write the script: {e}"))?;
+    }
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let out = child
+                    .wait_with_output()
+                    .map_err(|e| format!("osascript did not finish: {e}"))?;
+                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                return if status.success() {
+                    Ok(stdout)
+                } else {
+                    Err(if stderr.is_empty() { stdout } else { stderr })
+                };
+            }
+            Ok(None) => {
+                if started.elapsed() >= limit {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("timed out".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Err(e) => return Err(format!("osascript failed: {e}")),
+        }
+    }
+}
+
+/// AppleScript string literal: only the backslash and the quote need escaping.
+fn as_literal(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Whether Spaces may drive other applications.
+///
+/// There is no way to ask politely: a denied process gets no error from
+/// `System Events`, it just blocks forever. So this asks the cheapest possible
+/// question and treats "did not answer in two seconds" as "not permitted",
+/// which is what the user needs to be told either way.
+#[tauri::command]
+async fn app_automation_ready() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        osascript(
+            "tell application \"System Events\" to return name of first process whose frontmost is true",
+            Duration::from_millis(2_000),
+        )
+        .is_ok()
+    })
+    .await
+    .unwrap_or(false)
+}
+
+#[derive(serde::Serialize)]
+struct AppSendResult {
+    delivered: bool,
+    /// What went wrong, in a sentence the UI can show as-is.
+    problem: String,
+    /// The app that was frontmost before, so the UI can say what it interrupted.
+    previous_app: String,
+}
+
+/// Type a message into another application's composer and optionally send it.
+///
+/// This exists because some agents have no other door. Muse has no CLI, no
+/// AppleScript dictionary, no local port, and its `hatch://` scheme routes
+/// nothing but a login it no longer honours; its composer is not in the
+/// accessibility tree either. Driving the window is not a shortcut around a
+/// real API — it is the only interface the app has.
+///
+/// The composer is addressed as an offset from the window's bottom-left
+/// corner, because that is the one anchor a chat UI keeps when the window is
+/// resized. It is stored per agent so a layout change is a settings edit
+/// rather than a new build.
+///
+/// Text arrives by clipboard rather than keystroke: a brief is longer than
+/// anyone wants typed one `CGEvent` at a time, and paste is atomic where
+/// typing can interleave with whatever the app does between characters. The
+/// previous clipboard contents are put back afterwards.
+#[tauri::command]
+async fn send_to_app(
+    bundle_id: String,
+    app_name: String,
+    text: String,
+    composer_dx: f64,
+    composer_dy: f64,
+    submit: bool,
+) -> Result<AppSendResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = if app_name.trim().is_empty() {
+            bundle_id.trim().to_string()
+        } else {
+            app_name.trim().to_string()
+        };
+        if name.is_empty() {
+            return Err("no application named".to_string());
+        }
+        if text.trim().is_empty() {
+            return Err("nothing to send".to_string());
+        }
+
+        // Whoever the user was working in comes back afterwards. Stealing focus
+        // is unavoidable — the app only accepts input when it is frontmost —
+        // but keeping it is not.
+        let previous = osascript(
+            "tell application \"System Events\" to return name of first process whose frontmost is true",
+            Duration::from_millis(2_000),
+        )
+        .unwrap_or_default();
+
+        let script = format!(
+            r#"
+set theText to {text}
+set savedClipboard to ""
+try
+    set savedClipboard to the clipboard as text
+end try
+set the clipboard to theText
+
+tell application "System Events"
+    if not (exists process {name}) then
+        set the clipboard to savedClipboard
+        return "NOT-RUNNING"
+    end if
+    tell process {name}
+        set frontmost to true
+        delay 0.35
+        if (count of windows) is 0 then
+            set the clipboard to savedClipboard
+            return "NO-WINDOW"
+        end if
+        set w to first window
+        set p to position of w
+        set s to size of w
+        set cx to (item 1 of p) + {dx}
+        set cy to (item 2 of p) + (item 2 of s) - {dy}
+        click at {{cx, cy}}
+        delay 0.25
+        keystroke "v" using command down
+        delay 0.35
+        {submit_line}
+    end tell
+end tell
+delay 0.2
+set the clipboard to savedClipboard
+return "OK"
+"#,
+            text = as_literal(&text),
+            name = as_literal(&name),
+            dx = composer_dx,
+            dy = composer_dy,
+            submit_line = if submit { "key code 36" } else { "" },
+        );
+
+        // Generous: the script deliberately waits on the app between steps, and
+        // a cold app can take a moment to come forward.
+        let outcome = osascript(&script, Duration::from_secs(20));
+
+        // Put the user back where they were, whatever happened above.
+        if !previous.is_empty() {
+            let _ = osascript(
+                &format!(
+                    "tell application \"System Events\" to set frontmost of process {} to true",
+                    as_literal(&previous)
+                ),
+                Duration::from_millis(2_500),
+            );
+        }
+
+        let problem = match outcome {
+            Ok(value) if value == "OK" => String::new(),
+            Ok(value) if value == "NOT-RUNNING" => {
+                format!("{name} is not running, so there was nowhere to put the message.")
+            }
+            Ok(value) if value == "NO-WINDOW" => {
+                format!("{name} is running but has no open window.")
+            }
+            Ok(other) => format!("{name} answered unexpectedly: {other}"),
+            Err(e) if e == "timed out" => format!(
+                "Driving {name} timed out. Spaces needs Accessibility permission — System Settings \
+                 → Privacy & Security → Accessibility — and without it macOS blocks this silently."
+            ),
+            Err(e) => e,
+        };
+
+        Ok(AppSendResult {
+            delivered: problem.is_empty(),
+            problem,
+            previous_app: previous,
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 /// Which agent/GitHub CLIs are available on this machine.
 #[tauri::command]
 async fn check_tools() -> HashMap<String, bool> {
@@ -2193,6 +2409,8 @@ pub fn run() {
             apple_calendar_snapshot,
             apple_calendar_create,
             probe_program,
+            app_automation_ready,
+            send_to_app,
             check_app,
             start_agent_run,
             cancel_agent_run,

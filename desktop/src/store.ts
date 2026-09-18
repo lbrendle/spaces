@@ -673,9 +673,12 @@ export const useStore = create<SpacesState>((set, get) => ({
    */
   async openHandOffsFor(agentId) {
     const db = await getDb();
+    // LIKE, not equality: a hand-off that was typed straight into the app
+    // records that it was sent as well as that it is waiting, and both are
+    // still open until the agent's work shows up in git.
     return db.select<Run[]>(
       `SELECT * FROM runs
-        WHERE agent_id = $1 AND meta = 'awaiting external agent'
+        WHERE agent_id = $1 AND meta LIKE '%awaiting external agent%'
         ORDER BY started_at DESC
         LIMIT 20`,
       [agentId]

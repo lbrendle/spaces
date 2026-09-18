@@ -495,6 +495,46 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
     placeholder: ".hq/inbox",
     group: "Hand-off",
   },
+  {
+    key: "autosend",
+    label: "Send it automatically",
+    help:
+      "Type the ask straight into the app's composer and press send, instead of only leaving a brief. Spaces has to bring the app forward to do it — macOS only delivers input to the frontmost app — and puts you back afterwards. Needs Accessibility permission.",
+    control: "boolean",
+    kind: "json",
+    default: false,
+    group: "Hand-off",
+    chip: true,
+    risky: {
+      true:
+        "Spaces will take over the keyboard for about a second each time this agent is addressed, and it sends the message for real. Stop typing while it does.",
+    },
+  },
+  {
+    key: "composer_dx",
+    label: "Composer offset — across",
+    help:
+      "Points from the window's left edge to the message box. The bottom-left corner is the one anchor a chat window keeps when it is resized, so the box is addressed from there.",
+    control: "number",
+    kind: "json",
+    default: "160",
+    placeholder: "160",
+    step: "1",
+    min: "0",
+    group: "Hand-off",
+  },
+  {
+    key: "composer_dy",
+    label: "Composer offset — up from the bottom",
+    help: "Points from the window's bottom edge to the message box.",
+    control: "number",
+    kind: "json",
+    default: "34",
+    placeholder: "34",
+    step: "1",
+    min: "0",
+    group: "Hand-off",
+  },
 ];
 
 export const HARNESSES: readonly HarnessMeta[] = [

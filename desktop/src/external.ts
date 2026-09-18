@@ -40,6 +40,11 @@ export interface ExternalConfig {
   gitAuthor: string;
   /** Project-relative directory for hand-off briefs. */
   handoffDir: string;
+  /** Type the ask into the app's composer and send it, not just write a file. */
+  autosend: boolean;
+  /** Where the composer is, in points from the window's bottom-left corner. */
+  composerDx: number;
+  composerDy: number;
 }
 
 export function externalConfig(agent: Agent): ExternalConfig {
@@ -48,12 +53,19 @@ export function externalConfig(agent: Agent): ExternalConfig {
     const v = values[key];
     return typeof v === "string" ? v.trim() : "";
   };
+  const num = (key: string, fallback: number) => {
+    const parsed = Number(str(key));
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  };
   return {
     app: (agent.model ?? "").trim(),
     bundleId: str("bundle_id"),
     workdir: str("workdir"),
     gitAuthor: str("git_author"),
     handoffDir: str("handoff") || ".hq/inbox",
+    autosend: values.autosend === true,
+    composerDx: num("composer_dx", 160),
+    composerDy: num("composer_dy", 34),
   };
 }
 
@@ -273,6 +285,100 @@ export async function handOff(req: HandOffRequest): Promise<HandOffResult> {
     result.error = String(e);
   }
   return result;
+}
+
+/* ── putting it in front of the agent ────────────────────────── */
+
+export interface Delivery {
+  /** True when the message reached the app's composer and was sent. */
+  delivered: boolean;
+  /** "" when it worked; otherwise one sentence for the channel. */
+  problem: string;
+  /** The app Spaces put back in front afterwards. */
+  previousApp: string;
+}
+
+/** Whether Spaces is allowed to drive other applications on this Mac. */
+export async function automationReady(): Promise<boolean> {
+  return invoke<boolean>("app_automation_ready").catch(() => false);
+}
+
+/**
+ * The message Spaces actually types into the app.
+ *
+ * Deliberately short. The full brief is a file — it carries the project
+ * instructions, the channel charter, the board and the shared-workspace block,
+ * and pasting tens of kilobytes into a chat box is not what a person hands a
+ * colleague. What goes in the composer is what a person would type: the ask,
+ * where to work, and where the rest of it is.
+ */
+export function composerMessage(opts: {
+  agent: Agent;
+  ask: string;
+  workdir: string;
+  briefPath: string;
+  channelName: string;
+  authorName: string;
+}): string {
+  const ask = opts.ask.trim().replace(/\s+/g, " ");
+  return [
+    `${ask}`,
+    "",
+    `— from ${opts.authorName} in #${opts.channelName} via Spaces.`,
+    opts.workdir ? `Work in ${opts.workdir} and commit when you're done.` : "",
+    opts.briefPath ? `Full context: ${opts.briefPath}` : "",
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+}
+
+/**
+ * Hand the ask to the app directly.
+ *
+ * Muse has no CLI, no scripting dictionary, no local port, and a URL scheme
+ * that routes nothing usable; its composer is not in the accessibility tree
+ * either. Typing into the window is not a shortcut past an API — it is the
+ * only interface the app has, and leaving a file for somebody to notice is not
+ * an agent.
+ *
+ * Returns rather than throws: a hand-off that could not be delivered still
+ * happened — the brief is on disk and the git baseline is recorded — so the
+ * caller reports the problem and carries on.
+ */
+export async function deliverToApp(
+  agent: Agent,
+  message: string
+): Promise<Delivery> {
+  const config = externalConfig(agent);
+  if (!config.autosend) {
+    return { delivered: false, problem: "", previousApp: "" };
+  }
+  if (!config.app && !config.bundleId) {
+    return {
+      delivered: false,
+      problem: `${agent.name} has auto-send on but no app named, so Spaces does not know what to type into.`,
+      previousApp: "",
+    };
+  }
+
+  try {
+    const raw = await invoke("send_to_app", {
+      bundleId: config.bundleId,
+      appName: config.app,
+      text: message,
+      composerDx: config.composerDx,
+      composerDy: config.composerDy,
+      submit: true,
+    });
+    const result = (raw ?? {}) as Record<string, unknown>;
+    return {
+      delivered: result.delivered === true,
+      problem: String(result.problem ?? ""),
+      previousApp: String(result.previous_app ?? result.previousApp ?? ""),
+    };
+  } catch (e) {
+    return { delivered: false, problem: String(e), previousApp: "" };
+  }
 }
 
 /* ── closing the loop ────────────────────────────────────────── */

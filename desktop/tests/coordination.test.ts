@@ -297,3 +297,40 @@ test("only harnesses Spaces has verified are offered", async () => {
     assert.ok(kinds.includes(kind), `integration points at unknown harness "${kind}"`);
   }
 });
+
+test("an agent Spaces cannot launch is still actually sent to", async () => {
+  const [external, agents, rust] = await Promise.all([
+    readFile(new URL("../src/external.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
+  ]);
+
+  // Muse has no CLI, no scripting dictionary, no local port and no usable URL
+  // route, and its composer is not in the accessibility tree. Driving the
+  // window is the only interface it has — and a brief nobody opens is not a
+  // teammate, so the hand-off has to deliver, not just write a file.
+  assert.match(external, /export async function deliverToApp/);
+  assert.match(agents, /await deliverToApp\(/);
+  assert.match(rust, /async fn send_to_app/);
+
+  // The composer gets the ask, not the whole brief: tens of kilobytes pasted
+  // into a chat box is not what anyone hands a colleague.
+  assert.match(external, /export function composerMessage/);
+  assert.match(external, /Full context: \$\{opts\.briefPath\}/);
+
+  // The file is written either way — it is the durable record and the fallback
+  // when delivery fails, so a failed send must not fail the hand-off.
+  const handoff = agents.slice(agents.indexOf("async function runHandOff"));
+  assert.match(handoff, /result\.error\n\s*\? \{ delivered: false/);
+  assert.match(handoff, /delivery\.problem/);
+
+  // Focus is stolen because macOS only delivers input to the frontmost app,
+  // but it has to be given back.
+  assert.match(rust, /previous_app/);
+  assert.match(rust, /set frontmost of process/);
+
+  // A denied Accessibility permission does not error, it hangs — so every
+  // call is capped and the timeout says what to do about it.
+  assert.match(rust, /Duration::from_secs\(20\)/);
+  assert.match(rust, /Privacy & Security/);
+});
