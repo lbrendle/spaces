@@ -116,7 +116,12 @@ export function ImportSessions() {
   }
 
   return (
-    <div className="im">
+    // `main-pane scroll-pane` is the shell's own scroll model, not a bespoke
+    // one. Inventing a `height: 100%; overflow: auto` root looked equivalent
+    // and was not: inside `.sh-main`, which is a flex row with overflow
+    // hidden, that height never resolves, so the list simply ran off the
+    // bottom of the window with no way to reach the rest of it.
+    <div className="main-pane scroll-pane im">
       <header className="im-head">
         <div>
           <h2 className="im-title">Import history</h2>
