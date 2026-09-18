@@ -17,6 +17,7 @@
  */
 import { defaultsFor, harnessFor, serializeArgs, type OptionValues } from "./capabilities";
 import { config } from "./config";
+import { currentDeviceId } from "./deviceIdentity";
 
 export interface Integration {
   /** Stable id, used for React keys and for the "already added" check. */
@@ -116,7 +117,14 @@ export const INTEGRATIONS: readonly Integration[] = [
 export function agentFromIntegration(
   integration: Integration,
   takenNames: readonly string[]
-): { name: string; kind: string; model: string; role: string; cli_args: string } {
+): {
+  name: string;
+  kind: string;
+  model: string;
+  role: string;
+  cli_args: string;
+  host_device_id: string;
+} {
   const values: OptionValues = { ...defaultsFor(integration.kind), ...(integration.values ?? {}) };
   if (integration.model) values.model = integration.model;
 
@@ -126,6 +134,13 @@ export function agentFromIntegration(
     model: integration.model ?? String(values.model ?? ""),
     role: integration.role,
     cli_args: serializeArgs(integration.kind, values),
+    // A CLI agent is deliberately unhosted: any paired Mac that has the binary
+    // can run it. An external one cannot be — its app is installed on a
+    // particular machine, and "is it installed and open" is only answerable
+    // there. Recording the host is what that means, and it also stops a portal
+    // that has never heard of this harness from rewriting the agent on the way
+    // back down: the sync keeps the local kind for agents hosted here.
+    host_device_id: harnessFor(integration.kind).wire === "external" ? currentDeviceId() : "",
   };
 }
 
