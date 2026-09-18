@@ -290,12 +290,20 @@ export async function handOff(req: HandOffRequest): Promise<HandOffResult> {
 /* ── putting it in front of the agent ────────────────────────── */
 
 export interface Delivery {
-  /** True when the message reached the app's composer and was sent. */
+  /**
+   * Spaces clicked and pasted. Not "the app received it" — a window Spaces
+   * cannot introspect is the reason this exists — so the caller must not
+   * report arrival on the strength of this alone.
+   */
   delivered: boolean;
   /** "" when it worked; otherwise one sentence for the channel. */
   problem: string;
   /** The app Spaces put back in front afterwards. */
   previousApp: string;
+  /** Target window in screen points: x, y, width, height. */
+  window?: [number, number, number, number];
+  /** Where Spaces clicked, in screen points. */
+  clicked?: [number, number];
 }
 
 /** Whether Spaces is allowed to drive other applications on this Mac. */
@@ -387,10 +395,14 @@ export async function testDelivery(agent: Agent): Promise<Delivery> {
     });
     const result = (raw ?? {}) as Record<string, unknown>;
     const delivered = result.delivered === true;
+    const nums = (v: unknown, n: number) =>
+      Array.isArray(v) && v.length === n ? (v.map(Number) as number[]) : undefined;
     return {
       delivered,
       problem: delivered ? "" : await explain(String(result.problem ?? "")),
       previousApp: String(result.previous_app ?? result.previousApp ?? ""),
+      window: nums(result.window, 4) as Delivery["window"],
+      clicked: nums(result.clicked, 2) as Delivery["clicked"],
     };
   } catch (e) {
     return { delivered: false, problem: await explain(String(e)), previousApp: "" };
@@ -437,10 +449,14 @@ export async function deliverToApp(
     });
     const result = (raw ?? {}) as Record<string, unknown>;
     const delivered = result.delivered === true;
+    const nums = (v: unknown, n: number) =>
+      Array.isArray(v) && v.length === n ? (v.map(Number) as number[]) : undefined;
     return {
       delivered,
       problem: delivered ? "" : await explain(String(result.problem ?? "")),
       previousApp: String(result.previous_app ?? result.previousApp ?? ""),
+      window: nums(result.window, 4) as Delivery["window"],
+      clicked: nums(result.clicked, 2) as Delivery["clicked"],
     };
   } catch (e) {
     return { delivered: false, problem: await explain(String(e)), previousApp: "" };

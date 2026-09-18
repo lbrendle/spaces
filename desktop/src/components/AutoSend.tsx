@@ -182,8 +182,17 @@ export function AutoSend({ agent }: { agent: Agent }) {
       {result && (
         <p className={`as-result ${result.delivered ? "ok" : "bad"}`}>
           {result.delivered
-            ? `Typed it into ${app}. If it went somewhere other than the message box, adjust the two offsets below and try again.`
+            ? `Clicked and pasted. Spaces cannot see inside ${app}, so look at its message box: if the line is not there, the click missed and the numbers below need changing.`
             : result.problem || "Nothing happened, and macOS gave no reason."}
+        </p>
+      )}
+      {/* The measurements are the whole point of the test. Without them,
+          "it did not work" leaves nothing to act on but guesswork. */}
+      {result?.window && result.clicked && (
+        <p className="as-measure">
+          {app}&apos;s window: {Math.round(result.window[2])}×{Math.round(result.window[3])} at (
+          {Math.round(result.window[0])}, {Math.round(result.window[1])}). Spaces clicked (
+          {Math.round(result.clicked[0])}, {Math.round(result.clicked[1])}).
         </p>
       )}
     </div>

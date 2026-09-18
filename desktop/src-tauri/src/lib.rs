@@ -703,11 +703,19 @@ fn set_clipboard(text: &str) -> String {
 
 #[derive(serde::Serialize)]
 struct AppSendResult {
+    /// Spaces performed the click and the paste. Whether the app *accepted*
+    /// them is not knowable from here — the window is not introspectable, which
+    /// is why this feature exists at all — so this must never be read as "the
+    /// message arrived". The numbers below are what let somebody check.
     delivered: bool,
     /// What went wrong, in a sentence the UI can show as-is.
     problem: String,
     /// The app that was frontmost before, so the UI can say what it interrupted.
     previous_app: String,
+    /// The target window, in screen points: x, y, width, height.
+    window: [f64; 4],
+    /// Where Spaces clicked, in screen points.
+    clicked: [f64; 2],
 }
 
 /// Type a message into another application's composer and optionally send it.
@@ -749,7 +757,13 @@ async fn send_to_app(
         }
 
         let fail = |problem: String| {
-            Ok(AppSendResult { delivered: false, problem, previous_app: String::new() })
+            Ok(AppSendResult {
+                delivered: false,
+                problem,
+                previous_app: String::new(),
+                window: [0.0; 4],
+                clicked: [0.0; 2],
+            })
         };
 
         if !unsafe { AXIsProcessTrusted() } {
@@ -773,6 +787,8 @@ async fn send_to_app(
         };
 
         let was_front = frontmost_pid();
+        let mut frame = [0.0f64; 4];
+        let mut point = [0.0f64; 2];
 
         unsafe {
             let app = AXUIElementCreateApplication(pid);
@@ -782,12 +798,15 @@ async fn send_to_app(
             raise(app);
             std::thread::sleep(Duration::from_millis(350));
 
-            let Some((wx, wy, _ww, wh)) = first_window_frame(app) else {
+            let Some((wx, wy, ww, wh)) = first_window_frame(app) else {
                 return fail(format!("{name} is running but has no window Spaces can address."));
             };
+            frame = [wx, wy, ww, wh];
 
+            let (cx, cy) = (wx + composer_dx, wy + wh - composer_dy);
+            point = [cx, cy];
             let previous_clipboard = set_clipboard(&text);
-            click(wx + composer_dx, wy + wh - composer_dy);
+            click(cx, cy);
             std::thread::sleep(Duration::from_millis(220));
             key(KEY_V, true);
             std::thread::sleep(Duration::from_millis(320));
@@ -814,6 +833,8 @@ async fn send_to_app(
             delivered: true,
             problem: String::new(),
             previous_app: String::new(),
+            window: frame,
+            clicked: point,
         })
     })
     .await
