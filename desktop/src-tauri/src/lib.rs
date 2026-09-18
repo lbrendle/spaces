@@ -493,6 +493,581 @@ async fn run_git_ex(
 /// its executable list, and tests/coordination.test.ts fails if the two drift.
 const HARNESS_BINS: [&str; 5] = ["claude", "codex", "cursor-agent", "gh", "node"];
 
+/* ── Reading what other agents already did ─────────────────────── */
+
+// Claude Code and Codex both keep every session on this Mac as JSONL, keyed by
+// the directory the work happened in. That is a complete record of the context
+// somebody already has — and until now Spaces started every project from
+// nothing while thousands of sessions sat on the same disk.
+//
+// Scanning is separated from reading on purpose. A scan touches ~3,000 files
+// and has to feel instant, so it reads the head of each one and takes the rest
+// from the directory entry. Reading a transcript is only done for sessions
+// somebody is actually importing.
+
+/// How far into a session file a scan will read before giving up on it.
+///
+/// A scan stops the moment it has the two things it needs — the working
+/// directory and a title — which for almost every file is within a handful of
+/// records. The caps are for the rest.
+///
+/// They are not generous by accident. A fixed 64 KB window looked ample and
+/// silently lost the title of 998 Codex sessions out of 1,307: Codex opens
+/// with a `session_meta` record carrying the model's entire base instructions,
+/// which on its own can run past 64 KB, so the first thing the user actually
+/// said lands beyond the window. Reading until the answer appears, rather than
+/// reading a guessed amount and hoping, costs nothing for the common file and
+/// recovers the rest.
+const SCAN_BYTES: usize = 1_000_000;
+const SCAN_LINES: usize = 600;
+
+/// How long to keep looking for a better title once a usable one exists.
+///
+/// Claude Code names a session itself and writes that name as an `ai-title`
+/// record — but only after the conversation has started, so it is always
+/// behind the opening prompt. Stopping at the prompt would mean never seeing
+/// the name the person actually recognises from Claude Code's own list.
+const TITLE_GRACE: usize = 60;
+
+/// The longest a single turn may be once imported.
+///
+/// A pasted file or a long tool result can run to hundreds of kilobytes, which
+/// is real content but not conversation. Truncating keeps a transcript legible
+/// and the database a sensible size; the original file is never modified and
+/// stays the complete record.
+const TURN_LIMIT: usize = 8_000;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSummary {
+    /// Which agent wrote it: "claude" or "codex".
+    source: String,
+    /**
+     * What identifies this session, which is its *file*, not the id inside it.
+     *
+     * Codex reuses `session_id` across every rollout a conversation resumes
+     * into: 1,307 files on this machine carry only 251 distinct ids, one of
+     * them shared by 212 files. Keying on that would have thrown away four
+     * fifths of the Codex history and, worse, made a re-import delete the
+     * siblings of whichever file it happened to read last. The file stem is
+     * unique in both formats — for Claude Code it *is* the session id — so
+     * that is the identity.
+     */
+    id: String,
+    /// The id the session records for itself, which several files may share.
+    /// Kept because it is how the agent's own tooling refers to a
+    /// conversation; never used as a key.
+    session_id: String,
+    /// Absolute path, so importing does not have to search again.
+    path: String,
+    /// The directory the work happened in. This is what makes a session
+    /// belong to a project rather than to a machine.
+    cwd: String,
+    /// The session's own title where it has one, else its opening prompt.
+    title: String,
+    /// Milliseconds since the epoch; 0 when the file carried no timestamp.
+    started_at: i64,
+    /// Last write, from the directory entry — near enough to when it ended,
+    /// and free.
+    ended_at: i64,
+    bytes: u64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionTurn {
+    /// "user" or "assistant".
+    role: String,
+    text: String,
+    at: i64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionTranscript {
+    source: String,
+    /// The file's identity — see `SessionSummary::id`.
+    id: String,
+    session_id: String,
+    cwd: String,
+    title: String,
+    started_at: i64,
+    ended_at: i64,
+    turns: Vec<SessionTurn>,
+}
+
+/// `2026-07-07T22:14:16.211Z` to milliseconds, without pulling in a date crate.
+///
+/// Both formats write RFC 3339 in UTC and nothing else, so this parses exactly
+/// that and returns 0 rather than guessing at anything it does not recognise —
+/// a wrong timestamp would sort a transcript into nonsense.
+fn iso_millis(text: &str) -> i64 {
+    let bytes = text.as_bytes();
+    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' {
+        return 0;
+    }
+    let num = |from: usize, to: usize| -> i64 { text[from..to].parse().unwrap_or(-1) };
+    let (y, mo, d) = (num(0, 4), num(5, 7), num(8, 10));
+    let (h, mi, s) = (num(11, 13), num(14, 16), num(17, 19));
+    if y < 1970 || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return 0;
+    }
+    if h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 60 {
+        return 0;
+    }
+    // Days from the civil calendar, by Howard Hinnant's algorithm: exact for
+    // every proleptic Gregorian date and no leap-year special cases.
+    let y_adj = if mo <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+    let yoe = y_adj - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    let millis = text
+        .get(19..)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .map(|frac| {
+            let digits: String = frac.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let mut value: i64 = digits.get(..3).unwrap_or(&digits).parse().unwrap_or(0);
+            for _ in digits.len()..3 {
+                value *= 10;
+            }
+            value
+        })
+        .unwrap_or(0);
+
+    ((days * 24 + h) * 60 + mi) * 60_000 + s * 1_000 + millis
+}
+
+/// Last-modified, in milliseconds.
+fn modified_millis(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Every `.jsonl` under a root, at any depth.
+///
+/// Codex files them by date — `sessions/2026/07/01/rollout-*.jsonl` — and
+/// Claude Code by encoded working directory, one level down. One recursive
+/// walk handles both and will keep handling both if either changes its mind.
+fn jsonl_files(root: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+    if depth > 6 || out.len() > 20_000 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => jsonl_files(&path, out, depth + 1),
+            Ok(t) if t.is_file() => {
+                if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                    out.push(path);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Flatten a message body to plain text.
+///
+/// Both formats allow a string or a list of blocks, and the blocks that matter
+/// are the ones with text in them. Thinking and tool calls are deliberately
+/// dropped: they are the agent talking to itself, they dwarf the conversation,
+/// and what is wanted here is what was asked and what was answered.
+fn block_text(value: &serde_json::Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.trim().to_string();
+    }
+    let Some(items) = value.as_array() else { return String::new() };
+    let mut parts: Vec<String> = Vec::new();
+    for item in items {
+        let kind = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if matches!(kind, "thinking" | "tool_use" | "tool_result" | "reasoning") {
+            continue;
+        }
+        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+    }
+    parts.join("\n\n")
+}
+
+/// The first line of a message that a person actually wrote.
+///
+/// Codex opens most sessions by injecting blocks of its own into the first
+/// user message — `<recommended_plugins>`, `<user_instructions>`,
+/// `<environment_context>` — so taking "the first line of the first user turn"
+/// titles a session `<recommended_plugins>`, which says nothing about it and
+/// is the same for hundreds of sessions. Skipping a leading tag and the block
+/// it opens finds the sentence underneath.
+///
+/// Anything that is not that shape is returned as-is: a prompt is allowed to
+/// start with a less-than sign, and only a line that is *entirely* a tag is
+/// treated as one.
+fn first_prose_line(text: &str) -> String {
+    let mut inside: Option<String> = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(tag) = &inside {
+            if line == format!("</{tag}>") {
+                inside = None;
+            }
+            continue;
+        }
+        if line.starts_with('<') && line.ends_with('>') && !line.starts_with("</") {
+            let name: String = line[1..line.len() - 1]
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches('/')
+                .to_string();
+            let tagish = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+            if tagish {
+                // A self-closing tag opens no block.
+                if !line.ends_with("/>") {
+                    inside = Some(name);
+                }
+                continue;
+            }
+        }
+        return line.chars().take(160).collect();
+    }
+    String::new()
+}
+
+/// Keep a turn to a readable size, on a character boundary.
+fn clamp(text: String) -> String {
+    if text.chars().count() <= TURN_LIMIT {
+        return text;
+    }
+    let kept: String = text.chars().take(TURN_LIMIT).collect();
+    format!("{kept}\n\n… truncated — the full session is in the original file.")
+}
+
+/// What a scan can learn from the head of one file.
+fn summarise(path: &Path, source: &str) -> Option<SessionSummary> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() == 0 {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut cwd = String::new();
+    let mut title = String::new();
+    let mut id = String::new();
+    let mut started_at = 0i64;
+    let mut used = 0usize;
+    // Whether the title came from the agent naming the session, rather than
+    // from falling back to its opening prompt.
+    let mut named = false;
+
+    for (seen, line) in std::io::BufRead::lines(reader).enumerate() {
+        // Stop as soon as there is nothing left to learn, which for nearly
+        // every file is the first few records — but hold on a little longer
+        // when the title is only a fallback and this format has a real one.
+        let settled = named || source != "claude" || seen >= TITLE_GRACE;
+        if !cwd.is_empty() && !title.is_empty() && settled {
+            break;
+        }
+        let Ok(line) = line else { break };
+        used += line.len();
+        if seen >= SCAN_LINES || used >= SCAN_BYTES {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let kind = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if started_at == 0 {
+            if let Some(stamp) = record.get("timestamp").and_then(|v| v.as_str()) {
+                started_at = iso_millis(stamp);
+            }
+        }
+
+        match source {
+            "claude" => {
+                if cwd.is_empty() {
+                    if let Some(value) = record.get("cwd").and_then(|v| v.as_str()) {
+                        cwd = value.to_string();
+                    }
+                }
+                if id.is_empty() {
+                    if let Some(value) = record.get("sessionId").and_then(|v| v.as_str()) {
+                        id = value.to_string();
+                    }
+                }
+                // The agent's own title beats the opening prompt, and beats one
+                // already taken from it.
+                if kind == "ai-title" {
+                    if let Some(value) = record.get("aiTitle").and_then(|v| v.as_str()) {
+                        if !value.trim().is_empty() {
+                            title = value.trim().to_string();
+                            named = true;
+                        }
+                    }
+                } else if kind == "user" && title.is_empty() {
+                    let body = record.get("message").and_then(|m| m.get("content"));
+                    if let Some(body) = body {
+                        let line = first_prose_line(&block_text(body));
+                        if !line.is_empty() {
+                            title = line;
+                        }
+                    }
+                }
+            }
+            _ => {
+                if kind == "session_meta" {
+                    let payload = record.get("payload");
+                    if let Some(payload) = payload {
+                        if let Some(value) = payload.get("cwd").and_then(|v| v.as_str()) {
+                            cwd = value.to_string();
+                        }
+                        if let Some(value) = payload.get("session_id").and_then(|v| v.as_str()) {
+                            id = value.to_string();
+                        }
+                        if started_at == 0 {
+                            if let Some(stamp) = payload.get("timestamp").and_then(|v| v.as_str()) {
+                                started_at = iso_millis(stamp);
+                            }
+                        }
+                    }
+                } else if kind == "response_item" && title.is_empty() {
+                    let payload = record.get("payload");
+                    let is_user = payload
+                        .and_then(|p| p.get("role"))
+                        .and_then(|v| v.as_str())
+                        == Some("user");
+                    if is_user {
+                        if let Some(content) = payload.and_then(|p| p.get("content")) {
+                            let line = first_prose_line(&block_text(content));
+                            if !line.is_empty() {
+                                title = line;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let file_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_string();
+    if file_id.is_empty() {
+        return None;
+    }
+    // A session with no working directory cannot be placed in a project, and a
+    // project is the whole point — so it is not offered rather than offered
+    // wrongly.
+    if cwd.trim().is_empty() {
+        return None;
+    }
+
+    let title = title.chars().take(160).collect::<String>();
+    Some(SessionSummary {
+        source: source.to_string(),
+        id: file_id,
+        session_id: id,
+        path: path.to_string_lossy().to_string(),
+        cwd,
+        title,
+        started_at,
+        ended_at: modified_millis(&meta),
+        bytes: meta.len(),
+    })
+}
+
+/// Every Claude Code and Codex session on this Mac, with the directory each
+/// one belongs to.
+///
+/// Returns what it can read and says nothing about what it cannot: an
+/// unreadable or half-written file is skipped, because a scan that fails
+/// because one session of three thousand is malformed is useless.
+#[tauri::command]
+async fn scan_agent_sessions() -> Result<Vec<SessionSummary>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let home = std::env::var("HOME").map_err(|_| "no home directory".to_string())?;
+        let mut found: Vec<SessionSummary> = Vec::new();
+
+        for (source, root) in [
+            ("claude", PathBuf::from(&home).join(".claude").join("projects")),
+            ("codex", PathBuf::from(&home).join(".codex").join("sessions")),
+        ] {
+            if !root.is_dir() {
+                continue;
+            }
+            let mut files = Vec::new();
+            jsonl_files(&root, &mut files, 0);
+            for path in files {
+                if let Some(summary) = summarise(&path, source) {
+                    found.push(summary);
+                }
+            }
+        }
+
+        // Newest first: the sessions somebody wants are the recent ones, and
+        // this is the order every caller would otherwise impose itself.
+        found.sort_by(|a, b| b.ended_at.cmp(&a.ended_at));
+        Ok(found)
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// One session in full, as an alternating conversation.
+#[tauri::command]
+async fn read_agent_session(path: String, source: String) -> Result<SessionTranscript, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::BufRead;
+        let file = std::fs::File::open(&path).map_err(|e| format!("could not open {path}: {e}"))?;
+        let meta = std::fs::metadata(&path).ok();
+        let reader = std::io::BufReader::new(file);
+
+        let mut turns: Vec<SessionTurn> = Vec::new();
+        let mut cwd = String::new();
+        let mut title = String::new();
+        let mut id = String::new();
+        let mut started_at = 0i64;
+        let mut last_at = 0i64;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            let kind = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let at = record
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .map(iso_millis)
+                .unwrap_or(0);
+            if at > 0 {
+                if started_at == 0 {
+                    started_at = at;
+                }
+                last_at = at;
+            }
+
+            if source == "claude" {
+                if cwd.is_empty() {
+                    if let Some(value) = record.get("cwd").and_then(|v| v.as_str()) {
+                        cwd = value.to_string();
+                    }
+                }
+                if id.is_empty() {
+                    if let Some(value) = record.get("sessionId").and_then(|v| v.as_str()) {
+                        id = value.to_string();
+                    }
+                }
+                if kind == "ai-title" {
+                    if let Some(value) = record.get("aiTitle").and_then(|v| v.as_str()) {
+                        if !value.trim().is_empty() {
+                            title = value.trim().to_string();
+                        }
+                    }
+                    continue;
+                }
+                if kind != "user" && kind != "assistant" {
+                    continue;
+                }
+                let Some(body) = record.get("message").and_then(|m| m.get("content")) else { continue };
+                let text = block_text(body);
+                if text.is_empty() {
+                    continue;
+                }
+                if title.is_empty() && kind == "user" {
+                    title = first_prose_line(&text);
+                }
+                turns.push(SessionTurn { role: kind.to_string(), text: clamp(text), at });
+            } else {
+                if kind == "session_meta" {
+                    if let Some(payload) = record.get("payload") {
+                        if let Some(value) = payload.get("cwd").and_then(|v| v.as_str()) {
+                            cwd = value.to_string();
+                        }
+                        if let Some(value) = payload.get("session_id").and_then(|v| v.as_str()) {
+                            id = value.to_string();
+                        }
+                        if started_at == 0 {
+                            if let Some(stamp) = payload.get("timestamp").and_then(|v| v.as_str()) {
+                                started_at = iso_millis(stamp);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if kind != "response_item" {
+                    continue;
+                }
+                let Some(payload) = record.get("payload") else { continue };
+                if payload.get("type").and_then(|v| v.as_str()) != Some("message") {
+                    continue;
+                }
+                let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                if role != "user" && role != "assistant" {
+                    continue;
+                }
+                let Some(content) = payload.get("content") else { continue };
+                let text = block_text(content);
+                if text.is_empty() {
+                    continue;
+                }
+                if title.is_empty() && role == "user" {
+                    title = first_prose_line(&text);
+                }
+                turns.push(SessionTurn { role: role.to_string(), text: clamp(text), at });
+            }
+        }
+
+        let file_id = Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let ended_at = if last_at > 0 {
+            last_at
+        } else {
+            meta.as_ref().map(modified_millis).unwrap_or(0)
+        };
+
+        Ok(SessionTranscript {
+            source,
+            id: file_id,
+            session_id: id,
+            cwd,
+            title: title.chars().take(160).collect(),
+            started_at,
+            ended_at,
+            turns,
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 /* ── Accessibility permission ──────────────────────────────────── */
 
 // Driving another application needs the Accessibility grant, and there is a
@@ -2723,6 +3298,95 @@ fn browser_url(app: AppHandle, label: String) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    /*
+     * Timestamps decide the order a transcript reads in, and a date parser
+     * that is wrong is wrong silently — the session still imports, it just
+     * comes out shuffled or stamped in 1970. Known-good values from real
+     * session files, plus the cases a hand-rolled civil-calendar conversion
+     * gets wrong: a leap day, a century that is not a leap year, one that is,
+     * and the epoch itself.
+     */
+    #[test]
+    fn iso_timestamps_convert_to_milliseconds() {
+        assert_eq!(iso_millis("1970-01-01T00:00:00.000Z"), 0);
+        assert_eq!(iso_millis("2026-07-07T22:14:16.211Z"), 1_783_462_456_211);
+        assert_eq!(iso_millis("2026-07-01T12:41:44.488Z"), 1_782_909_704_488);
+        // Leap day, and a leap year divisible by 100 but also by 400.
+        assert_eq!(iso_millis("2024-02-29T00:00:00.000Z"), 1_709_164_800_000);
+        assert_eq!(iso_millis("2000-02-29T00:00:00.000Z"), 951_782_400_000);
+        // 2100 is divisible by 100 and not by 400, so it is not a leap year —
+        // the case a naive every-fourth-year rule gets wrong by a day.
+        assert_eq!(iso_millis("2100-03-01T00:00:00.000Z"), 4_107_542_400_000);
+        // Fractions are optional, and shorter than three digits scales up.
+        assert_eq!(iso_millis("2026-07-07T22:14:16Z"), 1_783_462_456_000);
+        assert_eq!(iso_millis("2026-07-07T22:14:16.2Z"), 1_783_462_456_200);
+        // Anything not recognised is refused rather than guessed at. A
+        // timestamp before the epoch is in that class on purpose: no session
+        // file predates Unix, so one that claims to is corrupt, and a
+        // plausible-looking negative would sort a transcript into nonsense.
+        assert_eq!(iso_millis(""), 0);
+        assert_eq!(iso_millis("07/07/2026"), 0);
+        assert_eq!(iso_millis("2026-13-07T22:14:16.211Z"), 0);
+        assert_eq!(iso_millis("1969-12-31T23:59:59.999Z"), 0);
+    }
+
+    /*
+     * A session's title is the first thing a person wrote, not the first thing
+     * its harness injected. Codex prefixes most opening messages with blocks of
+     * its own; titling by "first line" labelled hundreds of sessions
+     * `<recommended_plugins>`, which distinguishes none of them.
+     */
+    #[test]
+    fn a_title_skips_the_harness_and_finds_the_prompt() {
+        assert_eq!(
+            first_prose_line("<recommended_plugins>\nuse ripgrep\n</recommended_plugins>\n\nfix the build"),
+            "fix the build"
+        );
+        // Several blocks in a row, and one with attributes.
+        assert_eq!(
+            first_prose_line(
+                "<user_instructions>\nbe terse\n</user_instructions>\n<environment_context cwd=\"/x\">\nmac\n</environment_context>\nship it"
+            ),
+            "ship it"
+        );
+        // A self-closing tag opens no block, so the next line still counts.
+        assert_eq!(first_prose_line("<meta/>\nthe actual ask"), "the actual ask");
+        // Ordinary prose is untouched, including prose that merely contains a
+        // less-than sign.
+        assert_eq!(first_prose_line("  make it faster  \nand smaller"), "make it faster");
+        assert_eq!(first_prose_line("if a < b then swap"), "if a < b then swap");
+        // Nothing but scaffolding, and nothing at all, are both "no title".
+        assert_eq!(first_prose_line("<x>\ny\n</x>"), "");
+        assert_eq!(first_prose_line(""), "");
+    }
+
+    /*
+     * Thinking and tool traffic dwarf the conversation in both formats and are
+     * the agent talking to itself. What is wanted is what was asked and what
+     * was answered — importing the rest would bury it.
+     */
+    #[test]
+    fn message_bodies_keep_the_conversation_and_drop_the_machinery() {
+        let plain = serde_json::json!("just a string");
+        assert_eq!(block_text(&plain), "just a string");
+
+        let blocks = serde_json::json!([
+            {"type": "thinking", "thinking": "hmm", "signature": "x"},
+            {"type": "text", "text": "  the answer  "},
+            {"type": "tool_use", "name": "Bash", "input": {}},
+            {"type": "text", "text": "and a second paragraph"},
+        ]);
+        assert_eq!(block_text(&blocks), "the answer\n\nand a second paragraph");
+
+        // Codex writes the same idea with its own block names.
+        let codex = serde_json::json!([{"type": "input_text", "text": "do the thing"}]);
+        assert_eq!(block_text(&codex), "do the thing");
+
+        // Nothing sayable is an empty string, not a panic and not whitespace.
+        assert_eq!(block_text(&serde_json::json!([{"type": "thinking"}])), "");
+        assert_eq!(block_text(&serde_json::json!({})), "");
+    }
+
     fn open(cols: u16, rows: u16) -> portable_pty::PtyPair {
         native_pty_system()
             .openpty(PtySize {
@@ -2920,6 +3584,8 @@ pub fn run() {
             accessibility_trusted,
             request_accessibility,
             send_to_app,
+            scan_agent_sessions,
+            read_agent_session,
             check_app,
             start_agent_run,
             cancel_agent_run,

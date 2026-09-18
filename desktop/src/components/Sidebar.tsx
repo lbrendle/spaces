@@ -15,6 +15,7 @@ import {
   IconGraph,
   IconKnowledge,
   IconPerson,
+  IconDownload,
   IconWorkspace,
 } from "./icons";
 import { Modal, Field, Spinner } from "./ui";
@@ -29,7 +30,7 @@ import { GitHubRepoPicker } from "./GitHubRepoPicker";
 type NavType =
   | "dashboard" | "tasks" | "documents" | "mail" | "calendar" | "content"
   | "memory" | "agents" | "workspaces" | "settings" | "git" | "graph"
-  | "knowledge" | "people";
+  | "knowledge" | "people" | "import";
 
 /**
  * The rail's information architecture.
@@ -69,6 +70,7 @@ const NAV_GROUPS: { id: string; label: string; items: [string, ReactNode, NavTyp
     items: [
       ["Workspaces", <IconWorkspace />, "workspaces"],
       ["Git activity", <IconGitHub />, "git"],
+      ["Import history", <IconDownload />, "import"],
     ],
   },
   {

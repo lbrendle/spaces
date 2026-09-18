@@ -449,6 +449,7 @@ export type View =
   | { type: "memory" }
   | { type: "agents" }
   | { type: "workspaces" }
+  | { type: "import" }
   | { type: "settings" }
   | { type: "git" }
   | { type: "graph" }

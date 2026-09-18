@@ -1,0 +1,190 @@
+/* ── Import history ──────────────────────────────────────────── */
+/*
+ * A hundred and fifty rows of near-identical shape, so the whole job of this
+ * stylesheet is making one row scannable: a name that reads first, a path that
+ * recedes, counts that align down the column, and state that only colours when
+ * it is saying something. Every tint is a token.
+ */
+
+.im {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6) calc(var(--space-6) * 2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  height: 100%;
+}
+
+.im-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.im-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+}
+.im-sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  max-width: var(--measure);
+}
+
+.im-totals {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+.im-empty {
+  margin: var(--space-6) 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.im-empty code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  background: var(--surface-2);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.im-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text-faint);
+}
+.im-search input {
+  flex: 1;
+  border: 0;
+  background: none;
+  padding: var(--space-2) 0;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  outline: none;
+}
+
+.im-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.im-row {
+  display: grid;
+  /* name · counts · state · actions — the counts and state columns are fixed
+     so they line up down the list and can be compared without reading. */
+  grid-template-columns: minmax(0, 1fr) 190px 150px auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  transition: background var(--dur-fast) var(--ease);
+}
+.im-row:last-child { border-bottom: 0; }
+.im-row:hover { background: var(--surface-1); }
+.im-row.im-busy { background: var(--surface-1); }
+
+.im-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.im-name {
+  font-size: var(--fs);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.im-path {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  /* Abbreviation is done in JS — see shortPath. The `direction: rtl` trick
+     that usually does this reorders a leading "/" to the other end, which
+     turns an absolute path into a plausible-looking wrong one. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.im-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.im-count { color: var(--text-dim); }
+
+.im-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: var(--fs-xs);
+}
+.im-watching,
+.im-linked {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.im-watching { color: var(--green); }
+.im-watching:hover { text-decoration: line-through; }
+.im-linked { color: var(--text-dim); }
+.im-linked:hover { text-decoration: underline; }
+.im-new { color: var(--text-faint); }
+.im-partial { color: var(--yellow); }
+
+.im-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+.im-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.im-more { align-self: flex-start; }
+
+/* Narrow: the fixed columns stop fitting long before the window is small, so
+   the row stacks rather than crushing the path to nothing. */
+@media (max-width: 900px) {
+  .im-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-2);
+  }
+  .im-facts { grid-column: 1; }
+  .im-state { grid-column: 2; align-items: flex-end; }
+  .im-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}

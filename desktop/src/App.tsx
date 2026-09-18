@@ -16,6 +16,9 @@ import { TasksView } from "./components/TasksView";
 import { MemoryView } from "./components/MemoryView";
 import { AgentsView } from "./components/AgentsView";
 import { WorkspacesView } from "./components/WorkspacesView";
+import { ImportSessions } from "./components/ImportSessions";
+import { initSessionWatch } from "./sessions";
+import { toast } from "./toast";
 import { GitActivity } from "./components/GitActivity";
 import { SettingsView } from "./components/SettingsView";
 import { Palette } from "./components/Palette";
@@ -111,6 +114,25 @@ export default function App() {
     };
   }, [portal?.device_id]);
 
+  /*
+   * Picking up sessions written elsewhere.
+   *
+   * Not folded into the effect above, which is gated on being paired with a
+   * portal: reading Claude Code and Codex history is entirely local, and a
+   * machine that has never paired should still catch up on its own work.
+   */
+  useEffect(
+    () =>
+      initSessionWatch((results) => {
+        const sessions = results.reduce((n, r) => n + r.sessions, 0);
+        toast.success(
+          `${sessions} new session${sessions === 1 ? "" : "s"} imported`,
+          results.map((r) => r.projectName).join(", ")
+        );
+      }),
+    []
+  );
+
   const activeWorkspaceId = view.type === "workspace" ? view.projectId : "";
   useEffect(() => {
     if (!activeWorkspaceId) return;
@@ -171,6 +193,7 @@ export default function App() {
       {view.type === "memory" && <MemoryView />}
       {view.type === "agents" && <AgentsView />}
       {view.type === "workspaces" && <WorkspacesView />}
+      {view.type === "import" && <ImportSessions />}
       {view.type === "git" && <GitActivity />}
       {view.type === "graph" && <GraphView />}
       {view.type === "knowledge" && <KnowledgeView />}
