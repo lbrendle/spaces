@@ -493,6 +493,49 @@ async fn run_git_ex(
 /// its executable list, and tests/coordination.test.ts fails if the two drift.
 const HARNESS_BINS: [&str; 5] = ["claude", "codex", "cursor-agent", "gh", "node"];
 
+/* ── Accessibility permission ──────────────────────────────────── */
+
+// Driving another application needs the Accessibility grant, and there is a
+// real API for both asking and checking. The alternative — inferring it from
+// whether `System Events` answers within a timeout — cannot tell a denied
+// permission from a busy machine, and takes seconds to be wrong.
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef) -> bool;
+    static kAXTrustedCheckOptionPrompt: core_foundation::string::CFStringRef;
+}
+
+/// Whether Spaces may drive other applications. Instant, and never prompts.
+#[tauri::command]
+fn accessibility_trusted() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
+
+/// Ask for the Accessibility grant, with macOS's own dialog.
+///
+/// Worth preferring over sending somebody to System Settings by hand: the
+/// system prompt deep-links to the right pane *and* registers the app in the
+/// list, so the whole task becomes one toggle instead of finding a hidden
+/// window, clicking +, and typing a path into a file picker.
+///
+/// Returns the trust state as it is *now*. It is almost always false on the
+/// first call — the dialog is not modal and the grant lands later — so callers
+/// poll `accessibility_trusted` rather than believing this answer.
+#[tauri::command]
+fn request_accessibility() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    unsafe {
+        let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
+        let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
+        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef())
+    }
+}
+
 /* ── Driving an app Spaces cannot launch ───────────────────────── */
 
 /// Run one AppleScript with a hard wall-clock cap.
@@ -546,25 +589,6 @@ fn osascript(script: &str, limit: Duration) -> Result<String, String> {
 /// AppleScript string literal: only the backslash and the quote need escaping.
 fn as_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-/// Whether Spaces may drive other applications.
-///
-/// There is no way to ask politely: a denied process gets no error from
-/// `System Events`, it just blocks forever. So this asks the cheapest possible
-/// question and treats "did not answer in two seconds" as "not permitted",
-/// which is what the user needs to be told either way.
-#[tauri::command]
-async fn app_automation_ready() -> bool {
-    tauri::async_runtime::spawn_blocking(|| {
-        osascript(
-            "tell application \"System Events\" to return name of first process whose frontmost is true",
-            Duration::from_millis(2_000),
-        )
-        .is_ok()
-    })
-    .await
-    .unwrap_or(false)
 }
 
 #[derive(serde::Serialize)]
@@ -2409,7 +2433,8 @@ pub fn run() {
             apple_calendar_snapshot,
             apple_calendar_create,
             probe_program,
-            app_automation_ready,
+            accessibility_trusted,
+            request_accessibility,
             send_to_app,
             check_app,
             start_agent_run,

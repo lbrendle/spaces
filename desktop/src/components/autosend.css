@@ -1,0 +1,61 @@
+/* ── Auto-send readiness ─────────────────────────────────────── */
+/*
+ * Sits inside the agent editor, above the two offset fields it explains.
+ * Colour is only ever about the permission, because that is the one state
+ * that decides whether anything at all can happen.
+ */
+
+.as {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  margin-bottom: var(--space-3);
+}
+
+.as-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.as-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--text-faint);
+}
+.as-on { background: var(--green); border-color: var(--green); }
+.as-off { background: var(--yellow); border-color: var(--yellow); }
+/* checking stays hollow */
+
+.as-state {
+  flex: 1;
+  min-width: 12ch;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.as-why,
+.as-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  max-width: var(--measure);
+}
+
+.as-result {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  max-width: var(--measure);
+}
+.as-result.ok { color: var(--green); }
+.as-result.bad { color: var(--yellow); }

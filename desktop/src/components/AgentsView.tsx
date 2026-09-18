@@ -37,6 +37,7 @@ import { SaveState, useCloseGuard } from "./SaveState";
 import { EntityAvatarStack, EntityChip } from "./EntityChip";
 import { HarnessMark } from "./Face";
 import { Integrations } from "./Integrations";
+import { AutoSend } from "./AutoSend";
 import { RadioChips } from "./LinkPicker";
 import { IconPlus, IconX, IconInfo, IconGear, IconBolt, IconSearch, IconCheck } from "./icons";
 import {
@@ -2540,6 +2541,9 @@ function AgentEditor({
         )}
         <HarnessDoctor kind={kind} agent={probeAgent} />
         <HarnessCaps kind={kind} />
+        {/* Only this kind can be driven, and only it has a permission and a
+            click point that fail silently when they are wrong. */}
+        {meta.wire === "external" && values.autosend === true && <AutoSend agent={probeAgent} />}
       </section>
 
       {groups.map((g) => (

@@ -4254,6 +4254,7 @@ dependencies = [
 name = "spaces"
 version = "0.1.21"
 dependencies = [
+ "core-foundation",
  "libc",
  "portable-pty",
  "reqwest",

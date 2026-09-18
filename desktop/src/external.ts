@@ -300,7 +300,19 @@ export interface Delivery {
 
 /** Whether Spaces is allowed to drive other applications on this Mac. */
 export async function automationReady(): Promise<boolean> {
-  return invoke<boolean>("app_automation_ready").catch(() => false);
+  return invoke<boolean>("accessibility_trusted").catch(() => false);
+}
+
+/**
+ * Ask for the Accessibility grant with macOS's own dialog.
+ *
+ * Better than pointing somebody at System Settings: the system prompt opens
+ * the right pane and puts Spaces in the list already, so what is left is one
+ * toggle. The grant does not land while this call is running — the dialog is
+ * not modal — so the caller polls `automationReady` afterwards.
+ */
+export async function requestAutomation(): Promise<boolean> {
+  return invoke<boolean>("request_accessibility").catch(() => false);
 }
 
 /**
@@ -330,6 +342,52 @@ export function composerMessage(opts: {
   ]
     .filter((line) => line !== "")
     .join("\n");
+}
+
+/**
+ * Type a harmless line into the app, so somebody can find out whether this
+ * works before they rely on it in a channel.
+ *
+ * Deliberately does not press send: verifying that Spaces can reach the
+ * composer is the whole question, and posting a test message into somebody's
+ * real conversation to answer it is rude. The text is left in the box for them
+ * to see and clear.
+ */
+export async function testDelivery(agent: Agent): Promise<Delivery> {
+  const config = externalConfig(agent);
+  if (!config.app && !config.bundleId) {
+    return {
+      delivered: false,
+      problem: "Name the app first — Spaces does not know what to type into.",
+      previousApp: "",
+    };
+  }
+  if (!(await automationReady())) {
+    return {
+      delivered: false,
+      problem:
+        "Spaces does not have Accessibility permission yet, so macOS will not let it type into another app.",
+      previousApp: "",
+    };
+  }
+  try {
+    const raw = await invoke("send_to_app", {
+      bundleId: config.bundleId,
+      appName: config.app,
+      text: "Spaces can type here. (Test message — nothing was sent.)",
+      composerDx: config.composerDx,
+      composerDy: config.composerDy,
+      submit: false,
+    });
+    const result = (raw ?? {}) as Record<string, unknown>;
+    return {
+      delivered: result.delivered === true,
+      problem: String(result.problem ?? ""),
+      previousApp: String(result.previous_app ?? result.previousApp ?? ""),
+    };
+  } catch (e) {
+    return { delivered: false, problem: String(e), previousApp: "" };
+  }
 }
 
 /**
