@@ -501,15 +501,18 @@ const HARNESS_BINS: [&str; 5] = ["claude", "codex", "cursor-agent", "gh", "node"
 // permission from a busy machine, and takes seconds to be wrong.
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-    fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef) -> bool;
+    // CoreFoundation's `Boolean` is an unsigned char, not C's `_Bool`. Reading
+    // it as a Rust `bool` is undefined behaviour for any value other than 0 or
+    // 1, and silently wrong rather than loudly wrong.
+    fn AXIsProcessTrusted() -> u8;
+    fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef) -> u8;
     static kAXTrustedCheckOptionPrompt: core_foundation::string::CFStringRef;
 }
 
 /// Whether Spaces may drive other applications. Instant, and never prompts.
 #[tauri::command]
 fn accessibility_trusted() -> bool {
-    unsafe { AXIsProcessTrusted() }
+    unsafe { AXIsProcessTrusted() != 0 }
 }
 
 /// Ask for the Accessibility grant, with macOS's own dialog.
@@ -532,7 +535,7 @@ fn request_accessibility() -> bool {
     unsafe {
         let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
         let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
-        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef())
+        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0
     }
 }
 
@@ -766,13 +769,6 @@ async fn send_to_app(
             })
         };
 
-        if !unsafe { AXIsProcessTrusted() } {
-            return fail(format!(
-                "macOS has not granted Spaces Accessibility permission, so it cannot type into \
-                 {name}. Turn Spaces on in System Settings → Privacy & Security → Accessibility."
-            ));
-        }
-
         // pgrep, not AX: finding the process is not an accessibility operation,
         // and the executable inside an .app bundle is named after the bundle.
         let pid: i32 = match Command::new("/usr/bin/pgrep").arg("-x").arg(&name).output() {
@@ -829,9 +825,20 @@ async fn send_to_app(
             }
         }
 
+        // Never a gate — only a note. Whether the events were delivered is
+        // something only the target app can show; this says whether macOS was
+        // likely to have dropped them on the way.
+        let trusted = unsafe { AXIsProcessTrusted() != 0 };
         Ok(AppSendResult {
             delivered: true,
-            problem: String::new(),
+            problem: if trusted {
+                String::new()
+            } else {
+                format!(
+                    "macOS also reports no Accessibility permission for Spaces, so it may have \
+                     dropped the click and the paste. If nothing appeared in {name}, that is why."
+                )
+            },
             previous_app: String::new(),
             window: frame,
             clicked: point,
