@@ -116,25 +116,31 @@ export function ImportSessions() {
   }
 
   return (
-    // `main-pane scroll-pane` is the shell's own scroll model, not a bespoke
-    // one. Inventing a `height: 100%; overflow: auto` root looked equivalent
-    // and was not: inside `.sh-main`, which is a flex row with overflow
-    // hidden, that height never resolves, so the list simply ran off the
-    // bottom of the window with no way to reach the rest of it.
+    /*
+     * The app's pane model is three parts, not one.
+     *
+     * `main-pane scroll-pane` deliberately does *not* scroll — it is
+     * `overflow: hidden` — because the header is a fixed sibling and the body
+     * owns the scroller, so headings inside the body can stick at top:0
+     * without competing with the header for the offset. Putting the whole
+     * surface in the wrapper, as this did, means nothing scrolls at all and
+     * the list runs off the bottom of the window.
+     */
     <div className="main-pane scroll-pane im">
-      <header className="im-head">
+      <div className="pane-header">
         <div>
-          <h2 className="im-title">Import history</h2>
-          <p className="im-sub">
+          <div className="pane-title">Import history</div>
+          <div className="pane-sub">
             Every Claude Code and Codex session on this Mac, grouped by the folder it ran in.
             Importing reads those files and never changes them.
-          </p>
+          </div>
         </div>
         <button className="btn" onClick={() => void scan()} disabled={groups === null}>
           {groups === null ? <Spinner /> : <IconRefresh size={13} />} Re-scan
         </button>
-      </header>
+      </div>
 
+      <div className="db-body im-body">
       {groups === null ? (
         <p className="im-empty">
           <Spinner /> Reading session files…
@@ -188,6 +194,7 @@ export function ImportSessions() {
           {filtered.length === 0 && <p className="im-empty">Nothing matches “{query}”.</p>}
         </>
       )}
+      </div>
     </div>
   );
 }

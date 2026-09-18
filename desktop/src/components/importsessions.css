@@ -6,45 +6,23 @@
  * it is saying something. Every tint is a token.
  */
 
-/* Scrolling and flex come from `main-pane scroll-pane`; this only adds the
-   rhythm between the sections. */
-.im {
+/*
+ * The body owns the scroller — `.db-body` under `.main-pane.scroll-pane` is
+ * what the rest of the app scrolls with. This adds only the rhythm inside it.
+ *
+ * Nothing in that column may shrink: a flex item's default is to compress
+ * rather than overflow, which made the list give up height instead of
+ * scrolling — the last row sliced through by the container's own border, the
+ * "show more" button stranded under it, and no scrollbar anywhere.
+ */
+.im-body {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-5) var(--pane-x) calc(var(--space-6) * 2);
 }
-
-/*
- * Nothing in this column may shrink.
- *
- * `main-pane` is a flex column, and a flex item's default is to compress
- * rather than overflow its parent — so the list quietly gave up height
- * instead of making the pane scroll. What that looked like was the last row
- * sliced through the middle by the container's own border, with the "show
- * more" button stranded below it and no scrollbar anywhere. Keeping their
- * natural height is what hands the overflow to `scroll-pane`.
- */
-.im > * {
+.im-body > * {
   flex: 0 0 auto;
-}
-
-.im-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-.im-title {
-  margin: 0;
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  letter-spacing: var(--ls-title);
-}
-.im-sub {
-  margin: var(--space-1) 0 0;
-  color: var(--text-faint);
-  font-size: var(--fs-sm);
-  line-height: 1.55;
-  max-width: var(--measure);
 }
 
 .im-totals {
