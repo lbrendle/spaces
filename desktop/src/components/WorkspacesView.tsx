@@ -19,6 +19,7 @@ import {
 } from "../workspaces";
 import type { WorkspaceStatus } from "../workspaces";
 import { Avatar, Modal, Spinner } from "./ui";
+import { SharedWorkspace } from "./SharedWorkspace";
 import { IconMoreHorizontal } from "./icons";
 import "./workspaces.css";
 
@@ -75,7 +76,8 @@ export function WorkspacesView() {
         <div>
           <div className="pane-title">Workspaces</div>
           <div className="pane-sub">
-            Mission control for the code your agents produce — main checkouts and per-agent git worktrees.
+            Mission control for the code your agents produce — who is holding which files, what
+            lands next, and every checkout behind it.
           </div>
         </div>
         <button className="btn" onClick={() => setTick((t) => t + 1)}>⟳ Refresh</button>
@@ -210,6 +212,13 @@ function ProjectSection({
       )}
 
       {loadError && <div className="banner warn ws-error">{loadError}</div>}
+
+      {/* Across every checkout first — who is holding which files, and in what
+          order today's branches land. The per-worktree cards below answer the
+          narrower question of what is in one directory. */}
+      {main?.isRepo && (
+        <SharedWorkspace project={project} agents={agents} tick={tick} openDiff={openDiff} />
+      )}
 
       <div className="ws-grid">
         <MainCheckoutCard project={project} main={main} reload={load} openDiff={openDiff} />

@@ -371,7 +371,14 @@ export async function mergeCheck(
 
 export interface IntegrationStep {
   lane: AgentLane;
-  /** 1-based position in the proposed landing order. */
+  /**
+   * 1-based position in the sequence, for both clean and blocked branches.
+   * A blocked branch keeps the position it was *tested* at — reading it out of
+   * sequence is what makes "conflicts once 2 earlier branches are in" sound
+   * wrong when it is sitting below four of them.
+   */
+  position: number;
+  /** 1-based position among the branches that actually land; 0 when blocked. */
   order: number;
   check: MergeCheck;
   /** Why it is where it is, in one line. */
@@ -432,8 +439,10 @@ export async function integrationPlan(
   // commit standing for "base plus everything already in the plan".
   let against = map.base;
   let landed = 0;
+  let position = 0;
 
   for (const lane of ordered) {
+    position += 1;
     const check = await mergeCheck(project, lane.branch, against).catch(
       (e): MergeCheck => ({
         branch: lane.branch,
@@ -448,6 +457,7 @@ export async function integrationPlan(
     if (!check.clean) {
       plan.blocked.push({
         lane,
+        position,
         order: 0,
         check,
         note: check.error
@@ -462,6 +472,7 @@ export async function integrationPlan(
     landed += 1;
     plan.steps.push({
       lane,
+      position,
       order: landed,
       check,
       note: `${lane.ahead} commit${lane.ahead === 1 ? "" : "s"}, ${lane.committedFiles.length} file${lane.committedFiles.length === 1 ? "" : "s"} — merges cleanly.`,

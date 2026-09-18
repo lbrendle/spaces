@@ -1,0 +1,337 @@
+/* ── Shared workspace ────────────────────────────────────────── */
+/*
+ * The cross-checkout view that sits above the per-worktree cards.
+ *
+ * Colour carries meaning here and nowhere else in this view: red is
+ * "somebody is about to lose work", yellow is "this will conflict later",
+ * green/red on the lane bar are additions and deletions. Everything else is
+ * --text / --text-dim / --text-faint, so the two red things on the screen are
+ * the two things worth looking at.
+ *
+ * Every tint is a *-soft / *-border token, never a literal, so a light theme
+ * reads as light.
+ */
+
+.sw {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.sw-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.sw-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+}
+.sw-sub {
+  margin-left: var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+}
+.sw-sub code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.sw-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  padding: var(--space-4) 0;
+}
+.sw-empty {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  padding: var(--space-3) 0;
+}
+.sw-error { margin-bottom: var(--space-4); }
+
+/* ── holding: the only thing that earns a fill ───────────────── */
+
+.sw-holding {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--yellow-border);
+  background: var(--yellow-soft);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sw-holding.danger {
+  border-color: var(--red-border);
+  background: var(--red-soft);
+}
+
+.sw-holding-head {
+  font-size: var(--fs-sm);
+  color: var(--yellow);
+}
+.sw-holding.danger .sw-holding-head { color: var(--red); }
+.sw-holding-head strong { font-weight: 700; }
+
+.sw-holding-why {
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+  max-width: var(--measure);
+}
+
+.sw-holding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.sw-holding-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.sw-holding-list code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sw-holding-list li.live code { color: var(--text); font-weight: 600; }
+.sw-holding-who {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── lanes ───────────────────────────────────────────────────── */
+
+.sw-lanes {
+  display: flex;
+  flex-direction: column;
+}
+.sw-lane {
+  display: grid;
+  /*
+   * who · bar · facts, then slack.
+   *
+   * The bar is capped rather than stretched. Let it take the full width and a
+   * 6px saturated rule becomes the loudest thing on the screen, which is
+   * backwards — it is the least actionable of the three. Capped, it still
+   * compares lanes to a shared scale and the counts next to it stay legible.
+   */
+  grid-template-columns: minmax(150px, 210px) minmax(60px, 300px) auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  /* Tighter above than below, so a lane's own commit subject groups with it
+     rather than with the lane underneath. */
+  padding: var(--space-2) 0 var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+.sw-lane:last-child { border-bottom: 0; }
+
+.sw-lane-who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.sw-lane-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sw-lane-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sw-lane-name svg { color: var(--text-faint); flex-shrink: 0; }
+.sw-lane-branch {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sw-lane-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+  min-width: 0;
+}
+.sw-lane-fill {
+  height: 100%;
+  background: var(--diff-del-fg);
+  border-radius: 3px;
+  overflow: hidden;
+  transition: width var(--dur) var(--ease);
+}
+.sw-lane-add {
+  height: 100%;
+  background: var(--diff-add-fg);
+}
+
+.sw-lane-facts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.sw-fact {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.sw-fact.stale { color: var(--yellow); }
+.sw-fact.ext {
+  color: var(--text-faint);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
+.sw-fact.quiet { color: var(--text-faint); }
+button.sw-fact.dirty {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  font: inherit;
+}
+button.sw-fact.dirty:hover { text-decoration: underline; }
+
+.sw-lane-subject {
+  grid-column: 2 / -1;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: var(--space-1);
+}
+.sw-lane-subject.warn { color: var(--yellow); white-space: normal; }
+
+/* ── landing order ───────────────────────────────────────────── */
+
+.sw-landing-cta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.sw-landing-note {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+.sw-landing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+}
+.sw-landing-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.sw-landing-head code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+.sw-landing-blocked {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  color: var(--red);
+}
+/* The refresh sits after the count, so it must not be pushed to the far edge. */
+.sw-landing-head .btn { margin-left: var(--space-2); }
+
+.sw-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.sw-step-order {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.sw-step.blocked .sw-step-order {
+  border-color: var(--red-border);
+  color: var(--red);
+}
+.sw-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sw-step-name { font-size: var(--fs-sm); }
+.sw-step-name code { font-family: var(--mono); font-size: var(--fs-xs); }
+.sw-step-note {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  line-height: 1.5;
+  max-width: var(--measure);
+}
+.sw-step.blocked .sw-step-note { color: var(--red); }
+
+.sw-step-conflicts {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+.sw-step-conflicts code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.sw-step-conflicts .quiet { color: var(--text-faint); font-size: var(--fs-xs); }
+
+@media (max-width: 720px) {
+  .sw-lane {
+    grid-template-columns: 1fr auto;
+  }
+  .sw-lane-subject { grid-column: 1 / -1; }
+  .sw-lane-bar { display: none; }
+  .sw-lane-subject { grid-column: 1 / -1; }
+}

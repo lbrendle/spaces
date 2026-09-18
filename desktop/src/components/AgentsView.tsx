@@ -42,6 +42,7 @@ import { IconPlus, IconX, IconInfo, IconGear, IconBolt, IconSearch, IconCheck } 
 import {
   HARNESSES,
   agentChips,
+  capsFor,
   carryOver,
   commandPreview,
   defaultsFor,
@@ -58,6 +59,8 @@ import {
   ritzAuthHeaders,
 } from "../capabilities";
 import type { HarnessKind, HarnessOption, OptionValue, OptionValues, RitzModel } from "../capabilities";
+import { checkHarness, forgetHealth, harnessHelp } from "../doctor";
+import type { HarnessHealth } from "../doctor";
 import "./agents.css";
 
 /* ── can it run from here? ───────────────────────────────────── */
@@ -88,7 +91,15 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
   const [checking, setChecking] = useState(false);
   const [custom, setCustom] = useState<Record<string, boolean>>({});
   const [nonce, setNonce] = useState(0);
-  const customKey = [...new Set(customPrograms.map((p) => p.trim()).filter(Boolean))].sort().join("\n");
+  // Probe every registered CLI harness's binary as well as the user's own
+  // executables — a harness whose availability is never asked about shows as
+  // "unknown" forever, which reads as broken.
+  const registryBins = HARNESSES.filter((h) => h.wire === "cli" && h.probe?.bin).map(
+    (h) => h.probe!.bin as string
+  );
+  const customKey = [...new Set([...registryBins, ...customPrograms].map((p) => p.trim()).filter(Boolean))]
+    .sort()
+    .join("\n");
   const ritzKey = [...new Map(
     httpRuntimes
       .filter((runtime) => runtime.base.trim())
@@ -164,16 +175,23 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
   return useMemo(
     () => ({
       of: (kind: string, program = ""): Availability => {
-        if (kind === "ritz") {
+        const meta = harnessFor(kind);
+        if (meta.wire === "http") {
           const key = (program || RITZ_BASE).trim();
           return ritz[key] ?? "unknown";
         }
-        if (kind === "custom") {
-          const key = program.trim();
-          if (!key) return "unavailable";
-          return custom[key] === undefined ? "unknown" : custom[key] ? "ready" : "unavailable";
-        }
-        const found = tools[kind];
+        // Spaces never launches an external agent, so there is no binary to
+        // find and nothing here can make it unavailable. Whether its app is
+        // installed is a different, softer question the editor asks.
+        if (meta.wire === "external") return "ready";
+
+        // The executable is the agent's own for a Custom CLI, and the harness's
+        // for everything else.
+        const bin = (kind === "custom" ? program : meta.probe?.bin ?? program).trim();
+        if (!bin) return "unavailable";
+        if (custom[bin] !== undefined) return custom[bin] ? "ready" : "unavailable";
+        // check_tools pre-answers the two most common ones on startup.
+        const found = tools[bin];
         return found === undefined ? "unknown" : found ? "ready" : "unavailable";
       },
       recheck,
@@ -183,18 +201,161 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
   );
 }
 
+/**
+ * What this harness can do, as facts rather than prose.
+ *
+ * Every row here is something that changes how the agent behaves in Spaces and
+ * that a person cannot infer from the product name: whether a second message is
+ * a reply or a fresh brief, whether the Spaces tools are reachable, whether the
+ * run inspector will have anything to show. Stated plainly so choosing a
+ * harness is a decision rather than a guess.
+ */
+function HarnessCaps({ kind }: { kind: string }) {
+  const caps = capsFor(kind);
+  const rows: Array<[string, string]> = [
+    [
+      "Conversation",
+      caps.resume
+        ? "Later turns continue the same session."
+        : "Every turn is a fresh brief — it has no memory of the last one beyond what Spaces puts in the prompt.",
+    ],
+    [
+      "Spaces tools",
+      caps.mcp === "none"
+        ? "No MCP. It reaches Spaces through .hq/actions.jsonl instead."
+        : caps.mcp === "args"
+          ? "MCP, configured at launch."
+          : "MCP, from the config Spaces writes in its working directory.",
+    ],
+    [
+      "Live output",
+      caps.toolEvents
+        ? "Tool calls and edits stream into the run inspector."
+        : caps.streaming
+          ? "Output streams, but without structured tool events."
+          : "Nothing streams — Spaces learns what happened from git.",
+    ],
+  ];
+  return (
+    <dl className="ag-caps">
+      {rows.map(([label, value]) => (
+        <div className="ag-caps-row" key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/* ── the doctor ──────────────────────────────────────────────── */
+
+/**
+ * What this harness's state actually is on this Mac, in one line plus a fix.
+ *
+ * The availability line above answers "is the binary there". That is the first
+ * of four ways a harness fails before it runs: it can also be there and signed
+ * out, be a GUI app that was never installed, or hang on its own --version.
+ * Telling someone an agent is ready and having it fail on the first turn is the
+ * failure this panel exists to prevent, so an unknown sign-in state is shown as
+ * unknown rather than rounded up.
+ */
+function HarnessDoctor({ kind, agent }: { kind: string; agent: Agent | null }) {
+  const meta = harnessFor(kind);
+  const [health, setHealth] = useState<HarnessHealth | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [help, setHelp] = useState("");
+  // Monotonic token: switching harness quickly must not show the old answer.
+  const req = useRef(0);
+
+  const check = useCallback(
+    async (fresh: boolean) => {
+      const token = ++req.current;
+      setBusy(true);
+      setHelp("");
+      if (fresh) forgetHealth();
+      try {
+        const next = await checkHarness(kind, agent ?? undefined);
+        if (token === req.current) setHealth(next);
+      } finally {
+        if (token === req.current) setBusy(false);
+      }
+    },
+    [kind, agent]
+  );
+
+  useEffect(() => {
+    setHealth(null);
+    void check(false);
+  }, [check]);
+
+  const bin = meta.probe?.bin ?? (kind === "custom" ? (agent?.model ?? "").trim() : "");
+
+  return (
+    <div className="ag-doctor">
+      <div className="ag-doctor-row">
+        <span className={`ag-doctor-dot ag-doctor-${health?.state ?? "checking"}`} aria-hidden="true" />
+        <span className="ag-doctor-detail">
+          {busy && !health ? "Checking…" : health?.detail || "Not checked yet."}
+        </span>
+        <button
+          type="button"
+          className="btn tiny ghost"
+          onClick={() => void check(true)}
+          disabled={busy}
+        >
+          {busy ? <Spinner /> : "⟳"}
+        </button>
+      </div>
+
+      {!meta.verified && (
+        <div className="ag-doctor-unverified">
+          Spaces has not verified {meta.label}&apos;s flags. The defaults below are a starting
+          point — read its own help and correct them if they have moved.
+          {bin && (
+            <button
+              type="button"
+              className="btn tiny ghost"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  setHelp(await harnessHelp(bin));
+                } catch (e) {
+                  setHelp(String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Read {bin} --help
+            </button>
+          )}
+        </div>
+      )}
+
+      {help && <pre className="ag-doctor-help">{help}</pre>}
+    </div>
+  );
+}
+
 /** Why an agent can't run from this machine — never phrased as a fault. */
 function unavailableNote(kind: string, name: string, runtime = ""): string {
   const handle = `@${slug(name)}`;
-  if (kind === "ritz") {
+  const meta = harnessFor(kind);
+  if (meta.wire === "http") {
     const endpoint = runtime || RITZ_BASE;
     return `${config().localAiName} isn't answering on ${endpoint.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
+  }
+  if (meta.wire === "external") {
+    return `Spaces doesn't launch ${meta.label.toLowerCase()} agents — ${handle} works in its own app and meets Spaces in the repository.`;
   }
   if (kind === "custom") {
     return `That custom executable isn't available on this machine, so ${handle} can't run here. Configure its command or host it on a teammate's device.`;
   }
-  const bin = kind === "codex" ? "codex" : "claude";
-  return `${bin} isn't on this machine's PATH, so ${handle} can't run from here. Teammates who have it can.`;
+  const bin = meta.probe?.bin ?? kind;
+  const where = meta.probe?.installHint ? ` Install it from ${meta.probe.installHint}.` : "";
+  return `${bin} isn't on this machine's PATH, so ${handle} can't run from here. Teammates who have it can.${where}`;
 }
 
 /* ── the hardest part of a new agent is the blank persona box ── */
@@ -2097,6 +2258,25 @@ function AgentEditor({
     kind === "custom" ? [customProgram] : []
   );
   const availability = runtimes.of(kind, kind === "ritz" ? currentRitzBase : customProgram);
+  /**
+   * The doctor has to check what is on screen, not what was last saved —
+   * otherwise typing a bundle id or an endpoint and watching the verdict not
+   * move is indistinguishable from the check being broken. Memoized on the two
+   * fields it reads, so it re-probes when they settle and not on every stroke.
+   */
+  const probeAgent = useMemo<Agent>(
+    () =>
+      ({
+        ...(agent ?? {}),
+        id: agent?.id ?? "draft",
+        name: name.trim() || "draft",
+        kind,
+        model: String(values.model ?? "").trim(),
+        cli_args: serialized,
+      }) as Agent,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- name is cosmetic here
+    [agent, kind, values.model, serialized]
+  );
 
   const handle = slug(name);
   // Mentions resolve by handle, so two agents sharing one is a real ambiguity.
@@ -2408,21 +2588,40 @@ function AgentEditor({
       <section className="ag-ed-sec">
         <h3 className="ag-h3">Runtime</h3>
         <Field label="Backend">
+          {/* Grouped by how Spaces reaches it, because that is the difference
+              that changes what the agent can do — not who makes it. */}
           <select value={kind} onChange={(e) => changeKind(e.target.value as HarnessKind)}>
-            {HARNESSES.map((h) => (
-              <option key={h.kind} value={h.kind}>
-                {h.label}
-              </option>
-            ))}
+            <optgroup label="Command-line agents">
+              {HARNESSES.filter((h) => h.wire === "cli" && h.kind !== "custom").map((h) => (
+                <option key={h.kind} value={h.kind}>
+                  {h.label}
+                  {h.verified ? "" : " (flags unverified)"}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Runs elsewhere">
+              {HARNESSES.filter((h) => h.wire !== "cli").map((h) => (
+                <option key={h.kind} value={h.kind}>
+                  {h.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Anything else">
+              <option value="custom">{harnessFor("custom").label}</option>
+            </optgroup>
           </select>
         </Field>
         <div className="harness-blurb">{meta.blurb}</div>
         <p className={"ag-avail ag-avail-" + availability}>
-          {availability === "ready"
-            ? `${meta.label} is available on this machine, so you can run this agent yourself.`
-            : availability === "unavailable"
-              ? `${meta.label} isn't on this machine — the agent is still perfectly real, and anyone whose machine has it can run it. No API key is involved either way.`
-              : "Checking whether this machine has that runtime…"}
+          {meta.wire === "external"
+            ? // "Available on this machine" is meaningless for a harness Spaces
+              // never launches — there is no run to be able or unable to start.
+              "Spaces will never start this agent. It works in its own app, and joins here through the repository — so it is equally usable from every machine on the workspace."
+            : availability === "ready"
+              ? `${meta.label} is available on this machine, so you can run this agent yourself.`
+              : availability === "unavailable"
+                ? `${meta.label} isn't on this machine — the agent is still perfectly real, and anyone whose machine has it can run it. No API key is involved either way.`
+                : "Checking whether this machine has that runtime…"}
         </p>
         {kind === "ritz" && (
           <button
@@ -2434,6 +2633,8 @@ function AgentEditor({
             {runtimes.checking ? "Testing…" : "Test connection"}
           </button>
         )}
+        <HarnessDoctor kind={kind} agent={probeAgent} />
+        <HarnessCaps kind={kind} />
       </section>
 
       {groups.map((g) => (

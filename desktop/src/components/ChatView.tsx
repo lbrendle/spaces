@@ -25,6 +25,7 @@ import { autoLinkMessage } from "../links";
 import { SPACES_COMMANDS, availableCommands, parseSlash, runCommand } from "../commands";
 import type { SlashCommand } from "../commands";
 import { timeAgo } from "../github";
+import { harnessFor } from "../capabilities";
 import { toast } from "../toast";
 import { Avatar, Modal, Spinner, mdToHtml } from "./ui";
 import {
@@ -317,29 +318,46 @@ function deviceTools(raw: string): Record<string, boolean> {
 function availabilityOf(agent: Agent): Availability {
   const s = useStore.getState();
   const handle = `@${slug(agent.name)}`;
-  // Ritz answers on a port rather than from PATH, and asking costs a request
-  // per keystroke. Agents & Teams is where that check belongs.
-  if (agent.kind === "ritz") return AVAILABLE;
+  const meta = harnessFor(agent.kind);
+
+  // Spaces never launches this one, so no amount of PATH or host checking is
+  // relevant — but the composer has to say so, because the difference between
+  // "will reply in a minute" and "will get a brief and reply when someone opens
+  // its app" is the whole point of addressing it.
+  if (meta.wire === "external") {
+    return {
+      blocked: true,
+      label: "hand-off",
+      note: `${handle} runs in ${agent.model || "its own app"}, which Spaces doesn't launch. Addressing it leaves a brief in the repository rather than starting a turn.`,
+    };
+  }
+  // An HTTP engine answers on a port rather than from PATH, and asking costs a
+  // request per keystroke. Agents & Teams is where that check belongs.
+  if (meta.wire !== "cli") return AVAILABLE;
+
+  // PATH is keyed by executable, not by harness id: the Cursor harness is
+  // `cursor` and its binary is `cursor-agent`.
+  const bin = (agent.kind === "custom" ? agent.model : meta.probe?.bin ?? agent.kind).trim();
   const host = s.devices.find((d) => d.id === (agent as HostedAgent).host_device_id);
   const here = currentDeviceId();
 
   if (!host || host.id === here) {
     // `undefined` means PATH detection hasn't answered yet, which is not the
     // same as a missing CLI — an unknown never becomes a warning.
-    return s.tools[agent.kind] === false
+    return s.tools[bin] === false
       ? {
           blocked: true,
           label: "not on this PATH",
-          note: `${agent.kind} isn't on this machine's PATH, so ${handle} can't answer from here. Anyone who has it still can.`,
+          note: `${bin} isn't on this machine's PATH, so ${handle} can't answer from here. Anyone who has it still can.`,
         }
       : AVAILABLE;
   }
 
-  if (deviceTools(host.tools)[agent.kind] === false) {
+  if (deviceTools(host.tools)[bin] === false) {
     return {
       blocked: true,
       label: "not on its host",
-      note: `${host.name} doesn't have ${agent.kind} on its PATH, so ${handle} can't run there.`,
+      note: `${host.name} doesn't have ${bin} on its PATH, so ${handle} can't run there.`,
     };
   }
   // Without a local device row every stamp looks stale, including your own
@@ -1373,7 +1391,7 @@ function Composer({
   const agents = channelAgents(store, channelId);
   const attachmentCapable =
     agents.length === 1 &&
-    agents[0].kind === "ritz" &&
+    harnessFor(agents[0].kind).wire === "http" &&
     /(?:^|\s)protocol=spaces-compatible-http(?:\s|$)/.test(agents[0].cli_args || "");
   const composerChannelName = store.channels.find((c) => c.id === channelId)?.name ?? "";
 

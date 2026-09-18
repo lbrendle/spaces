@@ -120,3 +120,47 @@ test("the doctor never upgrades an unknown sign-in state to ready", async () => 
   assert.match(doctor, /if \(probe\?\.authArgs\?\.length\)/);
   assert.match(doctor, /timedOut/);
 });
+
+test("the harness registry is the single source of truth for every layer", async () => {
+  const [capabilities, rust, portal, adapters] = await Promise.all([
+    readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
+    readFile(new URL("../../portal/lib/workspace.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
+  ]);
+
+  // Every `kind:` in HARNESSES, in registry order. Scoped to that array —
+  // HarnessOption also has a `kind`, and it holds "flag" or "json".
+  const harnesses = capabilities.slice(
+    capabilities.indexOf("export const HARNESSES"),
+    capabilities.indexOf("const MANIFEST")
+  );
+  const registry = [...harnesses.matchAll(/^\s{4}kind: "([a-z]+)",$/gm)].map((m) => m[1]);
+  assert.ok(registry.length >= 9, `expected the full registry, found ${registry.join(", ")}`);
+
+  // Each one needs an adapter, or runAgent silently falls back to a bare CLI.
+  const registered = [...adapters.matchAll(/^\s{2}([a-z]+): \w+Adapter,$/gm)].map((m) => m[1]);
+  for (const kind of registry) {
+    assert.ok(registered.includes(kind), `agents.ts has no adapter for "${kind}"`);
+  }
+
+  // Each one needs an option list, or norm() quietly downgrades it to custom.
+  const manifest = capabilities.slice(capabilities.indexOf("const MANIFEST"));
+  for (const kind of registry) {
+    assert.match(manifest, new RegExp(`\\n  ${kind}: `), `MANIFEST has no options for "${kind}"`);
+  }
+
+  // The portal rewrites an unlisted backend to "codex" without complaining, so
+  // a kind missing there comes back from a sync as a different agent.
+  for (const kind of registry) {
+    assert.match(portal, new RegExp(`"${kind}",`), `portal AGENT_BACKENDS is missing "${kind}"`);
+  }
+
+  // check_tools answers PATH questions for the chat composer. It is keyed by
+  // executable, so compare against the probe bins rather than the kinds.
+  const bins = [...capabilities.matchAll(/bin: "([a-z-]+)"/g)].map((m) => m[1]);
+  assert.ok(bins.length >= 6, `expected probe bins, found ${bins.join(", ")}`);
+  for (const bin of bins) {
+    assert.match(rust, new RegExp(`"${bin}"`), `HARNESS_BINS in lib.rs is missing "${bin}"`);
+  }
+});

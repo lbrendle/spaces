@@ -321,6 +321,37 @@ async function dispatch(cmd: string, args: Record<string, any>): Promise<unknown
       // codex deliberately absent: the setup UI has a "missing CLI" state and
       // it is worth being able to see it without uninstalling anything.
       return { gh: true, claude: true, codex: false };
+    case "check_program":
+      // Same spread as check_tools, and one harness deliberately missing, so
+      // both doctor states are walkable in the browser.
+      return ["claude", "cursor-agent", "gh", "node"].includes(String(args.program ?? "").trim());
+    case "probe_program": {
+      const program = String(args.program ?? "").trim();
+      const known: Record<string, string> = {
+        claude: "2.1.4 (Claude Code)",
+        "cursor-agent": "2026.06.24",
+      };
+      const found = program in known;
+      return {
+        found,
+        path: found ? `/usr/local/bin/${program}` : "",
+        exit_code: found ? 0 : -1,
+        stdout: found ? `${known[program]}\n` : "",
+        stderr: "",
+        timed_out: false,
+      };
+    }
+    case "check_app": {
+      // Muse is the one that matters here: a GUI agent Spaces cannot spawn.
+      const installed = String(args.bundleId ?? "") === "com.meta.endo" ||
+        String(args.appName ?? "").toLowerCase() === "muse";
+      return {
+        installed,
+        path: installed ? "/Applications/Muse.app" : "",
+        running: installed,
+        version: installed ? "1.0" : "",
+      };
+    }
     case "run_git":
       return runGit(args.args ?? [], String(args.cwd ?? ""));
     case "run_gh":
@@ -419,7 +450,7 @@ function readTextFile(root: string, rel: string): string {
 
 const ATLAS_PATH = "/Users/dev/code/atlas";
 const ORIGIN_URL = "git@github.com:acme/atlas.git";
-const WORKSPACE_ROOT = `${ATLAS_PATH}/../.hq-workspaces/atlas-p-atla`;
+const WORKSPACE_ROOT = `${ATLAS_PATH}/../.spaces-workspaces/atlas-p-atla`;
 
 interface FakeCommit {
   sha: string;
@@ -486,7 +517,7 @@ function gitFail(message: string): never {
 }
 
 function isWorkspace(cwd: string): boolean {
-  return cwd.includes(".hq-workspaces");
+  return cwd.includes(".spaces-workspaces");
 }
 
 function runGit(args: string[], cwd: string): string {
@@ -537,7 +568,16 @@ function runGit(args: string[], cwd: string): string {
     case "rev-list": {
       if (has("--left-right")) return "0\t2\n"; // behind \t ahead
       const range = rest.find((a) => a.includes(".."));
-      if (range) return `${range.startsWith("origin/") ? 2 : 3}\n`;
+      if (range) {
+        if (range.startsWith("origin/")) return "2\n";
+        // "<base>..<branch>" is how far ahead; "<branch>..<base>" is how stale.
+        // Reading them the same way makes every lane look both ahead and
+        // behind, which is exactly the thing the lanes exist to distinguish.
+        const [left, right] = range.split("..");
+        if (right.startsWith("hq/")) return "3\n";
+        if (left.startsWith("hq/")) return "1\n";
+        return "3\n";
+      }
       return `${UNPUSHED.length}\n`;
     }
 
@@ -556,11 +596,46 @@ function runGit(args: string[], cwd: string): string {
 
     case "diff": {
       if (has("--diff-filter=U")) return ""; // never mid-conflict
+      // The coordination map reads branch size and touched paths from numstat.
+      // Vary it per branch: identical numbers for every agent make the lane
+      // scale look broken when it is working perfectly.
+      if (has("--numstat")) {
+        const branch = rest.find((a) => a.includes("hq/")) ?? cwd;
+        const spread = [...branch].reduce((n, ch) => (n + ch.charCodeAt(0)) % 7, 0);
+        return (
+          `${12 + spread * 9}\t${3 + spread * 2}\tsrc/components/ChatView.tsx\n` +
+          `${4 + spread}\t1\tsrc/components/chat.css\n` +
+          (spread > 3 ? `${spread * 3}\t0\tsrc/components/RunInspector.tsx\n` : "")
+        );
+      }
       if (has("--name-only")) return "src/components/ChatView.tsx\nsrc/components/chat.css\n";
       if (has("--cached")) return "";
       if (has("--no-index")) return "";
       return SAMPLE_DIFF;
     }
+
+    /*
+     * The landing-order simulation. `merge-tree --write-tree` answers with a
+     * tree OID on the first line and conflicted paths after it.
+     *
+     * One seeded agent is made to conflict so the blocked half of the landing
+     * order is walkable in the browser without arranging a real collision —
+     * otherwise every demo run shows five clean merges and the copy that
+     * matters most is never seen.
+     */
+    case "merge-tree": {
+      const tree = "8bde34b53cc109148f7ee0ab308f216f40afa977";
+      const conflicting = rest.some((a) => a.includes("iris") || a.includes("review"));
+      return conflicting
+        ? `${tree}\nsrc/components/ChatView.tsx\n\nAuto-merging src/components/ChatView.tsx\nCONFLICT (content): Merge conflict in src/components/ChatView.tsx\n`
+        : `${tree}\n`;
+    }
+
+    case "commit-tree":
+      return "4f1c0a9d2b7e5361c8a0f4d93e2b6a1c7d5e8f30\n";
+
+    case "cat-file":
+      return "";
 
     case "show":
       return has("--name-only") ? "src/components/chat.css\n" : SAMPLE_DIFF;

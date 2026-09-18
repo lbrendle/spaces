@@ -1334,3 +1334,105 @@
   padding-top: var(--space-5);
 }
 .ag-import-actions > span { margin-right: auto; color: var(--text-faint); font-size: var(--fs-xs); }
+
+/* ── harness doctor ──────────────────────────────────────────── */
+/*
+ * Four states, one dot. Green is "checked and usable", amber is "present but
+ * you will have to do something", red is "not here", and hollow is "Spaces
+ * genuinely does not know" — which is a real answer and is drawn as one, rather
+ * than being rounded up to green.
+ */
+
+.ag-doctor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.ag-doctor-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ag-doctor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--text-faint);
+}
+.ag-doctor-ready { background: var(--green); border-color: var(--green); }
+.ag-doctor-signed-out { background: var(--yellow); border-color: var(--yellow); }
+.ag-doctor-missing { background: var(--red); border-color: var(--red); }
+.ag-doctor-error { background: var(--red); border-color: var(--red); }
+/* unknown and checking stay hollow */
+
+.ag-doctor-detail {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.ag-doctor-unverified {
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--yellow);
+  padding: var(--space-2) var(--space-3);
+  background: var(--yellow-soft);
+  border: 1px solid var(--yellow-border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ag-doctor-help {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--text-dim);
+}
+
+/* ── what a harness can do ───────────────────────────────────── */
+
+.ag-caps {
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.ag-caps-row {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+.ag-caps-row dt {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+}
+.ag-caps-row dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: var(--measure);
+}
+
+@media (max-width: 600px) {
+  .ag-caps-row { grid-template-columns: 1fr; gap: 0; }
+}

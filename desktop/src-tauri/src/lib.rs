@@ -485,12 +485,29 @@ async fn run_git_ex(
     .map_err(|e| format!("task failed: {e}"))?
 }
 
+/// Every harness binary Spaces knows how to launch, plus the two tools it needs
+/// itself. Keyed by *executable*, which is not always the harness id — the
+/// Cursor harness is `cursor` and its binary is `cursor-agent`.
+///
+/// The registry in desktop/src/capabilities.ts is the source of truth; this is
+/// its executable list, and tests/coordination.test.ts fails if the two drift.
+const HARNESS_BINS: [&str; 8] = [
+    "claude",
+    "codex",
+    "cursor-agent",
+    "gemini",
+    "aider",
+    "opencode",
+    "gh",
+    "node",
+];
+
 /// Which agent/GitHub CLIs are available on this machine.
 #[tauri::command]
 async fn check_tools() -> HashMap<String, bool> {
     tauri::async_runtime::spawn_blocking(|| {
         let mut m = HashMap::new();
-        for name in ["claude", "codex", "gh", "node"] {
+        for name in HARNESS_BINS {
             let found = std::path::Path::new(&resolve_bin(name)).is_absolute();
             m.insert(name.to_string(), found);
         }
