@@ -96,7 +96,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!portal) return;
+    /*
+     * Nothing here may start before the store has read the database.
+     *
+     * Every one of these acts on loaded state, and portal sync in particular
+     * used to schedule its first run 1.5s after this effect regardless — so it
+     * could describe the workspace to the portal while the store still held
+     * its initial empty arrays. Reporting an empty workspace is not a harmless
+     * no-op there: it is how the app says things have been deleted.
+     */
+    if (!portal || !loaded) return;
     void initAgentListener();
     void initOrchestrator();
     void ensureNotifyPermission();
@@ -112,7 +121,7 @@ export default function App() {
       stopRemoteJobs();
       stopPortal();
     };
-  }, [portal?.device_id]);
+  }, [portal?.device_id, loaded]);
 
   /*
    * Picking up sessions written elsewhere.

@@ -48,3 +48,20 @@ test("a tombstone does not leave the adoption ledger behind", async () => {
   const body = content.slice(content.indexOf("async function removeRemoteMirror("));
   assert.match(body, /DELETE FROM adopted_context WHERE project_id/);
 });
+
+/*
+ * The same hazard one level up: the sync schedules its first run 1.5s after
+ * it starts, and it used to start without waiting for the store to read the
+ * database. A sync that describes an empty workspace is not a harmless no-op
+ * — an empty workspace is how the app says everything has been deleted.
+ */
+test("nothing syncs before the store has read the database", async () => {
+  const app = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const at = app.indexOf("initPortalSync()");
+  assert.ok(at > 0, "portal sync is no longer started here");
+
+  const effect = app.slice(app.lastIndexOf("useEffect(", at), app.indexOf("}, [", at) + 40);
+  assert.match(effect, /if \(!portal \|\| !loaded\) return;/);
+  // And it re-runs once the store is ready, or the guard would just disable it.
+  assert.match(effect, /\}, \[portal\?\.device_id, loaded\]\)/);
+});
