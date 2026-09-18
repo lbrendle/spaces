@@ -184,3 +184,34 @@ test("the harness registry is the single source of truth for every layer", async
     assert.match(rust, new RegExp(`"${bin}"`), `HARNESS_BINS in lib.rs is missing "${bin}"`);
   }
 });
+
+test("an oversized brief spilled to disk never reaches the repository", async () => {
+  const agents = await readFile(new URL("../src/agents.ts", import.meta.url), "utf8");
+
+  // .hq/ is deliberately committed — it is the durable project brief — and a
+  // turn ends with `git add -A`. A prompt carries channel history, so without
+  // this ignore every oversized brief would land in someone's pull request.
+  const spill = agents.slice(agents.indexOf("async function promptArg"));
+  assert.match(spill, /\.hq\/prompts\/\.gitignore/);
+  const ignoreAt = spill.indexOf(".hq/prompts/.gitignore");
+  const promptAt = spill.indexOf("relativePath: relative");
+  assert.ok(
+    ignoreAt !== -1 && promptAt !== -1 && ignoreAt < promptAt,
+    "the ignore has to be written before the brief, or a crash in between leaves the brief exposed"
+  );
+
+  // And the recorded command must not become the prompt.
+  assert.match(agents, /const launchArgs =/);
+  assert.match(agents, /\[\.\.\.adapterArgs, "<prompt>"\]/);
+});
+
+test("a hand-off with no baseline claims no commits", async () => {
+  const external = await readFile(new URL("../src/external.ts", import.meta.url), "utf8");
+
+  const settle = external.slice(external.indexOf("export async function settleHandOff"));
+  // Without a "since" git log returns the last N commits on the branch, which
+  // predate the brief. Reporting those as the agent's work is worse than
+  // reporting nothing.
+  assert.match(settle, /if \(!baseline\.sha\)/);
+  assert.match(settle, /return \{ commits: \[\], newlyDirty/);
+});

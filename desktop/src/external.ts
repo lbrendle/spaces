@@ -23,6 +23,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { git, isGitRepo } from "./workspaces";
+import { parsePorcelainPaths } from "./gitparse";
 import { parseArgs } from "./capabilities";
 import { slug } from "./types";
 import type { Agent, Project } from "./types";
@@ -132,8 +133,8 @@ export async function activityOf(
   if (!(await isGitRepo(workdir).catch(() => false))) return empty;
 
   const branch = (await safe(() => git(workdir, "rev-parse", "--abbrev-ref", "HEAD"))).trim();
-  const dirtyFiles = lines(await safe(() => git(workdir, "status", "--porcelain"))).map((l) =>
-    l.slice(3).trim()
+  const dirtyFiles = parsePorcelainPaths(
+    await safe(() => git(workdir, "status", "--porcelain"))
   );
 
   const ownDirectory = config.workdir !== "" && config.workdir !== (project?.local_path ?? "");
@@ -228,8 +229,8 @@ export async function handOff(req: HandOffRequest): Promise<HandOffResult> {
   const workdir = externalWorkdir(req.project, req.agent);
   if (workdir && (await isGitRepo(workdir).catch(() => false))) {
     result.baselineSha = (await safe(() => git(workdir, "rev-parse", "HEAD"))).trim();
-    result.baselineDirty = lines(await safe(() => git(workdir, "status", "--porcelain"))).map((l) =>
-      l.slice(3).trim()
+    result.baselineDirty = parsePorcelainPaths(
+      await safe(() => git(workdir, "status", "--porcelain"))
     );
   }
 
@@ -297,7 +298,18 @@ export async function settleHandOff(
   agent: Agent,
   baseline: { sha: string; dirty: readonly string[] }
 ): Promise<HandOffOutcome> {
-  const activity = await activityOf(project, agent, baseline.sha ? { since: baseline.sha } : {});
+  // Without a baseline there is no "since", and activityOf would hand back the
+  // last ten commits on the branch — which were there before the brief was
+  // written. Reporting those as this agent's work is worse than reporting
+  // nothing, so only the working tree is compared.
+  if (!baseline.sha) {
+    const activity = await activityOf(project, agent);
+    const was = new Set(baseline.dirty);
+    const newlyDirty = activity.dirtyFiles.filter((f) => !was.has(f));
+    return { commits: [], newlyDirty, untouched: newlyDirty.length === 0 };
+  }
+
+  const activity = await activityOf(project, agent, { since: baseline.sha });
   const was = new Set(baseline.dirty);
   const newlyDirty = activity.dirtyFiles.filter((f) => !was.has(f));
   return {

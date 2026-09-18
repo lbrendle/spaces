@@ -1790,6 +1790,11 @@ const MAX_ARGV_PROMPT = 256 * 1024;
  * becomes a short instruction pointing at it. Every harness that needs this
  * can read a file in its own working directory, and a brief the agent has to
  * open is strictly better than a brief that was silently truncated.
+ *
+ * The rest of `.hq/` is deliberately committed — it is the durable project
+ * brief. A prompt is not: it carries channel history, and the turn ends with
+ * `git add -A`, so without the ignore below every oversized brief would land
+ * in the repository and then in somebody's pull request.
  */
 async function promptArg(
   prompt: string,
@@ -1802,6 +1807,14 @@ async function promptArg(
   const relative = `.hq/prompts/${runId}.md`;
   if (root) {
     try {
+      // Written first, and every time: a .gitignore that travels with the
+      // directory holds wherever the checkout is cloned, which a local
+      // .git/info/exclude does not.
+      await invoke("write_text_file", {
+        root,
+        relativePath: ".hq/prompts/.gitignore",
+        contents: "# Spaces writes oversized run briefs here. They are not project files.\n*\n",
+      });
       await invoke("write_text_file", { root, relativePath: relative, contents: prompt });
       return (
         `Your full brief is too large to pass on the command line, so it is in ` +
