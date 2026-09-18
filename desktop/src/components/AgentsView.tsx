@@ -159,11 +159,13 @@ function HarnessCaps({ kind }: { kind: string }) {
     ],
     [
       "Spaces tools",
-      caps.mcp === "none"
-        ? "No MCP. It reaches Spaces through .hq/actions.jsonl instead."
-        : caps.mcp === "args"
-          ? "MCP, configured at launch."
-          : "MCP, from the config Spaces writes in its working directory.",
+      caps.mcp === "repo"
+        ? "No MCP — it runs in its own app and never sees this checkout's config. It reads the brief and .hq/; Spaces reads its commits."
+        : caps.mcp === "none"
+          ? "No MCP. It reaches Spaces through .hq/actions.jsonl instead."
+          : caps.mcp === "args"
+            ? "MCP, configured at launch."
+            : "MCP, from the config Spaces writes in its working directory.",
     ],
     [
       "Live output",

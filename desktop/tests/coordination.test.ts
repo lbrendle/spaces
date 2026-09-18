@@ -130,6 +130,34 @@ test("external teammates are represented by evidence, never assumed", async () =
   assert.match(external, /export async function settleHandOff/);
 });
 
+/*
+ * A capability is a claim, and an unverified one is worse than none: it reads
+ * as a healthy agent right up until somebody relies on it.
+ *
+ * This is the case that got through. External agents were declared
+ * `mcp: "config-file"`, so the editor told anyone who asked that Muse got its
+ * Spaces tools "from the config Spaces writes in its working directory" — and
+ * Muse never reads that file. It runs in its own app, has its own connector
+ * system, and meets Spaces only in the repository.
+ */
+test("an agent that never sees the checkout is not credited with its tools", async () => {
+  const [caps, view] = await Promise.all([
+    readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/AgentsView.tsx", import.meta.url), "utf8"),
+  ]);
+
+  const external = caps.slice(caps.indexOf('kind: "external"'));
+  const block = external.slice(0, external.indexOf("\n  },"));
+  assert.match(block, /wire: "external"/);
+  assert.match(block, /mcp: "repo"/);
+  assert.doesNotMatch(block, /mcp: "(config-file|args)"/);
+
+  // And the editor has wording for it, rather than falling through to the
+  // config-file sentence that was the bug.
+  assert.match(view, /caps\.mcp === "repo"/);
+  assert.match(view, /never sees this checkout's config/);
+});
+
 test("the doctor never upgrades an unknown sign-in state to ready", async () => {
   const doctor = await readFile(new URL("../src/doctor.ts", import.meta.url), "utf8");
 

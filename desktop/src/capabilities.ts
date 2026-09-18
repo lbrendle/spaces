@@ -88,8 +88,17 @@ export interface HarnessOption {
 export interface HarnessCaps {
   /** Can continue a prior session, so a turn is a reply rather than a re-brief. */
   resume: boolean;
-  /** How the Spaces MCP server reaches it. */
-  mcp: "config-file" | "args" | "none";
+  /**
+   * How the Spaces MCP server reaches it.
+   *
+   * "repo" is not a quieter kind of MCP — it means there is none. An external
+   * agent runs in its own app, never reads the checkout's `.mcp.json`, and
+   * meets Spaces only through the repository. Saying "config-file" for those
+   * was a claim nobody had checked, and the editor repeated it: Muse's card
+   * said Spaces tools arrived "from the config Spaces writes in its working
+   * directory", which is not a thing Muse does.
+   */
+  mcp: "config-file" | "args" | "repo" | "none";
   /** Emits structured tool-call events (so the inspector can show live steps). */
   toolEvents: boolean;
   /** Reports tokens/cost at the end of a turn. */
@@ -600,7 +609,7 @@ export const HARNESSES: readonly HarnessMeta[] = [
     rawPlaceholder: "git_author=muse workdir=/Users/you/code/project",
     caps: {
       resume: false,
-      mcp: "config-file",
+      mcp: "repo",
       toolEvents: false,
       usage: false,
       worktrees: true,
