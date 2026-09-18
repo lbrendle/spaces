@@ -117,12 +117,11 @@ test("failed approvals become durable channel context for agent retries", async 
   assert.match(actions, /insertMessage/);
 });
 
-test("forks can configure and import arbitrary local agent harnesses", async () => {
-  const [types, config, capabilities, agents, settings, rust, desktopPortal, portal, chat] = await Promise.all([
+test("forks can rebrand and repoint, but not smuggle in a harness", async () => {
+  const [types, config, capabilities, settings, rust, desktopPortal, portal, chat] = await Promise.all([
     readFile(new URL("../src/types.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/config.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
-    readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
     readFile(new URL("../src/portal.ts", import.meta.url), "utf8"),
@@ -134,49 +133,32 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
   // The type stays open only so a row from a newer build still loads.
   assert.match(types, /BuiltinAgentKind =[\s\S]*"external"/);
   assert.match(types, /AgentKind = BuiltinAgentKind \| \(string & \{\}\)/);
-  assert.match(config, /localAiName/);
-  assert.match(config, /VITE_SPACES_LOCAL_AI_URL/);
-  assert.match(capabilities, /label: "Endpoint"[\s\S]*transportOnly: true/);
-  assert.match(capabilities, /label: "Health route"[\s\S]*transportOnly: true/);
-  assert.match(capabilities, /function ritzBase/);
-  assert.match(capabilities, /function checkRitzRuntime/);
-  assert.match(capabilities, /function ritzAuthHeaders/);
-  assert.match(capabilities, /read_upa_spaces_token/);
-  assert.match(capabilities, /if \(opt\.transportOnly\) continue/);
-  assert.match(agents, /fetch\(`\$\{baseUrl\}\/chat`/);
-  assert.match(agents, /principalActorId:[\s\S]*"local-user"/);
-  assert.match(agents, /attachments: opts\.trigger\.attachments/);
-  assert.match(capabilities, /body\.attachments = runtime\.attachments/);
-  assert.match(chat, /Attach files to \$\{agents\[0\]\?\.name/);
-  assert.match(chat, /MAX_UPA_ATTACHMENTS = 8/);
-  assert.match(chat, /MAX_UPA_ATTACHMENT_TOTAL_BYTES = 40_000_000/);
-  assert.match(chat, /file\.arrayBuffer\(\)/);
-  assert.match(desktopPortal, /author_id: `portal:\$\{receipt\.author_id/);
-  assert.match(desktopPortal, /const privateThreadIds = new Set<string>/);
-  assert.match(desktopPortal, /const privateOnlyChannelIds = new Set/);
-  assert.match(desktopPortal, /privateOnlyChannelIds\.has\(channel\.id\)/);
-  assert.match(desktopPortal, /privateAgentIds\.has\(message\.author_id\)/);
-  assert.match(desktopPortal, /addressesPrivateAgent/);
-  assert.match(desktopPortal, /agents\.host_device_id=\$13[\s\S]*agents\.cli_args/);
-  assert.match(desktopPortal, /agents\.host_device_id=\$13[\s\S]*agents\.visibility/);
-  assert.match(
-    desktopPortal,
-    /remote\.visibility,[\s\S]*now\(\),[\s\S]*thisDevice,[\s\S]*\]\s*\)/,
-  );
-  assert.match(settings, /global default/i);
+
+  // What a fork may still change: its name and where its portal lives.
+  assert.match(config, /brand/);
+  assert.match(config, /portalUrl/);
   assert.match(settings, /Open-source runtime/);
-  assert.match(rust, /async fn check_program/);
-  assert.match(rust, /async fn read_upa_spaces_token/);
-  assert.match(rust, /ai\.personalagent\.upa\.spaces/);
+
+  // What it may not: an arbitrary local engine or executable.
+  assert.doesNotMatch(config, /localAi/);
+  assert.doesNotMatch(capabilities, /wire: "http"/);
+  assert.doesNotMatch(chat, /spaces-compatible-http/);
+  assert.doesNotMatch(rust, /read_upa_spaces_token/);
+
+  // Agent profiles are still importable from the conventional locations.
   assert.match(rust, /async fn discover_agent_profiles/);
   assert.match(rust, /\.claude\/agents/);
   assert.match(rust, /\.codex\/agents/);
-  // The portal's allowlist silently rewrites an unlisted backend, so it has to
-  // carry every kind the desktop registry ships.
+
+  // The portal's allowlist has to carry every kind the registry ships.
   assert.match(portal, /export const AGENT_BACKENDS/);
-  for (const kind of ["claude", "codex", "cursor", "ritz", "external"]) {
+  for (const kind of ["claude", "codex", "cursor", "external"]) {
     assert.match(portal, new RegExp(`"${kind}"`), `portal AGENT_BACKENDS is missing ${kind}`);
   }
+  assert.doesNotMatch(portal, /"ritz"/);
+
+  // And the desktop side of the sync must not run an unrecognised value.
+  assert.match(desktopPortal, /harnessKinds\(\)\.includes\(remote\.backend\) \? remote\.backend : "external"/);
 });
 
 test("Knowledge references use shared sync identities and exclude private collections", async () => {

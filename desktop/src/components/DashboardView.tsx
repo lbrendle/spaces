@@ -28,8 +28,7 @@ import { getDb, uid } from "../db";
 import { KIND_BY_TYPE } from "../entities";
 import { LINK_KIND_BY_ID, workloadOf } from "../links";
 import { getQueueSnapshot, subscribeQueue } from "../orchestrator";
-import { HARNESSES, RITZ_BASE, harnessBin, harnessFor } from "../capabilities";
-import { config } from "../config";
+import { HARNESSES, harnessBin, harnessFor } from "../capabilities";
 import { errorText, toast } from "../toast";
 import { slug } from "../types";
 import type { Agent, AgentKind, EntityRef, EntityType, MemoryKind, TaskStatus } from "../types";
@@ -325,13 +324,6 @@ interface Availability {
  */
 function runtimeAvailability(kind: AgentKind, tools: Record<string, boolean>): Availability {
   const meta = harnessFor(kind);
-  if (meta.wire === "http") {
-    return {
-      tone: "unknown",
-      label: "over HTTP",
-      hint: `${config().localAiName} is a service, not a binary — ${config().brand} talks to it at ${RITZ_BASE}. Settings shows whether it is answering.`,
-    };
-  }
   if (meta.wire === "external") {
     return {
       tone: "unknown",

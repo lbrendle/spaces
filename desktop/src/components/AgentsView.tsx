@@ -16,7 +16,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../store";
-import { config } from "../config";
 import { slug } from "../types";
 import type {
   Agent,
@@ -48,26 +47,20 @@ import {
   harnessBin,
   commandPreview,
   defaultsFor,
-  fetchRitzModels,
-  checkRitzRuntime,
   groupedOptions,
   harnessFor,
   parseArgs,
   riskNotes,
   serializeArgs,
-  RITZ_BASE,
-  ritzBase,
-  ritzHealthRoute,
-  ritzAuthHeaders,
 } from "../capabilities";
-import type { HarnessKind, HarnessOption, OptionValue, OptionValues, RitzModel } from "../capabilities";
+import type { HarnessKind, HarnessOption, OptionValue, OptionValues } from "../capabilities";
 import { checkHarness, forgetHealth, harnessHelp } from "../doctor";
 import type { HarnessHealth } from "../doctor";
 import "./agents.css";
 
 /* ── can it run from here? ───────────────────────────────────── */
 
-/** "unknown" is a real answer: PATH detection can fail, and Ritz takes a moment. */
+/** "unknown" is a real answer: PATH detection can fail and takes a moment. */
 type Availability = "ready" | "unavailable" | "unknown";
 
 interface Runtimes {
@@ -76,96 +69,49 @@ interface Runtimes {
   checking: boolean;
 }
 
-/** How long to wait on 127.0.0.1:8765 before calling it down. */
-const RITZ_TIMEOUT = 2500;
-
 /**
- * Two different questions, because the runtimes are two different things:
- * claude and codex are binaries the Rust side looks for on PATH, Ritz either
- * answers on its port right now or does not. Ritz is only asked when somebody
- * actually has a Ritz agent — an idle workspace shouldn't poll a local port.
+ * Whether a harness can run from this machine.
+ *
+ * Every supported harness is either a binary on somebody's PATH or an app
+ * Spaces never launches, so this is one question now: does the executable
+ * resolve? check_tools pre-answers it for the harnesses Spaces ships, and
+ * check_program covers anything it did not pre-answer.
  */
-type HttpRuntime = { base: string; healthRoute: string; authentication: string };
-
-function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] = []): Runtimes {
+function useRuntimes(): Runtimes {
   const tools = useStore((s) => s.tools);
-  const [ritz, setRitz] = useState<Record<string, Availability>>({});
+  const [found, setFound] = useState<Record<string, boolean>>({});
   const [checking, setChecking] = useState(false);
-  const [custom, setCustom] = useState<Record<string, boolean>>({});
   const [nonce, setNonce] = useState(0);
-  // Probe every registered CLI harness's binary as well as the user's own
-  // executables — a harness whose availability is never asked about shows as
-  // "unknown" forever, which reads as broken.
-  const registryBins = HARNESSES.map((h) => harnessBin(h.kind)).filter(Boolean);
-  const customKey = [...new Set([...registryBins, ...customPrograms].map((p) => p.trim()).filter(Boolean))]
-    .sort()
-    .join("\n");
-  const ritzKey = [...new Map(
-    httpRuntimes
-      .filter((runtime) => runtime.base.trim())
-      .map((runtime) => [
-        runtime.base.trim(),
-        `${runtime.base.trim()}\t${runtime.healthRoute.trim()}\t${runtime.authentication.trim()}`,
-      ])
-  ).values()].sort().join("\n");
+
+  const bins = HARNESSES.map((h) => harnessBin(h.kind)).filter(Boolean);
+  const key = [...new Set(bins)].sort().join("\n");
 
   useEffect(() => {
-    const runtimes = ritzKey
-      ? ritzKey.split("\n").map((line) => {
-          const [base, healthRoute = "/health", authentication = "trusted-local-origin"] = line.split("\t", 3);
-          return { base, healthRoute, authentication };
-        })
-      : [];
-    if (!runtimes.length) {
-      setRitz({});
-      return;
-    }
-    let live = true;
-    const ac = new AbortController();
-    // A dead port refuses instantly; the timeout is for the other case —
-    // something else holding 8765 and never answering.
-    const timer = window.setTimeout(() => ac.abort(), RITZ_TIMEOUT);
-    setRitz(Object.fromEntries(runtimes.map(({ base }) => [base, "unknown"])));
-    void Promise.all(runtimes.map(async ({ base, healthRoute, authentication }) => {
-      try {
-        const headers = await ritzAuthHeaders({ authentication });
-        await checkRitzRuntime(ac.signal, base, healthRoute, headers);
-        return [base, "ready"] as const;
-      } catch {
-        return [base, "unavailable"] as const;
-      }
-    })).then((pairs) => {
-      if (live) setRitz(Object.fromEntries(pairs));
-    });
-    return () => {
-      live = false;
-      clearTimeout(timer);
-      ac.abort();
-    };
-  }, [ritzKey, nonce]);
-
-  useEffect(() => {
-    const programs = customKey ? customKey.split("\n") : [];
+    const programs = key ? key.split("\n") : [];
     if (!programs.length) {
-      setCustom({});
+      setFound({});
       return;
     }
     let live = true;
     void Promise.all(
       programs.map(async (program) => [program, await invoke<boolean>("check_program", { program })] as const)
-    ).then((pairs) => {
-      if (live) setCustom(Object.fromEntries(pairs));
-    }).catch(() => {
-      if (live) setCustom(Object.fromEntries(programs.map((program) => [program, false])));
-    });
-    return () => { live = false; };
-  }, [customKey, nonce]);
+    )
+      .then((pairs) => {
+        if (live) setFound(Object.fromEntries(pairs));
+      })
+      .catch(() => {
+        if (live) setFound(Object.fromEntries(programs.map((program) => [program, false])));
+      });
+    return () => {
+      live = false;
+    };
+  }, [key, nonce]);
 
   const recheck = useCallback(() => {
     setChecking(true);
     setNonce((n) => n + 1);
     invoke<Record<string, boolean>>("check_tools")
-      .then((found) => useStore.setState({ tools: found }))
+      .then((map) => useStore.setState({ tools: map }))
       .catch((e: unknown) => toast.error("Could not read this machine's PATH", e))
       .finally(() => setChecking(false));
   }, []);
@@ -174,28 +120,21 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
   // may only change when an answer actually changes.
   return useMemo(
     () => ({
-      of: (kind: string, program = ""): Availability => {
-        const meta = harnessFor(kind);
-        if (meta.wire === "http") {
-          const key = (program || RITZ_BASE).trim();
-          return ritz[key] ?? "unknown";
-        }
-        // Spaces never launches an external agent, so there is no binary to
-        // find and nothing here can make it unavailable. Whether its app is
-        // installed is a different, softer question the editor asks.
-        if (meta.wire === "external") return "ready";
-
-        const bin = harnessBin(kind, program);
+      of: (kind: string): Availability => {
+        // Spaces never launches an external agent, so nothing here can make it
+        // unavailable. Whether its app is installed is a softer, separate
+        // question the editor asks.
+        if (harnessFor(kind).wire === "external") return "ready";
+        const bin = harnessBin(kind);
         if (!bin) return "unavailable";
-        if (custom[bin] !== undefined) return custom[bin] ? "ready" : "unavailable";
-        // check_tools pre-answers the two most common ones on startup.
-        const found = tools[bin];
-        return found === undefined ? "unknown" : found ? "ready" : "unavailable";
+        if (found[bin] !== undefined) return found[bin] ? "ready" : "unavailable";
+        const known = tools[bin];
+        return known === undefined ? "unknown" : known ? "ready" : "unavailable";
       },
       recheck,
       checking,
     }),
-    [tools, ritz, custom, recheck, checking]
+    [tools, found, recheck, checking]
   );
 }
 
@@ -338,13 +277,9 @@ function HarnessDoctor({ kind, agent }: { kind: string; agent: Agent | null }) {
 }
 
 /** Why an agent can't run from this machine — never phrased as a fault. */
-function unavailableNote(kind: string, name: string, runtime = ""): string {
+function unavailableNote(kind: string, name: string): string {
   const handle = `@${slug(name)}`;
   const meta = harnessFor(kind);
-  if (meta.wire === "http") {
-    const endpoint = runtime || RITZ_BASE;
-    return `${config().localAiName} isn't answering on ${endpoint.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
-  }
   if (meta.wire === "external") {
     return `Spaces doesn't launch ${meta.label.toLowerCase()} agents — ${handle} works in its own app and meets Spaces in the repository.`;
   }
@@ -520,17 +455,7 @@ export function AgentsView() {
   const [importSelected, setImportSelected] = useState<Set<string>>(new Set());
   const seq = useRef(0);
 
-  const runtimes = useRuntimes(
-    agents.filter((a) => a.kind === "ritz").map((a) => {
-      const values = parseArgs("ritz", a.cli_args);
-      return {
-        base: ritzBase(values),
-        healthRoute: ritzHealthRoute(values),
-        authentication: String(values.authentication || "trusted-local-origin"),
-      };
-    }),
-    []
-  );
+  const runtimes = useRuntimes();
 
   // The window is the wrong thing to measure: the sidebar and the inspector
   // both eat into this pane without the window changing size.
@@ -599,10 +524,7 @@ export function AgentsView() {
       return {
         agent,
         handle: slug(agent.name),
-        availability: runtimes.of(
-          agent.kind,
-          agent.kind === "ritz" ? ritzBase(parseArgs("ritz", agent.cli_args)) : agent.model
-        ),
+        availability: runtimes.of(agent.kind),
         running,
         lastActive: lastActiveOf(agent.id, sessions, runs),
         workload,
@@ -683,10 +605,7 @@ export function AgentsView() {
         members,
         workload: workloadOf({ type: "team", id: team.id }).sort(byRole),
         channels: channels.filter((c) => channelIds.has(c.id)),
-        ready: members.filter((m) => runtimes.of(
-          m.kind,
-          m.kind === "ritz" ? ritzBase(parseArgs("ritz", m.cli_args)) : m.model
-        ) === "ready").length,
+        ready: members.filter((m) => runtimes.of(m.kind) === "ready").length,
         memberLoad: members.reduce((n, m) => n + (loadById.get(m.id) ?? 0), 0),
         lastActive: members.reduce((t, m) => Math.max(t, lastActiveOf(m.id, sessions, runs)), 0),
         haystack: [team.name, slug(team.name), team.description, team.charter,
@@ -1125,10 +1044,10 @@ function AboutAgents() {
             <div>
               <dt>Each one runs on the machine that has its runtime.</dt>
               <dd>
-                <code>claude</code>, <code>codex</code> and <code>cursor-agent</code> run from somebody's PATH; {config().localAiName} is an
-                engine answering on {RITZ_BASE.replace("http://", "")}. An agent can work while at
-                least one host with that runtime is online — which is why a card can say it is
-                unavailable <em>from here</em> and still be perfectly usable by a teammate.
+                <code>claude</code>, <code>codex</code> and <code>cursor-agent</code> run from
+                somebody&apos;s PATH. An agent can work while at least one host with that runtime
+                is online — which is why a card can say it is unavailable <em>from here</em> and
+                still be perfectly usable by a teammate.
               </dd>
             </div>
             <div>
@@ -1398,11 +1317,7 @@ function AvailabilityNote({ row }: { row: AgentRow }) {
             row.lastActive ? ` Last active ${timeAgo(row.lastActive)}.` : " Never run yet."
           }`
         : state === "unavailable"
-          ? unavailableNote(
-              agent.kind,
-              agent.name,
-              agent.kind === "ritz" ? ritzBase(parseArgs("ritz", agent.cli_args)) : agent.model
-            )
+          ? unavailableNote(agent.kind, agent.name)
           : "Still checking what this machine can run.";
 
   return <p className={"ag-note ag-note-" + state}>{note}</p>;
@@ -2250,17 +2165,8 @@ function AgentEditor({
   const preview = commandPreview(kind, values);
   const risks = riskNotes(kind, values);
   const serialized = serializeArgs(kind, values);
-  const modelValue = String(values.model ?? "");
-  const currentRitzBase = ritzBase(values);
-  const runtimes = useRuntimes(
-    kind === "ritz" ? [{
-      base: currentRitzBase,
-      healthRoute: ritzHealthRoute(values),
-      authentication: String(values.authentication || "trusted-local-origin"),
-    }] : [],
-    []
-  );
-  const availability = runtimes.of(kind, kind === "ritz" ? currentRitzBase : modelValue);
+  const runtimes = useRuntimes();
+  const availability = runtimes.of(kind);
   /**
    * The doctor has to check what is on screen, not what was last saved —
    * otherwise typing a bundle id or an endpoint and watching the verdict not
@@ -2646,10 +2552,7 @@ function AgentEditor({
             <OptionControl
               key={opt.key}
               opt={opt}
-              kind={kind}
               value={values[opt.key]}
-              ritzEndpoint={currentRitzBase}
-              ritzAuthentication={String(values.authentication || "trusted-local-origin")}
               onChange={(v) => update(opt.key, v)}
             />
           ))}
@@ -2996,17 +2899,11 @@ async function restoreAgent(row: Agent, snap: RosterSnapshot): Promise<void> {
 /** One manifest option, rendered as the control it declares. */
 function OptionControl({
   opt,
-  kind,
   value,
-  ritzEndpoint,
-  ritzAuthentication,
   onChange,
 }: {
   opt: HarnessOption;
-  kind: HarnessKind;
   value: OptionValue | undefined;
-  ritzEndpoint?: string;
-  ritzAuthentication?: string;
   onChange: (v: OptionValue) => void;
 }) {
   const text = typeof value === "string" ? value : "";
@@ -3094,18 +2991,6 @@ function OptionControl({
     );
   }
 
-  if (opt.dynamic === "ritz-models") {
-    return (
-      <RitzModelPicker
-        opt={opt}
-        value={text}
-        onChange={onChange}
-        active={kind === "ritz"}
-        endpoint={ritzEndpoint || RITZ_BASE}
-        authentication={ritzAuthentication || "trusted-local-origin"}
-      />
-    );
-  }
 
   return (
     <div className="opt">
@@ -3147,122 +3032,6 @@ function OptHead({ opt }: { opt: HarnessOption }) {
 }
 
 /** Model picker for Ritz: the live model list, with free text as the fallback. */
-function RitzModelPicker({
-  opt,
-  value,
-  onChange,
-  active,
-  endpoint,
-  authentication,
-}: {
-  opt: HarnessOption;
-  value: string;
-  onChange: (v: OptionValue) => void;
-  active: boolean;
-  endpoint: string;
-  authentication: string;
-}) {
-  const [models, setModels] = useState<RitzModel[] | null>(null);
-  const [engineDefault, setEngineDefault] = useState("");
-  const [error, setError] = useState("");
-  const [custom, setCustom] = useState(false);
-
-  useEffect(() => {
-    if (!active) return;
-    let live = true;
-    const ac = new AbortController();
-    setError("");
-    ritzAuthHeaders({ authentication })
-      .then((headers) => fetchRitzModels(ac.signal, endpoint, headers))
-      .then((list) => {
-        if (!live) return;
-        setModels(list.models);
-        setEngineDefault(list.default);
-      })
-      .catch((e: unknown) => {
-        if (!live) return;
-        setModels([]);
-        setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      live = false;
-      ac.abort();
-    };
-  }, [active, endpoint, authentication]);
-
-  const known = models ?? [];
-  const inList = known.some((m) => m.key === value);
-  const asText = custom || (!!value && known.length > 0 && !inList) || (!!error && known.length === 0);
-
-  return (
-    <div className="opt">
-      <OptHead opt={opt} />
-      {asText ? (
-        <input
-          value={value}
-          spellCheck={false}
-          placeholder={opt.placeholder}
-          aria-label={opt.label}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      ) : (
-        <select
-          value={value}
-          aria-label={opt.label}
-          onChange={(e) => {
-            if (e.target.value === "__custom") {
-              setCustom(true);
-              return;
-            }
-            onChange(e.target.value);
-          }}
-        >
-          <option value="">
-            {engineDefault ? `Let ${config().localAiName} choose (${engineDefault})` : `Let ${config().localAiName} choose`}
-          </option>
-          {/* keeps a saved model visible while the live list is still loading */}
-          {!!value && !inList && <option value={value}>{value}</option>}
-          {known.map((m) => (
-            <option key={m.key} value={m.key}>
-              {m.name} — {m.key}
-              {m.tier ? ` · ${m.tier}` : ""}
-            </option>
-          ))}
-          <option value="__custom">Type a model key…</option>
-        </select>
-      )}
-      {models === null && !error && (
-        <div className="model-status">
-          <Spinner /> Asking {config().localAiName} which models it has…
-        </div>
-      )}
-      {!!error && (
-        <div className="model-status warn">
-          {config().localAiName} isn&rsquo;t answering on {RITZ_BASE.replace(/^https?:\/\//, "")} — type a model key, or start the engine and
-          reopen this dialog.
-        </div>
-      )}
-      {models !== null && !error && (
-        <div className="model-status">
-          {known.length} model{known.length === 1 ? "" : "s"} loaded.
-          {asText && known.length > 0 && (
-            <button
-              className="model-link"
-              type="button"
-              onClick={() => {
-                setCustom(false);
-                if (!known.some((m) => m.key === value)) onChange("");
-              }}
-            >
-              Pick from the list
-            </button>
-          )}
-        </div>
-      )}
-      <div className="opt-hint">{opt.help}</div>
-    </div>
-  );
-}
 
 async function restoreTeam(row: Team, memberIds: string[], snap: RosterSnapshot): Promise<void> {
   try {

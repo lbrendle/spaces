@@ -9,22 +9,19 @@ Copy `desktop/.env.example` to `desktop/.env.local`.
 | `VITE_SPACES_BRAND` | Product name in the UI | `Spaces` |
 | `VITE_SPACES_BRAND_SHORT` | Compact product mark | `Spaces` |
 | `VITE_SPACES_PORTAL_URL` | Paired portal base URL | empty; user is prompted |
-| `VITE_SPACES_LOCAL_AI_NAME` | Label for the optional local HTTP engine | `Local AI` |
-| `VITE_SPACES_LOCAL_AI_URL` | Base URL for a `/models` + `/chat` local HTTP engine | `http://127.0.0.1:8765` |
 | `VITE_SPACES_DB_NAME` | SQLite filename in app data | `spaces.db` |
 | `VITE_SPACES_CONTEXT_DIR` | Generated project context directory | `.hq` |
 | `VITE_SPACES_SAMPLE_PATH` | Cosmetic example path | `~/code/my-app` |
 | `VITE_SPACES_DOCS_URL` | Optional documentation URL | empty |
 
-Brand, portal, local-engine, sample-path, and documentation values can also be
-changed per installation in **Settings → Open source**. Runtime values are
-stored only on that Mac and win over build-time defaults. The legacy
-`VITE_SPACES_RITZ_URL` variable remains a compatibility alias for older forks.
+Brand, portal, sample-path, and documentation values can also be changed per
+installation in **Settings → Open source**. Runtime values are stored only on
+that Mac and win over build-time defaults.
 
-Custom CLI agents do not require another build-time variable. Choose **Custom
-CLI** in the agent editor, provide a command name on PATH or an absolute
-executable path, and optionally add arguments. Spaces writes the prompt to
-stdin and accepts plain stdout or common JSONL text shapes.
+The set of agents Spaces supports is curated rather than configurable: each one
+is verified against the harness itself — a CLI's own `--help`, an app's bundle
+identifier — so there is no build-time variable for adding another. Agents that
+work in their own window need nothing on PATH and no variable at all.
 
 Build-time values are not secrets. OAuth credentials belong only in the portal.
 

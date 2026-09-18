@@ -156,7 +156,7 @@ test("the harness registry is the single source of truth for every layer", async
     capabilities.indexOf("const MANIFEST")
   );
   const registry = [...harnesses.matchAll(/^\s{4}kind: "([a-z]+)",$/gm)].map((m) => m[1]);
-  assert.ok(registry.length >= 5, `expected the full registry, found ${registry.join(", ")}`);
+  assert.ok(registry.length >= 4, `expected the full registry, found ${registry.join(", ")}`);
 
   // Each one needs an adapter, or runAgent silently falls back to a bare CLI.
   const registered = [...adapters.matchAll(/^\s{2}([a-z]+): \w+Adapter,$/gm)].map((m) => m[1]);
@@ -275,7 +275,7 @@ test("only harnesses Spaces has verified are offered", async () => {
 
   // The generic escape hatch is gone: no kind may run an executable taken from
   // the agent row, because nothing validates that value.
-  for (const gone of ["custom", "gemini", "aider", "opencode"]) {
+  for (const gone of ["custom", "gemini", "aider", "opencode", "ritz"]) {
     assert.doesNotMatch(
       capabilities.slice(capabilities.indexOf("export const HARNESSES")),
       new RegExp(`kind: "${gone}"`),
@@ -292,7 +292,7 @@ test("only harnesses Spaces has verified are offered", async () => {
   // Every integration has to name a harness that actually exists.
   const kinds = [...capabilities.matchAll(/^\s{4}kind: "([a-z]+)",$/gm)].map((m) => m[1]);
   const used = [...integrations.matchAll(/\n    kind: "([a-z]+)",/g)].map((m) => m[1]);
-  assert.ok(used.length >= 5, `expected integrations, found ${used.length}`);
+  assert.ok(used.length >= 4, `expected integrations, found ${used.length}`);
   for (const kind of used) {
     assert.ok(kinds.includes(kind), `integration points at unknown harness "${kind}"`);
   }

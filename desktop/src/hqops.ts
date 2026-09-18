@@ -2,7 +2,7 @@
  * What an agent can do in Spaces.
  *
  * Spaces's premise is that agents are members, not tools: they run inside their
- * own harness — `claude`, `codex`, Ritz — but they are graphed and orchestrated
+ * own harness — `claude`, `codex`, `cursor-agent` — but they are graphed and orchestrated
  * as first-class members of the workspace. Membership means acting, not just
  * being described, and until this module existed an agent could read `.hq/`
  * and talk in a channel but could not create a task, draw a link or take
@@ -14,7 +14,7 @@
  *   MCP        a stdio server the harness discovers through .mcp.json
  *   file drop  a JSONL line appended to .hq/actions.jsonl
  *
- * Two transports, one registry, deliberately: Ritz has its own tool system and
+ * Two transports, one registry, deliberately: an external agent has no MCP and
  * no MCP, and a second definition of "what an agent may do" would drift from
  * the first within a week. The transports differ only in how a call arrives.
  *

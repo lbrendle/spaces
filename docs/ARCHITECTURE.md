@@ -61,7 +61,7 @@ durable router/queue ── one lane per (channel, agent)
     └─ current project/team/channel instructions
              │
              ▼
- Claude · Codex · Cursor · Local HTTP · External app (Muse, Zed, …)
+ Claude · Codex · Cursor · External app (Muse, Zed, …)
              │
       MCP or local CLI fallback
              ▼
@@ -78,11 +78,10 @@ will not launch rather than an arbitrary command. Spaces keeps native adapters
 for the CLIs members already have authenticated on their Mac, so no provider
 API key is involved and no session moves into the portal.
 
-Three transports, not one:
+Two transports, not one:
 
 - **cli** — Spaces spawns the process. The prompt goes on stdin, or as the last
   argument for harnesses with no stdin reader.
-- **http** — a local or self-hosted engine, called over the network.
 - **external** — an agent Spaces *cannot* launch, because it is a GUI app:
   Muse, the Cursor app, Zed, or a terminal somebody drives by hand. These are
   full teammates anyway, because the shared git repository was always the real

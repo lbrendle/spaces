@@ -47,7 +47,6 @@ import { errorText, toast } from "../toast";
 import { colorFor } from "../types";
 import type { AgentKind, EntityRef, Member } from "../types";
 import { harnessFor } from "../capabilities";
-import { config } from "../config";
 import { Modal } from "./ui";
 import { IconImage } from "./icons";
 import "./face.css";
@@ -104,7 +103,6 @@ export const HARNESS_MARK_LABEL: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   cursor: "Cursor",
-  ritz: config().localAiName,
   external: "External app",
 };
 

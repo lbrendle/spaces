@@ -97,8 +97,6 @@ export function SettingsView() {
     brand: config().brand,
     brandShort: config().brandShort,
     portalUrl: config().portalUrl,
-    localAiName: config().localAiName,
-    localAiUrl: config().localAiUrl,
     docsUrl: config().docsUrl,
   }));
 
@@ -334,26 +332,6 @@ export function SettingsView() {
                 type="url"
               />
               <small>Optional. Pairing a desktop can also set this address.</small>
-            </label>
-            <label>
-              <span>Local HTTP engine label</span>
-              <input
-                value={runtimeConfig.localAiName}
-                onChange={(event) => setRuntimeConfig((value) => ({ ...value, localAiName: event.target.value }))}
-                placeholder="Local AI"
-                required
-              />
-            </label>
-            <label>
-              <span>Default Local HTTP engine URL</span>
-              <input
-                value={runtimeConfig.localAiUrl}
-                onChange={(event) => setRuntimeConfig((value) => ({ ...value, localAiUrl: event.target.value }))}
-                placeholder="http://127.0.0.1:8765"
-                type="url"
-                required
-              />
-              <small>This global default is inherited only when an HTTP agent has no endpoint of its own.</small>
             </label>
             <label className="runtime-wide">
               <span>Documentation URL</span>

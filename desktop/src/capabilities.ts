@@ -1,21 +1,21 @@
 /**
  * capabilities.ts — a declarative manifest of what each agent harness can do.
  *
- * Spaces spawns three very different things:
+ * Spaces spawns:
  *
  *   claude  →  claude -p --output-format stream-json --verbose [flags]   (prompt on stdin)
  *   codex   →  codex exec --json [flags] -                               (prompt on stdin)
- *   ritz    →  POST <ritz endpoint>/chat                            (JSON body, SSE reply)
+ *   cursor  →  cursor-agent -p --output-format stream-json [flags] <prompt>
  *
- * The first two are configured with CLI flags, the third with JSON body
- * fields — so every option declares `kind: "flag" | "json"` and the
- * serializer emits the right wire form.
+ * and represents agents it cannot spawn at all. CLI options are emitted as
+ * flags; settings that are not flags — an external app's bundle identifier —
+ * are stored as `key=value`, so every option declares which wire form it uses.
  *
  * The agent row only has two columns to store all of this: `model` and
  * `cli_args`. So:
  *   • options with `storage: "model"` live in the `model` column;
  *   • everything else round-trips through `cli_args` via
- *     serializeArgs() / parseArgs(), including Ritz's JSON fields (stored
+ *     serializeArgs() / parseArgs(), including non-flag settings (stored
  *     as `key=value` tokens so a single text column keeps working).
  *
  * Anything in `cli_args` that the manifest does not recognise is kept
@@ -26,7 +26,6 @@
  * machine — do not "tidy" them.
  */
 import { config } from "./config";
-import { invoke } from "@tauri-apps/api/core";
 import type { BuiltinAgentKind } from "./types";
 
 /**
@@ -71,8 +70,6 @@ export interface HarnessOption {
   storage?: "model";
   /** Rejected by `codex exec resume` — translated or dropped on resume. */
   execOnly?: boolean;
-  /** Choices come from a live source rather than `choices`. */
-  dynamic?: "ritz-models";
   /** Summarised as a chip on the agent card. */
   chip?: boolean;
   /** Connection metadata stored with the agent but never sent in the request body. */
@@ -135,11 +132,11 @@ export interface HarnessMeta {
   label: string;
   blurb: string;
   /**
-   * "cli" harnesses are spawned as processes, "http" ones are called over the
-   * network, and "external" ones Spaces never starts at all — they run in their
-   * own app against the same checkout and collaborate through git and .hq.
+   * "cli" harnesses are spawned as processes; "external" ones Spaces never
+   * starts at all — they run in their own app against the same checkout and
+   * collaborate through git and .hq.
    */
-  wire: "cli" | "http" | "external";
+  wire: "cli" | "external";
   /** Fixed prefix Spaces always passes — shown in the preview, never editable. */
   base: string;
   /** Copy for the Advanced → raw disclosure. */
@@ -150,145 +147,6 @@ export interface HarnessMeta {
   probe?: HarnessProbe;
   /** Who makes it — shown on the picker so a long list stays scannable. */
   vendor?: string;
-}
-
-/* ── Ritz (local engine) ──────────────────────────────────────── */
-
-/**
- * Local model server for the `ritz` kind. Read through config() so a fork can
- * point it elsewhere — or run none at all — without editing this manifest.
- */
-export const RITZ_BASE = config().localAiUrl;
-export const RITZ_CHAT_URL = `${RITZ_BASE}/chat`;
-export const RITZ_MODELS_URL = `${RITZ_BASE}/models`;
-
-export interface RitzModel {
-  key: string;
-  name: string;
-  notes?: string;
-  tier?: string;
-  status?: string;
-}
-
-export interface RitzModelList {
-  /** The engine's own default model key. */
-  default: string;
-  models: RitzModel[];
-}
-
-/**
- * GET /models on the local engine. Tolerates a bare array, {models:[…]} or
- * {data:[…]}, and entries that are plain strings. Throws if unreachable —
- * callers fall back to free text.
- */
-export function ritzBase(values?: OptionValues): string {
-  const configured = typeof values?.endpoint === "string" ? values.endpoint.trim() : "";
-  return (configured || RITZ_BASE).replace(/\/+$/, "");
-}
-
-export function ritzHealthRoute(values?: OptionValues): string {
-  const configured = typeof values?.health_route === "string" ? values.health_route.trim() : "";
-  if (!configured) return "/health";
-  return configured.startsWith("/") ? configured : `/${configured}`;
-}
-
-export async function fetchRitzModels(
-  signal?: AbortSignal,
-  baseUrl: string = RITZ_BASE,
-  headers: Record<string, string> = {}
-): Promise<RitzModelList> {
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, { signal, headers });
-  if (!res.ok) throw new Error(`${config().localAiName} returned ${res.status}`);
-  const raw: unknown = await res.json();
-  const box = (raw ?? {}) as Record<string, unknown>;
-  const list: unknown = Array.isArray(raw) ? raw : box.models ?? box.data ?? [];
-  const models: RitzModel[] = (Array.isArray(list) ? list : []).map((m) => {
-    if (typeof m === "string") return { key: m, name: m };
-    const o = (m ?? {}) as Record<string, unknown>;
-    const key = String(o.key ?? o.id ?? o.name ?? "");
-    return {
-      key,
-      name: String(o.name ?? key),
-      notes: o.notes ? String(o.notes) : undefined,
-      tier: o.tier ? String(o.tier) : undefined,
-      status: o.status ? String(o.status) : undefined,
-    };
-  }).filter((m) => m.key !== "");
-  return { default: typeof box.default === "string" ? box.default : "", models };
-}
-
-/** Verify both the configured liveness route and the HTTP agent contract. */
-export async function checkRitzRuntime(
-  signal: AbortSignal | undefined,
-  baseUrl: string,
-  healthRoute: string,
-  headers: Record<string, string> = {}
-): Promise<void> {
-  const base = baseUrl.replace(/\/+$/, "");
-  const route = healthRoute.trim();
-  if (route) {
-    const health = await fetch(`${base}${route.startsWith("/") ? route : `/${route}`}`, { signal, headers });
-    if (!health.ok) throw new Error(`${config().localAiName} health check returned ${health.status}`);
-  }
-  await fetchRitzModels(signal, base, headers);
-}
-
-/** Resolve HTTP credentials at request time; secret material never enters agent configuration. */
-export async function ritzAuthHeaders(values?: OptionValues): Promise<Record<string, string>> {
-  if (values?.authentication !== "upa-keychain-bearer") return {};
-  const token = await invoke<string>("read_upa_spaces_token");
-  if (!token) throw new Error("Universal Personal Agent bearer token is unavailable in Mac Keychain");
-  return { Authorization: `Bearer ${token}` };
-}
-
-/**
- * The JSON body Spaces posts to /chat. `values` supplies the configured fields;
- * `runtime` supplies the per-run ones. Empty options are omitted so the
- * engine's own defaults apply.
- */
-export function ritzBody(
-  values: OptionValues,
-  runtime?: {
-    conversationId?: string;
-    message?: string;
-    workspace?: string;
-    systemPrompt?: string;
-    principalActorId?: string;
-    triggerOrigin?: string;
-    attachments?: Array<{
-      name: string;
-      mime_type: string;
-      data_base64: string;
-      sha256?: string;
-    }>;
-  }
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    conversation_id: runtime?.conversationId ?? "<channel>:<agent>",
-    message: runtime?.message ?? "<prompt>",
-  };
-  if (runtime?.workspace !== undefined) body.workspace = runtime.workspace;
-  if (runtime?.systemPrompt) body.system_prompt = runtime.systemPrompt;
-  if (runtime?.principalActorId) body.principal_actor_id = runtime.principalActorId;
-  if (runtime?.triggerOrigin) body.trigger_origin = runtime.triggerOrigin;
-  if (runtime?.attachments?.length) body.attachments = runtime.attachments;
-  for (const opt of RITZ_OPTIONS) {
-    if (opt.transportOnly) continue;
-    const v = values[opt.key];
-    if (opt.control === "boolean") {
-      body[opt.key] = v === true;
-      continue;
-    }
-    const s = typeof v === "string" ? v.trim() : "";
-    if (!s) continue;
-    if (opt.control === "number") {
-      const n = Number(s);
-      if (Number.isFinite(n)) body[opt.key] = n;
-      continue;
-    }
-    body[opt.key] = s;
-  }
-  return body;
 }
 
 /* ── Manifest ─────────────────────────────────────────────────── */
@@ -497,118 +355,6 @@ const CODEX_OPTIONS: readonly HarnessOption[] = [
   },
 ];
 
-const RITZ_OPTIONS: readonly HarnessOption[] = [
-  {
-    key: "protocol",
-    label: "Protocol preset",
-    help: "Spaces-compatible HTTP uses GET /models and streaming POST /chat.",
-    control: "enum",
-    kind: "json",
-    choices: ["spaces-compatible-http"],
-    default: "spaces-compatible-http",
-    group: "Connection",
-    transportOnly: true,
-    chip: true,
-  },
-  {
-    key: "endpoint",
-    label: "Endpoint",
-    help: `Blank inherits the installation default (${RITZ_BASE}); set this to give this agent its own engine.`,
-    control: "text",
-    kind: "json",
-    placeholder: RITZ_BASE,
-    group: "Connection",
-    transportOnly: true,
-    chip: true,
-  },
-  {
-    key: "health_route",
-    label: "Health route",
-    help: "A lightweight route used by connection checks before a run.",
-    control: "text",
-    kind: "json",
-    default: "/health",
-    placeholder: "/health",
-    group: "Connection",
-    transportOnly: true,
-  },
-  {
-    key: "authentication",
-    label: "Authentication",
-    help: "Trusted local origin works with a localhost-only engine; bearer credentials belong in the Mac Keychain, never this field.",
-    control: "enum",
-    kind: "json",
-    choices: ["trusted-local-origin", "upa-keychain-bearer", "none"],
-    default: "trusted-local-origin",
-    group: "Connection",
-    transportOnly: true,
-  },
-  {
-    key: "model",
-    label: "Model",
-    help: `Fetched live from ${config().localAiName}. Blank lets the engine route the message itself.`,
-    control: "text",
-    kind: "json",
-    storage: "model",
-    dynamic: "ritz-models",
-    placeholder: "auto",
-    group: "Model",
-    chip: true,
-  },
-  {
-    key: "use_tools",
-    label: "Tools",
-    help: "Lets the engine call its local tools (files, shell, search). Off means chat only.",
-    control: "boolean",
-    kind: "json",
-    default: true,
-    group: "Behavior",
-    chip: true,
-  },
-  {
-    key: "deep",
-    label: "Deep thinking",
-    help: "Longer multi-pass reasoning before answering. Slower, better on hard problems.",
-    control: "boolean",
-    kind: "json",
-    default: false,
-    group: "Behavior",
-    chip: true,
-  },
-  {
-    key: "research",
-    label: "Research",
-    help: "Lets the engine gather sources before answering.",
-    control: "boolean",
-    kind: "json",
-    default: false,
-    group: "Behavior",
-    chip: true,
-  },
-  {
-    key: "temperature",
-    label: "Temperature",
-    help: "0 is deterministic, 1 is loose. Blank uses the engine default.",
-    control: "number",
-    kind: "json",
-    placeholder: "0.7",
-    step: "0.05",
-    min: "0",
-    max: "2",
-    group: "Generation",
-  },
-  {
-    key: "max_tokens",
-    label: "Max tokens",
-    help: "Upper bound on the reply length. Blank uses the engine default.",
-    control: "number",
-    kind: "json",
-    placeholder: "4096",
-    step: "256",
-    min: "1",
-    group: "Generation",
-  },
-];
 
 
 /* ── Cursor Agent ─────────────────────────────────────────────── */
@@ -828,25 +574,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     },
   },
   {
-    kind: "ritz",
-    label: `${config().localAiName} (HTTP)`,
-    blurb: `A configurable local or self-hosted engine at ${RITZ_BASE} — no vendor lock-in.`,
-    wire: "http",
-    base: `POST ${RITZ_CHAT_URL}`,
-    rawLabel: "Raw body fields",
-    rawHelp: "The JSON body fields, as key=value pairs. Edit them and the controls follow; unknown fields are kept and sent as-is.",
-    rawPlaceholder: "use_tools=true deep=false",
-    caps: {
-      resume: true,
-      mcp: "none",
-      toolEvents: true,
-      usage: false,
-      worktrees: true,
-      models: "dynamic",
-      streaming: true,
-    },
-  },
-  {
     kind: "external",
     label: "External app",
     blurb:
@@ -872,7 +599,6 @@ const MANIFEST: Record<string, readonly HarnessOption[]> = {
   claude: CLAUDE_OPTIONS,
   codex: CODEX_OPTIONS,
   cursor: CURSOR_OPTIONS,
-  ritz: RITZ_OPTIONS,
   external: EXTERNAL_OPTIONS,
 };
 
@@ -1035,7 +761,7 @@ function asText(v: OptionValue | undefined): string {
 /**
  * Values → the string stored in `agents.cli_args`.
  *
- * Flag harnesses emit `--flag value`; Ritz emits `field=value` tokens for
+ * Flag options emit `--flag value`; settings emit `field=value` tokens for
  * its JSON body. Options with `storage: "model"` are skipped — they live in
  * the agent's own model column. Unrecognised text is appended verbatim.
  */
@@ -1183,7 +909,7 @@ export function parseArgs(kind: string, cliArgs: string): OptionValues {
  *
  * The model is the exception — it is dropped when it came from the old
  * harness's own list ("opus" means nothing to Codex) or when the harnesses
- * talk over different wires (a Ritz model key means nothing to a CLI, and
+ * talk over different wires (an app name means nothing to a CLI, and
  * vice versa). A hand-typed id survives a CLI-to-CLI switch.
  */
 export function carryOver(fromKind: string, toKind: string, values: OptionValues): OptionValues {
@@ -1206,7 +932,7 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
     if (opt.choices && !opt.choices.includes(text)) continue;
     if (opt.key === "model") {
       const prev = optionFor(fromKind, "model");
-      const fromList = Boolean(prev?.suggestions?.includes(text)) || prev?.dynamic !== undefined;
+      const fromList = Boolean(prev?.suggestions?.includes(text));
       const crossWire = harnessFor(fromKind).wire !== harnessFor(toKind).wire;
       if (fromList || crossWire) continue;
     }
@@ -1217,12 +943,9 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
 
 /* ── Preview, risks, chips ────────────────────────────────────── */
 
-/** The exact command Spaces will run — or, for Ritz, the request it will send. */
+/** The exact command Spaces will run, or what it does instead when it cannot. */
 export function commandPreview(kind: string, values: OptionValues): string {
   const meta = harnessFor(kind);
-  if (meta.wire === "http") {
-    return `POST ${ritzBase(values)}/chat\n${JSON.stringify(ritzBody(values), null, 2)}`;
-  }
   if (meta.wire === "external") {
     // There is no command. Showing what Spaces *does* do instead is the honest
     // preview: it writes a brief and then reads git.
@@ -1296,16 +1019,14 @@ export function agentChips(kind: string, model: string, cliArgs: string): CapChi
 
 /** Stable label stored with each run so later agent edits do not rewrite history. */
 export function configuredEffort(kind: string, cliArgs: string): string {
-  const values = parseArgs(kind, cliArgs);
-  if (norm(kind) === "ritz") return values.deep === true ? "deep" : "standard";
-  return asText(values.effort).trim();
+  return asText(parseArgs(kind, cliArgs).effort).trim();
 }
 
 /**
  * Flags for `codex exec resume <id> --json`, which rejects exec-only flags:
  * --sandbox becomes `-c sandbox_mode="…"`, and the other exec-only options
  * (--add-dir, --profile) are dropped rather than crashing the resume.
- * Claude and Ritz resume with their configuration unchanged.
+ * Claude and Cursor resume with their configuration unchanged.
  */
 export function resumeArgs(kind: string, cliArgs: string): string {
   const k = norm(kind);

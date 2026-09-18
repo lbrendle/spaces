@@ -36,14 +36,9 @@ import {
   configuredEffort,
   tokenize,
   resumeArgs,
-  ritzBody,
-  ritzBase,
-  ritzAuthHeaders,
-  parseArgs as parseOptionValues,
 } from "./capabilities";
 import { registerCanceller, trackRun, untrackRun } from "./runbus";
 import { dispatch } from "./orchestrator";
-import { config } from "./config";
 import { currentDeviceId } from "./deviceIdentity";
 import { confirmAction } from "./toast";
 import {
@@ -199,11 +194,11 @@ export async function ensureNotifyPermission() {
 export interface AgentAdapter {
   id: AgentKind;
   /**
-   * "cli" spawns a process via Rust; "http" streams from a local service;
-   * "external" is never launched at all — the agent runs in its own app and
-   * meets Spaces in the shared repo (see external.ts).
+   * "cli" spawns a process via Rust; "external" is never launched at all — the
+   * agent runs in its own app and meets Spaces in the shared repo (see
+   * external.ts).
    */
-  transport?: "cli" | "http" | "external";
+  transport?: "cli" | "external";
   /** Executable name; the Rust side resolves it on PATH. */
   program: string;
   /**
@@ -433,170 +428,6 @@ const externalAdapter: AgentAdapter = {
   },
 };
 
-/* ------------------------------------------------------------------ *
- * Ritz — the user's local on-device engine. Not a CLI: an HTTP service
- * that streams Server-Sent Events. It is a different transport behind the
- * same adapter seam, which is exactly what that seam is for.
- *
- * Memory: the conversation id is namespaced "spaces-<channel>-<agent>", so
- * Ritz-in-Spaces starts blank and never touches the conversations its own app
- * has accumulated. Reusing that id per (channel, agent) is what gives us
- * resume for free.
- * ------------------------------------------------------------------ */
-
-/** Local model server for the `ritz` kind; overridable per deployment. */
-export const RITZ_URL = config().localAiUrl;
-
-export function ritzConversationId(channelId: string, agentId: string): string {
-  return `spaces-${channelId}-${agentId}`;
-}
-
-/** Ritz emits reasoning inline; it is useful live but noise in the transcript. */
-function stripThinking(s: string): string {
-  return s.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/<think>[\s\S]*$/, "").trim();
-}
-
-const ritzAborts = new Map<string, AbortController>();
-
-const ritzAdapter: AgentAdapter = {
-  id: "ritz",
-  transport: "http",
-  program: "ritz",
-
-  buildArgs() {
-    return []; // not a process
-  },
-
-  extractSessionId() {
-    // The conversation id is chosen by us, not returned by the stream.
-    return "";
-  },
-
-  parseLine(obj, run) {
-    if (obj.type === "start") {
-      pushActivity(run, "info", `model ${obj.model ?? ""}`);
-      run.liveActivity = "thinking…";
-    } else if (obj.type === "token" && typeof obj.text === "string") {
-      // Tokens arrive one fragment at a time; grow a single block.
-      if (!run.parts.length) run.parts.push("");
-      run.parts[0] += obj.text;
-      run.liveActivity = "";
-    } else if (obj.type === "step" && obj.name) {
-      const args = obj.arguments ? JSON.stringify(obj.arguments).slice(0, 200) : "";
-      pushActivity(run, "tool", `${obj.name} ${args}`);
-      run.liveActivity = `⚙︎ using ${obj.name}…`;
-      if (obj.result) pushActivity(run, "info", String(obj.result).slice(0, 300));
-    } else if (obj.type === "error" && obj.message) {
-      pushActivity(run, "stderr", String(obj.message).slice(0, 300));
-    } else if (obj.type === "done" || obj.type === "end") {
-      run.liveActivity = "";
-    }
-  },
-};
-
-/**
- * POST /chat and pump its SSE stream through the same funnel the CLI
- * adapters use, so streaming, activity, cancel and persistence behave
- * identically regardless of transport.
- */
-async function startRitzRun(opts: {
-  runId: string;
-  agent: Agent;
-  conversationId: string;
-  prompt: string;
-  cwd: string;
-  trigger: Trigger;
-}): Promise<void> {
-  const ctrl = new AbortController();
-  ritzAborts.set(opts.runId, ctrl);
-  const values = {
-    ...parseOptionValues("ritz", opts.agent.cli_args ?? ""),
-    model: opts.agent.model ?? "",
-  };
-  const baseUrl = ritzBase(values);
-  const authHeaders = await ritzAuthHeaders(values);
-
-  const res = await fetch(`${baseUrl}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders },
-    signal: ctrl.signal,
-    body: JSON.stringify(
-      ritzBody(
-        values,
-        {
-          conversationId: opts.conversationId,
-          message: opts.prompt,
-          workspace: opts.cwd || undefined,
-          principalActorId:
-            opts.trigger.authorType === "user" && opts.trigger.authorId === "user"
-              ? "local-user"
-              : `${opts.trigger.authorType}:${opts.trigger.authorId}`,
-          triggerOrigin:
-            opts.trigger.authorType === "user" && opts.trigger.authorId === "user"
-              ? "local-composer"
-              : "shared-or-automated",
-          attachments: opts.trigger.attachments,
-        }
-      ),
-    ),
-  });
-  if (!res.ok || !res.body) {
-    throw new Error(`${config().localAiName} returned ${res.status} ${res.statusText}`);
-  }
-
-  // Drain in the background; runAgent's promise settles off the done event.
-  void (async () => {
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let failure = "";
-    // Ritz serialises all GPU work through one worker, and aborting an HTTP
-    // request does not stop generation server-side — so an abandoned request
-    // can block every later one. Fail loudly instead of spinning forever.
-    let sawData = false;
-    const stall = setTimeout(() => {
-      if (!sawData && !ctrl.signal.aborted) {
-        failure =
-          `${config().localAiName} accepted the request but produced no output in 2 minutes. Its worker is ` +
-          "probably busy with an earlier request — restart the engine if this persists.";
-        ctrl.abort();
-        void handleEvent({ runId: opts.runId, kind: "error", data: failure, exitCode: 1 });
-      }
-    }, 120_000);
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        // SSE frames are separated by a blank line; each "data:" is one JSON.
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
-          sawData = true;
-          await handleEvent({ runId: opts.runId, kind: "line", data: payload, exitCode: null });
-        }
-      }
-    } catch (e) {
-      if (!ctrl.signal.aborted) failure = String(e);
-    } finally {
-      clearTimeout(stall);
-      ritzAborts.delete(opts.runId);
-      if (!ctrl.signal.aborted) {
-        await handleEvent({
-          runId: opts.runId,
-          kind: failure ? "error" : "done",
-          data: failure,
-          exitCode: failure ? 1 : 0,
-        });
-      }
-    }
-  })();
-}
-
 /**
  * The harness registry, keyed the same way capabilities.ts keys its manifest.
  * Adding one is: write an adapter, register it here, add its HarnessMeta and
@@ -606,7 +437,6 @@ const ADAPTERS: Record<string, AgentAdapter> = {
   claude: claudeAdapter,
   codex: codexAdapter,
   cursor: cursorAdapter,
-  ritz: ritzAdapter,
   external: externalAdapter,
 };
 
@@ -901,8 +731,7 @@ function handleLine(run: RunState, line: string) {
 function renderContent(run: RunState): string {
   if (run.parts.length) {
     const joined = run.parts.join("\n\n");
-    // Ritz streams its reasoning inline; keep it out of the saved transcript.
-    return run.agent.kind === "ritz" ? stripThinking(joined) : joined;
+    return joined;
   }
   return run.raw.join("\n");
 }
@@ -1801,13 +1630,7 @@ export async function runAgent(
     run_id: msgId,
   });
 
-  let session = remote ? "" : store.getSession(channelId, agent.id);
-  if (!remote && adapterFor(agent).transport === "http" && !session) {
-    // The conversation id is deterministic, so recording it makes the very
-    // next turn a resume rather than a fresh brief.
-    session = ritzConversationId(channelId, agent.id);
-    void store.setSession(channelId, agent.id, session);
-  }
+  const session = remote ? "" : store.getSession(channelId, agent.id);
   // Teammates share one git object database, so every turn gets an up-to-date
   // picture of their branches, the files somebody else is holding, and how to
   // read their work. Built from the whole roster — including agents Spaces
@@ -1905,8 +1728,8 @@ export async function runAgent(
       }))
     : { path: "", written: false, error: "" };
   // Codex takes its MCP config as spawn arguments. Claude and Cursor read the
-  // config files we verified in the exact cwd above. Ritz has neither and
-  // reaches the same operations through .hq/actions.jsonl.
+  // config files we verified in the exact cwd above. An external agent has
+  // neither and reaches the same operations through .hq/actions.jsonl.
   const adapterArgs = [
     ...(agent.kind === "codex" && mcpProject ? mcpCodexArgs(mcpProject) : []),
     ...adapter.buildArgs(agent, session, runtimeContract.error ? "" : runtimeContract.path),
@@ -1940,8 +1763,6 @@ export async function runAgent(
     command:
       remote
         ? `remote → ${agent.host_device_id}`
-        : adapter.transport === "http"
-        ? `POST ${ritzBase(parseOptionValues("ritz", agent.cli_args ?? ""))}/chat`
         : adapter.transport === "external"
         ? `hand-off → ${handoffPath(agent)}`
         : displayCommand(
@@ -2000,16 +1821,7 @@ export async function runAgent(
       await store.patchRun(msgId, { meta: run.liveActivity });
       return settled;
     }
-    if (adapter.transport === "http") {
-      await startRitzRun({
-        runId: msgId,
-        agent,
-        conversationId: ritzConversationId(channelId, agent.id),
-        prompt,
-        cwd,
-        trigger,
-      });
-    } else {
+    {
       await invoke("start_agent_run", {
         request: {
           runId: msgId,
@@ -2230,11 +2042,6 @@ export async function cancelRun(msgId: string) {
   if (remoteJobId) {
     remoteJobIds.delete(msgId);
     await cancelRemoteJob(remoteJobId).catch(() => {});
-  }
-  const abort = ritzAborts.get(msgId);
-  if (abort) {
-    abort.abort();
-    ritzAborts.delete(msgId);
   }
   await invoke("cancel_agent_run", { runId: msgId }).catch(() => {});
   // The done event may have landed during the await — don't flip a run that

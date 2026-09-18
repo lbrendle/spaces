@@ -1387,10 +1387,10 @@ function Composer({
   const hintTimer = useRef<number | undefined>(undefined);
   const listId = useId();
   const agents = channelAgents(store, channelId);
-  const attachmentCapable =
-    agents.length === 1 &&
-    harnessFor(agents[0].kind).wire === "http" &&
-    /(?:^|\s)protocol=spaces-compatible-http(?:\s|$)/.test(agents[0].cli_args || "");
+  // Attachments crossed the wire as base64 in an HTTP engine's request body.
+  // Every supported harness reads the repository directly now, so media is
+  // shared through Spaces and referenced by path rather than inlined here.
+  const attachmentCapable = false;
   const composerChannelName = store.channels.find((c) => c.id === channelId)?.name ?? "";
 
   // Adjusting state during render is React's own answer to "the props moved":

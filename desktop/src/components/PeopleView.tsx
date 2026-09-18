@@ -25,7 +25,6 @@ import { getDb, now } from "../db";
 import { colorFor, slug } from "../types";
 import type { Agent, Calendar, Device, Member, MemberRole } from "../types";
 import { accessFor } from "../calendars";
-import { config } from "../config";
 import { workloadOf } from "../links";
 import type { AssignmentView } from "../links";
 import { confirmAction, toast } from "../toast";
@@ -1711,12 +1710,6 @@ function BringAgentPanel({
                   that CLI is installed there.
                 </li>
               )}
-            {hostDevice && harnessFor(effectiveKind).wire === "http" && (
-              <li>
-                {config().localAiName} answers on that machine's configured HTTP port rather than from PATH, so a device's tool
-                list says nothing either way about it.
-              </li>
-            )}
             {hostDevice && harnessFor(effectiveKind).wire === "external" && (
               <li>
                 Spaces never launches this one, so no machine needs anything on its PATH for it.

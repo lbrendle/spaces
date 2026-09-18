@@ -34,7 +34,6 @@ export type BuiltinAgentKind =
   | "claude"
   | "codex"
   | "cursor"
-  | "ritz"
   | "external";
 
 export type AgentKind = BuiltinAgentKind | (string & {});

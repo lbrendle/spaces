@@ -17,7 +17,7 @@
  * spawning `--version` for each one would be absurd.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { harnessBin, harnessFor, parseArgs, ritzBase, ritzHealthRoute } from "./capabilities";
+import { harnessBin, harnessFor, parseArgs } from "./capabilities";
 import type { Agent } from "./types";
 
 export type HealthState =
@@ -240,34 +240,6 @@ async function checkCli(kind: string, program: string): Promise<HarnessHealth> {
   };
 }
 
-async function checkHttp(kind: string, agent?: Agent): Promise<HarnessHealth> {
-  const meta = harnessFor(kind);
-  const values = parseArgs(kind, agent?.cli_args ?? "");
-  const url = `${ritzBase(values)}${ritzHealthRoute(values)}`;
-  const base: HarnessHealth = {
-    kind,
-    state: "unknown",
-    detail: "",
-    version: "",
-    path: ritzBase(values),
-    installHint: meta.probe?.installHint ?? "",
-    checkedAt: Date.now(),
-  };
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) {
-      return { ...base, state: "error", detail: `${url} answered ${res.status} ${res.statusText}.` };
-    }
-    return { ...base, state: "ready", detail: `${meta.label} is answering at ${ritzBase(values)}.` };
-  } catch (e) {
-    return {
-      ...base,
-      state: "missing",
-      detail: `Nothing is answering at ${url} — start the engine, or point this agent at a different endpoint. (${String(e).slice(0, 80)})`,
-    };
-  }
-}
-
 async function checkExternal(kind: string, agent?: Agent): Promise<HarnessHealth> {
   const values = parseArgs(kind, agent?.cli_args ?? "");
   const appName = String(agent?.model ?? values.model ?? "").trim();
@@ -323,7 +295,7 @@ export async function checkHarness(kind: string, agent?: Agent): Promise<Harness
   const meta = harnessFor(kind);
   const program = harnessBin(kind, String(agent?.model ?? ""));
   const discriminator =
-    meta.wire === "cli" ? program : meta.wire === "http" ? String(agent?.cli_args ?? "") : `${agent?.model ?? ""}|${agent?.cli_args ?? ""}`;
+    meta.wire === "cli" ? program : `${agent?.model ?? ""}|${agent?.cli_args ?? ""}`;
   const key = `${kind}:${discriminator}`;
 
   const hit = cache.get(key);
@@ -335,11 +307,9 @@ export async function checkHarness(kind: string, agent?: Agent): Promise<Harness
   const task = (async () => {
     try {
       const value =
-        meta.wire === "http"
-          ? await checkHttp(kind, agent)
-          : meta.wire === "external"
-            ? await checkExternal(kind, agent)
-            : await checkCli(kind, program);
+        meta.wire === "external"
+          ? await checkExternal(kind, agent)
+          : await checkCli(kind, program);
       cache.set(key, { at: Date.now(), value });
       announce();
       return value;

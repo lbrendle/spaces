@@ -4496,7 +4496,6 @@ function DialogFields({
             <option value="claude">Claude Code</option>
             <option value="codex">Codex</option>
             <option value="cursor">Cursor Agent</option>
-            <option value="ritz">Local HTTP</option>
             <option value="external">External app</option>
           </select>
         </Field>

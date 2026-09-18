@@ -4,7 +4,7 @@
  * An agent that can only read `.hq/` is a spectator. MCP fixes that for the
  * harnesses that speak it; this fixes it for everything else. Appending a line
  * to `<cwd>/.hq/actions.jsonl` needs nothing but `echo >>`, which every agent
- * in every harness can already do — Ritz included, and any future one.
+ * in every harness can already do, including ones Spaces never launches.
  *
  * Both transports meet at dispatchAction(): one place decides whether an
  * operation applies now or waits for a human, one place writes the audit row.

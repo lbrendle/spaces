@@ -16,7 +16,6 @@
  * at setup.
  */
 import { defaultsFor, harnessFor, serializeArgs, type OptionValues } from "./capabilities";
-import { config } from "./config";
 import { currentDeviceId } from "./deviceIdentity";
 
 export interface Integration {
@@ -95,14 +94,6 @@ export const INTEGRATIONS: readonly Integration[] = [
     role: "Engineer",
     model: "Zed",
     values: { bundle_id: "dev.zed.Zed" },
-  },
-  {
-    id: "local-ai",
-    label: `${config().localAiName}`,
-    kind: "ritz",
-    blurb: `A local or self-hosted engine, answering over HTTP. Nothing leaves this machine.`,
-    agentName: config().localAiName,
-    role: "Engineer",
   },
 ];
 

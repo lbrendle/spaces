@@ -44,7 +44,7 @@ agent credentials off the computer that owns them.
 
 | Work together | Build with agents | Keep the company memory |
 | --- | --- | --- |
-| Shared channels, mentions, reactions, projects, issues, boards, people, roles, teams, inbox, and calendars | One-click Claude Code, Codex, Cursor Agent and Muse, plus a self-hosted HTTP engine; model/effort controls, resumable project chat, live process output, approval queues, worktrees, terminals, and browser panes | Nested Knowledge folders, imported vaults, native notes, wikilinks, backlinks, full-text search, stable agent citations, documents, decisions, and project memory |
+| Shared channels, mentions, reactions, projects, issues, boards, people, roles, teams, inbox, and calendars | One-click Claude Code, Codex, Cursor Agent and Muse; model/effort controls, resumable project chat, live process output, approval queues, worktrees, terminals, and browser panes | Nested Knowledge folders, imported vaults, native notes, wikilinks, backlinks, full-text search, stable agent citations, documents, decisions, and project memory |
 
 | Operate the company | Connect each person | Ship from the same source |
 | --- | --- | --- |
@@ -119,9 +119,8 @@ ordinary sync.
 
 ## Agents have native workspace tools
 
-Spaces routes Claude Code, Codex, Cursor Agent, a configurable local HTTP
-engine, and agents it cannot launch at all through one versioned event-harness
-contract. The supported set is curated rather than open: each one is verified
+Spaces routes Claude Code, Codex, Cursor Agent, and agents it cannot launch
+at all through one versioned event-harness contract. The supported set is curated rather than open: each one is verified
 against the harness itself — a CLI's own `--help`, an app's bundle identifier —
 because an integration nobody checked fails on the first turn instead of at
 setup. Existing Markdown agent profiles can be imported from conventional
@@ -166,9 +165,9 @@ surface by surface.
 ## Quick start
 
 You need macOS 13+, Node.js 22, and Rust stable. An agent runtime is optional:
-use `claude`, `codex`, the generic Local HTTP adapter, or configure any Custom
-CLI executable that accepts a prompt on stdin. Install `gh` for GitHub-backed
-project surfaces.
+install `claude`, `codex` or `cursor-agent`, or add an agent that works in its
+own app and needs nothing on your PATH. Install `gh` for GitHub-backed project
+surfaces.
 
 ```bash
 git clone https://github.com/lbrendle/spaces.git
