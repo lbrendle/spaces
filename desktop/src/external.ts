@@ -345,6 +345,20 @@ export function composerMessage(opts: {
 }
 
 /**
+ * Add the permission hint to a failure — after one, and only when it is
+ * plausibly the cause.
+ *
+ * The trust API explains; it never prevents the attempt. It reports stale
+ * state after a grant — an app can be switched on in the list and still be
+ * told it is not trusted — and a pre-check that is wrong in that direction
+ * blocks a feature that would have worked.
+ */
+async function explain(problem: string): Promise<string> {
+  if (await automationReady()) return problem;
+  return `${problem} If this keeps happening, check Spaces is switched on in System Settings → Privacy & Security → Accessibility — and if it already is, switch it off and on again, which re-records the entry against the current signature.`.trim();
+}
+
+/**
  * Type a harmless line into the app, so somebody can find out whether this
  * works before they rely on it in a channel.
  *
@@ -362,14 +376,6 @@ export async function testDelivery(agent: Agent): Promise<Delivery> {
       previousApp: "",
     };
   }
-  if (!(await automationReady())) {
-    return {
-      delivered: false,
-      problem:
-        "Spaces does not have Accessibility permission yet, so macOS will not let it type into another app.",
-      previousApp: "",
-    };
-  }
   try {
     const raw = await invoke("send_to_app", {
       bundleId: config.bundleId,
@@ -380,13 +386,14 @@ export async function testDelivery(agent: Agent): Promise<Delivery> {
       submit: false,
     });
     const result = (raw ?? {}) as Record<string, unknown>;
+    const delivered = result.delivered === true;
     return {
-      delivered: result.delivered === true,
-      problem: String(result.problem ?? ""),
+      delivered,
+      problem: delivered ? "" : await explain(String(result.problem ?? "")),
       previousApp: String(result.previous_app ?? result.previousApp ?? ""),
     };
   } catch (e) {
-    return { delivered: false, problem: String(e), previousApp: "" };
+    return { delivered: false, problem: await explain(String(e)), previousApp: "" };
   }
 }
 
@@ -419,19 +426,6 @@ export async function deliverToApp(
     };
   }
 
-  // Ask the cheap question first. Without Accessibility permission macOS does
-  // not refuse, it never answers — so attempting the send would stall the
-  // channel for the whole 20-second cap before saying anything useful.
-  if (!(await automationReady())) {
-    return {
-      delivered: false,
-      problem:
-        "Spaces does not have Accessibility permission, so macOS will not let it type into another app. " +
-        "Grant it in System Settings → Privacy & Security → Accessibility, then try again.",
-      previousApp: "",
-    };
-  }
-
   try {
     const raw = await invoke("send_to_app", {
       bundleId: config.bundleId,
@@ -442,13 +436,14 @@ export async function deliverToApp(
       submit: true,
     });
     const result = (raw ?? {}) as Record<string, unknown>;
+    const delivered = result.delivered === true;
     return {
-      delivered: result.delivered === true,
-      problem: String(result.problem ?? ""),
+      delivered,
+      problem: delivered ? "" : await explain(String(result.problem ?? "")),
       previousApp: String(result.previous_app ?? result.previousApp ?? ""),
     };
   } catch (e) {
-    return { delivered: false, problem: String(e), previousApp: "" };
+    return { delivered: false, problem: await explain(String(e)), previousApp: "" };
   }
 }
 

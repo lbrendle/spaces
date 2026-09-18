@@ -126,7 +126,7 @@ export function AutoSend({ agent }: { agent: Agent }) {
               ? "Spaces has Accessibility permission, so it can type into other apps."
               : waiting
                 ? "Waiting for the toggle. Turn Spaces on in the Accessibility list macOS just opened — it may be on another desktop. This notices on its own, and again whenever you come back to Spaces."
-                : "Spaces does not have Accessibility permission. macOS will silently drop anything it tries to type into another app."}
+                : "macOS reports no Accessibility permission. If you have already granted it, that report can be stale — try the test below anyway, and if it fails, switch Spaces off and on again in the list."}
         </span>
         {trusted === false && !waiting && (
           <button type="button" className="btn tiny primary" onClick={() => void grant()}>
@@ -148,12 +148,13 @@ export function AutoSend({ agent }: { agent: Agent }) {
           type="button"
           className="btn tiny"
           onClick={() => void runTest()}
-          disabled={testing || trusted !== true}
+          disabled={testing}
         >
           {testing ? <Spinner /> : null} Type a test line into {app}
         </button>
         <span className="as-hint">
-          Types, but does not send — so you can see whether it lands in the message box.
+          Types, but does not send — so you can see whether it lands in the message box. Worth
+          trying even when the line above says the permission is missing; that report goes stale.
         </span>
       </div>
 
