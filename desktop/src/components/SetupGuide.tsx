@@ -9,9 +9,15 @@
  * as an error, "not found" is neutral, and every install path says out loud
  * that one runtime is enough.
  *
- * Detection is deliberately two different mechanisms, because the runtimes
- * are: claude/codex/gh are binaries on PATH (the Rust `check_tools`), Ritz is
- * an HTTP service that either answers on 127.0.0.1:8765 or does not.
+ * Detection is deliberately several mechanisms, because the runtimes are:
+ * CLI harnesses are binaries on PATH (the Rust `check_tools`), an HTTP engine
+ * either answers on its port or does not, and an external agent is a GUI app
+ * Spaces never launches at all.
+ *
+ * The two install paths below stay curated rather than listing the whole
+ * registry: this is somebody's first five minutes, and nine options is not a
+ * better answer to "what do I install" than two. Agents & Teams has the full
+ * set, with a per-harness check.
  */
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -291,9 +297,10 @@ export function SetupGuide() {
 
       <p className="rt-lede">
         Agents belong to this workspace, not to a person — everyone here can use anyone's.
-        Each one wraps a runtime on somebody's machine: the <code>claude</code> or{" "}
-        <code>codex</code> CLI, a Custom CLI, or {config().localAiName} over HTTP. It answers while its host device is
-        online.
+        Most wrap a runtime on somebody's machine: the <code>claude</code>, <code>codex</code> or{" "}
+        <code>cursor-agent</code> CLI, one of your own, or {config().localAiName} over HTTP. Those
+        answer while their host device is online. An agent can also be an app Spaces doesn't
+        launch at all — it works in the same repository, and Spaces reads what it did out of git.
       </p>
       <p className="rt-lede">
         <strong>You need none of this installed to use the workspace's agents.</strong> A
