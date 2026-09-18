@@ -660,7 +660,9 @@ fn jsonl_files(root: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     if depth > 6 || out.len() > 20_000 {
         return;
     }
-    let Ok(entries) = std::fs::read_dir(root) else { return };
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         match entry.file_type() {
@@ -683,7 +685,9 @@ fn block_text(value: &serde_json::Value) -> String {
     if let Some(text) = value.as_str() {
         return text.trim().to_string();
     }
-    let Some(items) = value.as_array() else { return String::new() };
+    let Some(items) = value.as_array() else {
+        return String::new();
+    };
     let mut parts: Vec<String> = Vec::new();
     for item in items {
         let kind = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -758,7 +762,11 @@ fn first_prose_line(text: &str) -> String {
             .unwrap_or_default();
     }
 
-    let first = lines.iter().find(|line| !line.is_empty()).copied().unwrap_or("");
+    let first = lines
+        .iter()
+        .find(|line| !line.is_empty())
+        .copied()
+        .unwrap_or("");
     if INJECTED_SECTIONS.iter().any(|head| first.starts_with(head)) {
         return String::new();
     }
@@ -851,7 +859,9 @@ fn summarise(path: &Path, source: &str) -> Option<SessionSummary> {
         if line.is_empty() {
             continue;
         }
-        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         let kind = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         if started_at == 0 {
@@ -909,9 +919,7 @@ fn summarise(path: &Path, source: &str) -> Option<SessionSummary> {
                     }
                 } else if kind == "response_item" && title.is_empty() {
                     let payload = record.get("payload");
-                    let is_user = payload
-                        .and_then(|p| p.get("role"))
-                        .and_then(|v| v.as_str())
+                    let is_user = payload.and_then(|p| p.get("role")).and_then(|v| v.as_str())
                         == Some("user");
                     if is_user {
                         if let Some(content) = payload.and_then(|p| p.get("content")) {
@@ -1003,8 +1011,14 @@ async fn scan_agent_sessions() -> Result<Vec<SessionSummary>, String> {
         let mut found: Vec<SessionSummary> = Vec::new();
 
         for (source, root) in [
-            ("claude", PathBuf::from(&home).join(".claude").join("projects")),
-            ("codex", PathBuf::from(&home).join(".codex").join("sessions")),
+            (
+                "claude",
+                PathBuf::from(&home).join(".claude").join("projects"),
+            ),
+            (
+                "codex",
+                PathBuf::from(&home).join(".codex").join("sessions"),
+            ),
         ] {
             if !root.is_dir() {
                 continue;
@@ -1049,7 +1063,9 @@ async fn read_agent_session(path: String, source: String) -> Result<SessionTrans
             if line.is_empty() {
                 continue;
             }
-            let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
             let kind = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
             let at = record
                 .get("timestamp")
@@ -1085,7 +1101,9 @@ async fn read_agent_session(path: String, source: String) -> Result<SessionTrans
                 if kind != "user" && kind != "assistant" {
                     continue;
                 }
-                let Some(body) = record.get("message").and_then(|m| m.get("content")) else { continue };
+                let Some(body) = record.get("message").and_then(|m| m.get("content")) else {
+                    continue;
+                };
                 let text = block_text(body);
                 if text.is_empty() {
                     continue;
@@ -1093,7 +1111,11 @@ async fn read_agent_session(path: String, source: String) -> Result<SessionTrans
                 if title.is_empty() && kind == "user" {
                     title = first_prose_line(&text);
                 }
-                turns.push(SessionTurn { role: kind.to_string(), text: clamp(text), at });
+                turns.push(SessionTurn {
+                    role: kind.to_string(),
+                    text: clamp(text),
+                    at,
+                });
             } else {
                 if kind == "session_meta" {
                     if let Some(payload) = record.get("payload") {
@@ -1114,7 +1136,9 @@ async fn read_agent_session(path: String, source: String) -> Result<SessionTrans
                 if kind != "response_item" {
                     continue;
                 }
-                let Some(payload) = record.get("payload") else { continue };
+                let Some(payload) = record.get("payload") else {
+                    continue;
+                };
                 if payload.get("type").and_then(|v| v.as_str()) != Some("message") {
                     continue;
                 }
@@ -1122,7 +1146,9 @@ async fn read_agent_session(path: String, source: String) -> Result<SessionTrans
                 if role != "user" && role != "assistant" {
                     continue;
                 }
-                let Some(content) = payload.get("content") else { continue };
+                let Some(content) = payload.get("content") else {
+                    continue;
+                };
                 let text = block_text(content);
                 if text.is_empty() {
                     continue;
@@ -1130,7 +1156,11 @@ async fn read_agent_session(path: String, source: String) -> Result<SessionTrans
                 if title.is_empty() && role == "user" {
                     title = first_prose_line(&text);
                 }
-                turns.push(SessionTurn { role: role.to_string(), text: clamp(text), at });
+                turns.push(SessionTurn {
+                    role: role.to_string(),
+                    text: clamp(text),
+                    at,
+                });
             }
         }
 
@@ -1246,7 +1276,10 @@ const AX_VALUE_CGSIZE: u32 = 2;
 /// the trap this whole module exists to avoid. Launch Services will answer the
 /// same question without any permission at all.
 fn frontmost_pid() -> Option<i32> {
-    let front = Command::new("/usr/bin/lsappinfo").arg("front").output().ok()?;
+    let front = Command::new("/usr/bin/lsappinfo")
+        .arg("front")
+        .output()
+        .ok()?;
     let asn = String::from_utf8_lossy(&front.stdout).trim().to_string();
     if asn.is_empty() {
         return None;
@@ -1270,15 +1303,27 @@ fn frontmost_pid() -> Option<i32> {
 /// a reference. Wrapping it in `CFType` is what makes a tree walk safe: raw
 /// `CFTypeRef`s handed around by hand either leak on every node or dangle once
 /// the array they came from is dropped.
-unsafe fn ax_get(element: &core_foundation::base::CFType, name: &str) -> Option<core_foundation::base::CFType> {
+unsafe fn ax_get(
+    element: &core_foundation::base::CFType,
+    name: &str,
+) -> Option<core_foundation::base::CFType> {
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::string::CFString;
     let key = CFString::new(name);
     let mut value: core_foundation::base::CFTypeRef = std::ptr::null();
-    if AXUIElementCopyAttributeValue(element.as_CFTypeRef(), key.as_concrete_TypeRef(), &mut value) != 0 {
+    if AXUIElementCopyAttributeValue(
+        element.as_CFTypeRef(),
+        key.as_concrete_TypeRef(),
+        &mut value,
+    ) != 0
+    {
         return None;
     }
-    if value.is_null() { None } else { Some(CFType::wrap_under_create_rule(value)) }
+    if value.is_null() {
+        None
+    } else {
+        Some(CFType::wrap_under_create_rule(value))
+    }
 }
 
 /// An AX attribute as a string, for roles and for reading a field back.
@@ -1293,10 +1338,14 @@ unsafe fn ax_string(element: &core_foundation::base::CFType, name: &str) -> Opti
 }
 
 /// An AX element's children, or an empty list for a leaf.
-unsafe fn ax_children(element: &core_foundation::base::CFType) -> Vec<core_foundation::base::CFType> {
+unsafe fn ax_children(
+    element: &core_foundation::base::CFType,
+) -> Vec<core_foundation::base::CFType> {
     use core_foundation::array::CFArray;
     use core_foundation::base::{CFType, TCFType};
-    let Some(value) = ax_get(element, "AXChildren") else { return Vec::new() };
+    let Some(value) = ax_get(element, "AXChildren") else {
+        return Vec::new();
+    };
     if value.type_of() != CFArray::<CFType>::type_id() {
         return Vec::new();
     }
@@ -1309,14 +1358,25 @@ unsafe fn ax_frame(element: &core_foundation::base::CFType) -> Option<(f64, f64,
     use core_foundation::base::TCFType;
     #[repr(C)]
     #[derive(Default, Clone, Copy)]
-    struct Pair { a: f64, b: f64 }
+    struct Pair {
+        a: f64,
+        b: f64,
+    }
 
     let pos = ax_get(element, "AXPosition")?;
     let size = ax_get(element, "AXSize")?;
     let mut point = Pair::default();
     let mut extent = Pair::default();
-    let ok_point = AXValueGetValue(pos.as_CFTypeRef(), AX_VALUE_CGPOINT, &mut point as *mut _ as *mut _);
-    let ok_size = AXValueGetValue(size.as_CFTypeRef(), AX_VALUE_CGSIZE, &mut extent as *mut _ as *mut _);
+    let ok_point = AXValueGetValue(
+        pos.as_CFTypeRef(),
+        AX_VALUE_CGPOINT,
+        &mut point as *mut _ as *mut _,
+    );
+    let ok_size = AXValueGetValue(
+        size.as_CFTypeRef(),
+        AX_VALUE_CGSIZE,
+        &mut extent as *mut _ as *mut _,
+    );
     if !ok_point || !ok_size {
         return None;
     }
@@ -1329,7 +1389,9 @@ unsafe fn ax_frame(element: &core_foundation::base::CFType) -> Option<(f64, f64,
 /// window, and the order is arbitrary. Muse keeps a stale "Log in" window on
 /// another Space — first in the list, 1200 points wide, and completely wrong.
 /// Focused first, then main, and only then the arbitrary one.
-unsafe fn target_window(app: &core_foundation::base::CFType) -> Option<core_foundation::base::CFType> {
+unsafe fn target_window(
+    app: &core_foundation::base::CFType,
+) -> Option<core_foundation::base::CFType> {
     for attribute in ["AXFocusedWindow", "AXMainWindow"] {
         if let Some(window) = ax_get(app, attribute) {
             if ax_frame(&window).is_some() {
@@ -1454,7 +1516,10 @@ unsafe fn find_composer(window: &core_foundation::base::CFType) -> Option<Compos
                     }
                 };
                 if better {
-                    best = Some(Composer { element: element.clone(), frame: (x, y, w, h) });
+                    best = Some(Composer {
+                        element: element.clone(),
+                        frame: (x, y, w, h),
+                    });
                 }
             }
         }
@@ -1518,7 +1583,9 @@ fn click(x: f64, y: f64) {
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use core_graphics::geometry::CGPoint;
 
-    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else { return };
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
     let at = CGPoint::new(x, y);
     for kind in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
         if let Ok(event) = CGEvent::new_mouse_event(source.clone(), kind, at, CGMouseButton::Left) {
@@ -1552,7 +1619,9 @@ fn key(code: u16, command: bool) {
     use core_graphics::event::{CGEvent, CGEventFlags};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else { return };
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
     for down in [true, false] {
         if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), code, down) {
             if command {
@@ -1703,7 +1772,11 @@ async fn send_to_app(
                     Ok(value) => value,
                     Err(_) => return fail(format!("{name} is not running.")),
                 },
-                None => return fail(format!("{name} is not running, so there was nowhere to put the message.")),
+                None => {
+                    return fail(format!(
+                        "{name} is not running, so there was nowhere to put the message."
+                    ))
+                }
             },
             Err(e) => return fail(format!("could not look for {name}: {e}")),
         };
@@ -1745,7 +1818,9 @@ async fn send_to_app(
             std::thread::sleep(Duration::from_millis(500));
 
             let Some(window) = target_window(&app) else {
-                return fail(format!("{name} is running but has no window Spaces can address."));
+                return fail(format!(
+                    "{name} is running but has no window Spaces can address."
+                ));
             };
             let Some((wx, wy, ww, wh)) = ax_frame(&window) else {
                 return fail(format!("{name}'s window would not say where it is."));
@@ -1802,7 +1877,10 @@ async fn send_to_app(
              * proof from the box itself; otherwise the answer is "cannot tell",
              * which is a thing this type can say.
              */
-            seen = match composer.as_ref().and_then(|found| ax_string(&found.element, "AXValue")) {
+            seen = match composer
+                .as_ref()
+                .and_then(|found| ax_string(&found.element, "AXValue"))
+            {
                 Some(value) => Some(contains_trimmed(&value, &text)),
                 None => match focused_text(&app) {
                     Some(value) if contains_trimmed(&value, &text) => Some(true),
@@ -1981,7 +2059,13 @@ async fn screen_read(app_name: String) -> Result<String, String> {
 /// first line is enough to tell "the paste landed" from "nothing happened",
 /// which is the only question being asked.
 fn contains_trimmed(seen: &str, sent: &str) -> bool {
-    let needle: String = sent.trim().lines().next().unwrap_or_default().trim().to_string();
+    let needle: String = sent
+        .trim()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     if needle.is_empty() {
         return false;
     }
@@ -2056,12 +2140,12 @@ async fn probe_program(
         if program.is_empty() {
             return Err("no program given".to_string());
         }
-        let resolved = if Path::new(&program).is_absolute() || Path::new(&program).components().count() > 1
-        {
-            program.clone()
-        } else {
-            resolve_bin(&program)
-        };
+        let resolved =
+            if Path::new(&program).is_absolute() || Path::new(&program).components().count() > 1 {
+                program.clone()
+            } else {
+                resolve_bin(&program)
+            };
         if !Path::new(&resolved).is_absolute() || !Path::new(&resolved).is_file() {
             return Ok(ProbeResult {
                 found: false,
@@ -2220,7 +2304,6 @@ async fn check_app(bundle_id: String, app_name: String) -> Result<AppPresence, S
     .await
     .map_err(|e| format!("task failed: {e}"))?
 }
-
 
 fn unquote_frontmatter(value: &str) -> String {
     let value = value.trim();
@@ -3452,7 +3535,8 @@ async fn browser_dock(app: AppHandle, label: String) -> Result<String, String> {
 /// Whether this project's browser is currently floating.
 #[tauri::command]
 fn browser_floating(app: AppHandle, label: String) -> bool {
-    app.get_webview_window(&format!("{label}{PIP_SUFFIX}")).is_some()
+    app.get_webview_window(&format!("{label}{PIP_SUFFIX}"))
+        .is_some()
 }
 
 fn browser_http_url(value: &str) -> Result<tauri::Url, String> {
@@ -3698,7 +3782,9 @@ mod tests {
     #[test]
     fn a_title_skips_the_harness_and_finds_the_prompt() {
         assert_eq!(
-            first_prose_line("<recommended_plugins>\nuse ripgrep\n</recommended_plugins>\n\nfix the build"),
+            first_prose_line(
+                "<recommended_plugins>\nuse ripgrep\n</recommended_plugins>\n\nfix the build"
+            ),
             "fix the build"
         );
         // Several blocks in a row, and one with attributes.
@@ -3709,10 +3795,16 @@ mod tests {
             "ship it"
         );
         // A self-closing tag opens no block, so the next line still counts.
-        assert_eq!(first_prose_line("<meta/>\nthe actual ask"), "the actual ask");
+        assert_eq!(
+            first_prose_line("<meta/>\nthe actual ask"),
+            "the actual ask"
+        );
         // Ordinary prose is untouched, including prose that merely contains a
         // less-than sign.
-        assert_eq!(first_prose_line("  make it faster  \nand smaller"), "make it faster");
+        assert_eq!(
+            first_prose_line("  make it faster  \nand smaller"),
+            "make it faster"
+        );
         assert_eq!(first_prose_line("if a < b then swap"), "if a < b then swap");
         // Nothing but scaffolding, and nothing at all, are both "no title".
         assert_eq!(first_prose_line("<x>\ny\n</x>"), "");
