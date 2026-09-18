@@ -30,7 +30,7 @@ import { workloadOf } from "../links";
 import type { AssignmentView } from "../links";
 import { confirmAction, toast } from "../toast";
 import { timeAgo } from "../github";
-import { HARNESSES, defaultsFor, harnessFor, serializeArgs } from "../capabilities";
+import { HARNESSES, defaultsFor, harnessBin, harnessFor, serializeArgs } from "../capabilities";
 import type { HarnessKind } from "../capabilities";
 import { loadPortalConnection, portalMemberAction } from "../portal";
 import { EntityChip } from "./EntityChip";
@@ -65,10 +65,24 @@ type Ownership = Pick<Agent, "owner_member_id" | "host_device_id" | "visibility"
 
 const ABOUT_KEY = "spaces.people.about";
 
-const HARNESS_GLYPH: Record<string, string> = { claude: "✳", codex: "◈", ritz: "◉", custom: "⌘" };
+const HARNESS_GLYPH: Record<string, string> = {
+  claude: "✳",
+  codex: "◈",
+  cursor: "➤",
+  gemini: "✦",
+  aider: "△",
+  opencode: "❲",
+  ritz: "◉",
+  external: "▣",
+  custom: "⌘",
+};
 
-/** What `check_tools` looks for, in the order a card should read them. */
-const KNOWN_TOOLS = ["claude", "codex", "gh"] as const;
+/**
+ * What `check_tools` looks for, in the order a card should read them.
+ * Keyed by executable — the Cursor harness is `cursor`, its binary is
+ * `cursor-agent` — and kept in step with HARNESS_BINS in lib.rs.
+ */
+const KNOWN_TOOLS = ["claude", "codex", "cursor-agent", "gemini", "aider", "opencode", "gh"] as const;
 
 const ROLES: { role: MemberRole; label: string; help: string }[] = [
   { role: "owner", label: "Owner", help: "Set this workspace up." },
@@ -807,7 +821,7 @@ function RegisterMachine({ member, onDone }: { member: Member; onDone?: () => vo
   const found = KNOWN_TOOLS.filter((t) => tools[t]);
   // `gh` is on the same PATH but hosts nothing, so it never counts towards
   // whether this machine can actually run an agent.
-  const harnesses = (["claude", "codex"] as const).filter((t) => tools[t]);
+  const harnesses = KNOWN_TOOLS.filter((t) => t !== "gh" && tools[t]);
 
   async function register() {
     setBusy(true);
@@ -1140,8 +1154,12 @@ function PersonPanel({
               const host = agent.host_device_id ? deviceName(agent.host_device_id) : "";
               const device = devices.find((d) => d.id === agent.host_device_id);
               const tools = device ? parseTools(device.tools) : {};
+              // PATH is keyed by executable, and only a CLI harness has one:
+              // an HTTP engine answers on a port and an external agent is
+              // never launched at all, so neither can be "missing from PATH".
+              const agentBin = harnessBin(agent.kind, agent.model);
               const cliMissing =
-                device && agent.kind !== "ritz" && tools[agent.kind] === false;
+                device && harnessFor(agent.kind).wire === "cli" && tools[agentBin] === false;
               return (
                 <li key={agent.id}>
                   <div className="pe-detail-row">
@@ -1699,17 +1717,25 @@ function BringAgentPanel({
               It signs in with {ownerMember?.name ?? "its owner"}'s own {meta.label} session on
               that machine. Spaces never asks for an API key and has nowhere to store one.
             </li>
-            {hostDevice && effectiveKind !== "ritz" && hostTools[effectiveKind] === false && (
-              <li>
-                {hostDevice.name} reported no <code>{effectiveKind}</code> on its PATH when it
-                last checked in. Recording it here is fine; it will not run until that CLI is
-                installed there.
-              </li>
-            )}
-            {hostDevice && effectiveKind === "ritz" && (
+            {hostDevice &&
+              harnessFor(effectiveKind).wire === "cli" &&
+              hostTools[harnessBin(effectiveKind, "")] === false && (
+                <li>
+                  {hostDevice.name} reported no <code>{harnessBin(effectiveKind, "")}</code> on its
+                  PATH when it last checked in. Recording it here is fine; it will not run until
+                  that CLI is installed there.
+                </li>
+              )}
+            {hostDevice && harnessFor(effectiveKind).wire === "http" && (
               <li>
                 {config().localAiName} answers on that machine's configured HTTP port rather than from PATH, so a device's tool
                 list says nothing either way about it.
+              </li>
+            )}
+            {hostDevice && harnessFor(effectiveKind).wire === "external" && (
+              <li>
+                Spaces never launches this one, so no machine needs anything on its PATH for it.
+                It works in its own app against the same repository.
               </li>
             )}
           </ul>

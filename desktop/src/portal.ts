@@ -2,7 +2,7 @@ import { getDb, now } from "./db";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store";
 import { config } from "./config";
-import { configuredEffort, tokenize } from "./capabilities";
+import { configuredEffort, harnessKinds, tokenize } from "./capabilities";
 import {
   adoptPairedDevice,
   currentDeviceId,
@@ -1066,9 +1066,11 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       );
     }
     for (const remote of body.agents ?? []) {
-      const kind = ["claude", "codex", "ritz", "custom"].includes(remote.backend)
-        ? remote.backend
-        : "codex";
+      // An unregistered backend silently became "codex", so an agent synced
+      // from a newer build came back as a different harness than it left as.
+      // harnessFor() degrades to the Custom CLI shape instead, which runs the
+      // agent's own executable rather than somebody else's.
+      const kind = harnessKinds().includes(remote.backend) ? remote.backend : "custom";
       const effort = remote.effort.trim();
       const cliArgs = remote.cliArgs?.length
         ? remote.cliArgs

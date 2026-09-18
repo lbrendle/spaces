@@ -25,7 +25,7 @@ import { autoLinkMessage } from "../links";
 import { SPACES_COMMANDS, availableCommands, parseSlash, runCommand } from "../commands";
 import type { SlashCommand } from "../commands";
 import { timeAgo } from "../github";
-import { harnessFor } from "../capabilities";
+import { harnessBin, harnessFor } from "../capabilities";
 import { toast } from "../toast";
 import { Avatar, Modal, Spinner, mdToHtml } from "./ui";
 import {
@@ -335,9 +335,7 @@ function availabilityOf(agent: Agent): Availability {
   // request per keystroke. Agents & Teams is where that check belongs.
   if (meta.wire !== "cli") return AVAILABLE;
 
-  // PATH is keyed by executable, not by harness id: the Cursor harness is
-  // `cursor` and its binary is `cursor-agent`.
-  const bin = (agent.kind === "custom" ? agent.model : meta.probe?.bin ?? agent.kind).trim();
+  const bin = harnessBin(agent.kind, agent.model);
   const host = s.devices.find((d) => d.id === (agent as HostedAgent).host_device_id);
   const here = currentDeviceId();
 

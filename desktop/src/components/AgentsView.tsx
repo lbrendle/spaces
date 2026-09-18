@@ -44,6 +44,7 @@ import {
   agentChips,
   capsFor,
   carryOver,
+  harnessBin,
   commandPreview,
   defaultsFor,
   fetchRitzModels,
@@ -94,9 +95,7 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
   // Probe every registered CLI harness's binary as well as the user's own
   // executables — a harness whose availability is never asked about shows as
   // "unknown" forever, which reads as broken.
-  const registryBins = HARNESSES.filter((h) => h.wire === "cli" && h.probe?.bin).map(
-    (h) => h.probe!.bin as string
-  );
+  const registryBins = HARNESSES.map((h) => harnessBin(h.kind)).filter(Boolean);
   const customKey = [...new Set([...registryBins, ...customPrograms].map((p) => p.trim()).filter(Boolean))]
     .sort()
     .join("\n");
@@ -185,9 +184,7 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
         // installed is a different, softer question the editor asks.
         if (meta.wire === "external") return "ready";
 
-        // The executable is the agent's own for a Custom CLI, and the harness's
-        // for everything else.
-        const bin = (kind === "custom" ? program : meta.probe?.bin ?? program).trim();
+        const bin = harnessBin(kind, program);
         if (!bin) return "unavailable";
         if (custom[bin] !== undefined) return custom[bin] ? "ready" : "unavailable";
         // check_tools pre-answers the two most common ones on startup.
@@ -353,7 +350,7 @@ function unavailableNote(kind: string, name: string, runtime = ""): string {
   if (kind === "custom") {
     return `That custom executable isn't available on this machine, so ${handle} can't run here. Configure its command or host it on a teammate's device.`;
   }
-  const bin = meta.probe?.bin ?? kind;
+  const bin = harnessBin(kind) || kind;
   const where = meta.probe?.installHint ? ` Install it from ${meta.probe.installHint}.` : "";
   return `${bin} isn't on this machine's PATH, so ${handle} can't run from here. Teammates who have it can.${where}`;
 }

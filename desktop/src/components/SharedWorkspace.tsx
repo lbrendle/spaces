@@ -26,6 +26,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Agent, Project } from "../types";
 import {
   integrationPlan,
+  land,
+  rebaseCommand,
   workspaceMap,
   type AgentLane,
   type IntegrationPlan,
@@ -33,6 +35,7 @@ import {
   type WorkspaceMap,
 } from "../coordination";
 import { reportHandOffs } from "../agents";
+import { toast } from "../toast";
 import { Avatar, Spinner } from "./ui";
 import { HarnessMark } from "./Face";
 import "./sharedworkspace.css";
@@ -171,9 +174,11 @@ export function SharedWorkspace({
       )}
 
       <Landing
+        project={project}
         plan={plan}
         planning={planning}
         onBuild={() => void buildPlan()}
+        onLanded={() => void load()}
         landable={map.lanes.some((l) => l.ahead > 0)}
         base={map.base}
       />
@@ -306,18 +311,44 @@ function Lane({
 /* ── landing order ───────────────────────────────────────────── */
 
 function Landing({
+  project,
   plan,
   planning,
   onBuild,
+  onLanded,
   landable,
   base,
 }: {
+  project: Project;
   plan: IntegrationPlan | null;
   planning: boolean;
   onBuild: () => void;
+  onLanded: () => void;
   landable: boolean;
   base: string;
 }) {
+  const [landing, setLanding] = useState("");
+
+  /**
+   * Land one branch, then re-read.
+   *
+   * Only ever one at a time, and never the whole plan in a loop: the second
+   * merge is predicted against a simulation of the first, and a prediction is
+   * not a promise. Re-reading after each one means the next decision is made
+   * against what actually happened.
+   */
+  async function landOne(branch: string) {
+    setLanding(branch);
+    try {
+      const result = await land(project, branch, base);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.reason, result.hint);
+      if (result.ok) onLanded();
+    } finally {
+      setLanding("");
+    }
+  }
+
   if (!landable) return null;
 
   if (!plan) {
@@ -363,6 +394,32 @@ function Landing({
             <div className="sw-step-body">
               <span className="sw-step-name">
                 {step.lane.agent.name} · <code>{step.lane.branch}</code>
+                {blocked ? (
+                  <button
+                    className="btn tiny ghost sw-step-action"
+                    title="Copy the command to bring this branch up to date"
+                    onClick={() => {
+                      void navigator.clipboard
+                        .writeText(rebaseCommand(step.lane, base))
+                        .then(() => toast.info("Rebase command copied."))
+                        .catch(() => toast.error("Could not reach the clipboard."));
+                    }}
+                  >
+                    Copy rebase
+                  </button>
+                ) : (
+                  // Only the next one in the sequence: landing #3 before #2
+                  // would invalidate the prediction #3 was made under.
+                  step.order === 1 && (
+                    <button
+                      className="btn tiny sw-step-action"
+                      disabled={landing !== ""}
+                      onClick={() => void landOne(step.lane.branch)}
+                    >
+                      {landing === step.lane.branch ? <Spinner /> : null} Land
+                    </button>
+                  )
+                )}
               </span>
               <span className="sw-step-note">{step.note}</span>
               {step.check.conflicts.length > 0 && (

@@ -1086,6 +1086,24 @@ export function isExternal(kind: string): boolean {
   return harnessFor(kind).wire === "external";
 }
 
+/**
+ * The executable a harness runs, which is not its id — the Cursor harness is
+ * `cursor` and its binary is `cursor-agent`.
+ *
+ * Every PATH question in the app goes through this. Asking `tools["cursor"]`
+ * instead returns undefined forever, which reads as "still checking" and never
+ * resolves; that was true of every harness added after the original two.
+ *
+ * `model` supplies the executable for a Custom CLI, where it is the user's own.
+ * Returns "" for harnesses with no binary at all.
+ */
+export function harnessBin(kind: string, model = ""): string {
+  const meta = harnessFor(kind);
+  if (meta.wire !== "cli") return "";
+  if (norm(kind) === "custom") return model.trim();
+  return meta.probe?.bin ?? "";
+}
+
 export function harnessFor(kind: string): HarnessMeta {
   const k = norm(kind);
   return HARNESSES.find((h) => h.kind === k) ?? HARNESSES[0];
@@ -1387,6 +1405,18 @@ export function commandPreview(kind: string, values: OptionValues): string {
   if (meta.wire === "http") {
     return `POST ${ritzBase(values)}/chat\n${JSON.stringify(ritzBody(values), null, 2)}`;
   }
+  if (meta.wire === "external") {
+    // There is no command. Showing what Spaces *does* do instead is the honest
+    // preview: it writes a brief and then reads git.
+    const app = asText(values.model).trim() || "the app";
+    const dir = asText(values.workdir).trim();
+    const handoff = asText(values.handoff).trim() || ".hq/inbox";
+    return [
+      `# Spaces does not launch ${app}.`,
+      `write  ${handoff}/<agent>.md   # the same brief a spawned agent gets`,
+      `watch  ${dir || "<project checkout>"}   # commits and uncommitted changes`,
+    ].join("\n");
+  }
   const k = norm(kind);
   const modelOpt = optionFor(k, "model");
   const model = asText(values.model).trim();
@@ -1394,8 +1424,10 @@ export function commandPreview(kind: string, values: OptionValues): string {
   if (model && modelOpt?.flag) parts.push(modelOpt.flag, quoteArg(model));
   const args = serializeArgs(k, values);
   if (args) parts.push(args);
-  // codex reads the prompt from stdin via a trailing "-"
+  // codex reads the prompt from stdin via a trailing "-"; cursor-agent and
+  // aider have no stdin reader and take it as the last argument instead.
   if (k === "codex") parts.push("-");
+  else if (k === "cursor" || k === "aider") parts.push("<prompt>");
   return parts.join(" ");
 }
 

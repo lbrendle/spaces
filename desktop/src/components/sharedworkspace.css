@@ -335,3 +335,10 @@ button.sw-fact.dirty:hover { text-decoration: underline; }
   .sw-lane-bar { display: none; }
   .sw-lane-subject { grid-column: 1 / -1; }
 }
+
+/* The action sits with the branch name it acts on, not at the row's far edge —
+   at the far edge it reads as an action on the whole plan. */
+.sw-step-action {
+  margin-left: var(--space-2);
+  vertical-align: baseline;
+}

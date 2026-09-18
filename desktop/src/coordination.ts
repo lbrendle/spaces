@@ -498,6 +498,94 @@ export async function integrationPlan(
   return plan;
 }
 
+/* ── landing one ─────────────────────────────────────────────── */
+
+export type LandResult =
+  | { ok: true; message: string }
+  | { ok: false; reason: string; hint: string };
+
+/**
+ * Merge one branch into the integration base, for real.
+ *
+ * The plan above is a prediction; this is the act. It is deliberately strict
+ * about the preconditions rather than clever about recovering from them: a
+ * merge run against a dirty tree, or into whatever branch happened to be
+ * checked out, is how someone loses an afternoon. Every refusal names the one
+ * thing to do about it.
+ *
+ * `--no-ff` always, so the branch stays legible in the history as one agent's
+ * piece of work rather than being flattened into the base.
+ */
+export async function land(
+  project: Project,
+  branch: string,
+  base: string
+): Promise<LandResult> {
+  const root = project.local_path;
+  if (!root) {
+    return { ok: false, reason: "This project has no local checkout.", hint: "Set one in the project's settings." };
+  }
+  if (!branch || branch === base) {
+    return { ok: false, reason: "Nothing to land.", hint: "" };
+  }
+  if (!(await isGitRepo(root).catch(() => false))) {
+    return { ok: false, reason: `${root} is not a git repository.`, hint: "" };
+  }
+
+  const inMerge = await git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD").then(
+    () => true,
+    () => false
+  );
+  if (inMerge) {
+    return {
+      ok: false,
+      reason: "A merge is already in progress in the main checkout.",
+      hint: "Finish or abort it before landing anything else.",
+    };
+  }
+
+  const dirty = (await safe(() => git(root, "status", "--porcelain"))).trim();
+  if (dirty) {
+    return {
+      ok: false,
+      reason: "The main checkout has uncommitted changes.",
+      hint: "Commit or discard them first — a conflicted merge would land on top of them.",
+    };
+  }
+
+  const head = (await safe(() => git(root, "rev-parse", "--abbrev-ref", "HEAD"))).trim();
+  if (head !== base) {
+    return {
+      ok: false,
+      reason: `The main checkout is on \`${head || "a detached HEAD"}\`, not \`${base}\`.`,
+      hint: `Check out ${base} first, so this lands where the plan says it will.`,
+    };
+  }
+
+  try {
+    await git(root, "merge", "--no-ff", branch, "-m", `Merge ${branch} (Spaces)`);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // A merge that stops on conflicts leaves the tree mid-merge. Back it out:
+    // the prediction said this would be clean, so a surprise conflict is not
+    // something to strand the user's checkout in.
+    await git(root, "merge", "--abort").catch(() => "");
+    return {
+      ok: false,
+      reason: `git refused to merge ${branch}: ${message.split("\n")[0]}`,
+      hint: "The working tree was left as it was. Re-read the plan — the branch may have moved since it was checked.",
+    };
+  }
+
+  const sha = (await safe(() => git(root, "rev-parse", "HEAD"))).trim();
+  return { ok: true, message: `Merged \`${branch}\` into \`${base}\` as ${sha.slice(0, 7)}.` };
+}
+
+/** The command to bring a blocked branch up to date, for someone to run themselves. */
+export function rebaseCommand(lane: AgentLane, base: string): string {
+  return `git -C ${lane.workdir || "<worktree>"} rebase ${base}`;
+}
+
 /* ── prompt copy ─────────────────────────────────────────────── */
 
 function bullet(lane: AgentLane, base: string): string {

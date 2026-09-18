@@ -2036,9 +2036,14 @@ export async function runAgent(
   // Spaces prompt carries the whole project brief, which can outgrow ARG_MAX,
   // so an oversized one is written next to the agent instead — losing the
   // context would be a worse failure than one extra file read.
-  if (!remote && adapter.promptDelivery === "argv") {
-    adapterArgs.push(await promptArg(prompt, mcpProject, msgId, agent));
-  }
+  //
+  // Kept out of `adapterArgs`: that list is what the run row records as its
+  // command, and a run row is not where a whole prompt belongs. The spawn gets
+  // `launchArgs`, the inspector gets the command without it.
+  const launchArgs =
+    !remote && adapter.promptDelivery === "argv"
+      ? [...adapterArgs, await promptArg(prompt, mcpProject, msgId, agent)]
+      : adapterArgs;
 
   await store.insertRun({
     id: msgId,
@@ -2060,7 +2065,10 @@ export async function runAgent(
         ? `POST ${ritzBase(parseOptionValues("ritz", agent.cli_args ?? ""))}/chat`
         : adapter.transport === "external"
         ? `hand-off → ${handoffPath(agent)}`
-        : displayCommand(adapter.program, adapterArgs),
+        : displayCommand(
+            adapter.program,
+            adapter.promptDelivery === "argv" ? [...adapterArgs, "<prompt>"] : adapterArgs
+          ),
     commit_before: commitBefore,
     commit_after: "",
     files_changed: "",
@@ -2142,7 +2150,7 @@ export async function runAgent(
           runtime: agent.kind,
           harnessProtocol: SPACES_HARNESS_PROTOCOL,
           program: adapter.program,
-          args: adapterArgs,
+          args: launchArgs,
           cwd: cwd || null,
           prompt,
         },

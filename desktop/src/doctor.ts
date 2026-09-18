@@ -17,7 +17,7 @@
  * spawning `--version` for each one would be absurd.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { harnessFor, parseArgs, ritzBase, ritzHealthRoute } from "./capabilities";
+import { harnessBin, harnessFor, parseArgs, ritzBase, ritzHealthRoute } from "./capabilities";
 import type { Agent } from "./types";
 
 export type HealthState =
@@ -323,8 +323,7 @@ async function checkExternal(kind: string, agent?: Agent): Promise<HarnessHealth
  */
 export async function checkHarness(kind: string, agent?: Agent): Promise<HarnessHealth> {
   const meta = harnessFor(kind);
-  const program =
-    meta.kind === "custom" || !meta.probe?.bin ? String(agent?.model ?? "").trim() : meta.probe.bin;
+  const program = harnessBin(kind, String(agent?.model ?? ""));
   const discriminator =
     meta.wire === "cli" ? program : meta.wire === "http" ? String(agent?.cli_args ?? "") : `${agent?.model ?? ""}|${agent?.cli_args ?? ""}`;
   const key = `${kind}:${discriminator}`;

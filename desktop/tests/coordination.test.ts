@@ -80,11 +80,31 @@ test("porcelain status yields the post-rename path, unquoted", () => {
 test("the coordination layer predicts landings rather than attempting them", async () => {
   const coordination = await readFile(new URL("../src/coordination.ts", import.meta.url), "utf8");
 
-  // In-memory merges only: nothing may be checked out or committed for real.
-  assert.match(coordination, /merge-tree/);
-  assert.match(coordination, /--write-tree/);
-  assert.doesNotMatch(coordination, /git\(\s*project\.local_path,\s*"merge",/);
-  assert.doesNotMatch(coordination, /"checkout"/);
+  // In-memory merges only, up to the point where someone asks to land: the
+  // prediction runs against a repository people are working in, so it must not
+  // move a branch, stage anything or leave a merge half-finished. `land` is the
+  // one function allowed to mutate, and it lives after this slice.
+  const predicting = coordination.slice(
+    coordination.indexOf("export async function mergeCheck"),
+    coordination.indexOf("/* ── landing one ─")
+  );
+  assert.ok(predicting.length > 500, "could not isolate the prediction functions");
+  assert.match(predicting, /merge-tree/);
+  assert.match(predicting, /--write-tree/);
+  for (const verb of ["merge", "checkout", "reset", "commit", "add", "rebase", "push"]) {
+    assert.doesNotMatch(
+      predicting,
+      new RegExp(`git\\([^)]*"${verb}"`),
+      `the landing prediction must not run \`git ${verb}\``
+    );
+  }
+
+  // And landing must refuse rather than improvise when the tree is not ready.
+  const landing = coordination.slice(coordination.indexOf("/* ── landing one ─"));
+  assert.match(landing, /MERGE_HEAD/);
+  assert.match(landing, /status", "--porcelain/);
+  assert.match(landing, /head !== base/);
+  assert.match(landing, /"merge", "--abort"/);
 
   // The landing order must be simulated forward, or it cannot see branches that
   // conflict with each other rather than with the base.
