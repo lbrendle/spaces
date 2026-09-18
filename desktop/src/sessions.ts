@@ -421,13 +421,24 @@ async function replay(
 
   const when = transcript.startedAt || session.startedAt || session.endedAt;
   const agent = session.source === "codex" ? "Codex" : "Claude Code";
+  /*
+   * A stable author id per source.
+   *
+   * The chat groups consecutive messages by author to avoid repeating a name
+   * every line, and it compares author ids. Leaving these empty made every
+   * imported agent turn the *same* author, so a Claude reply and a Codex reply
+   * collapsed into one unattributed block — a wall of text with no way to see
+   * who said what. Not a real agent's id: these came from outside Spaces, and
+   * claiming they are a roster member would be a different lie.
+   */
+  const author = `imported:${session.source}`;
   const rows: unknown[][] = [];
 
   rows.push([
     uid(),
     channelId,
     "system",
-    "",
+    author,
     agent,
     `**${transcript.title || session.title || "Untitled session"}**\n\n`
       + `${agent} · ${new Date(when).toLocaleString()} · ${transcript.turns.length} turns\n\n`
@@ -445,7 +456,7 @@ async function replay(
       uid(),
       channelId,
       turn.role === "user" ? "user" : "agent",
-      "",
+      turn.role === "user" ? "" : author,
       turn.role === "user" ? "You" : agent,
       turn.text,
       "done",
@@ -595,6 +606,15 @@ export function initSessionWatch(
   let settle = 0;
   let running = false;
 
+  /*
+   * The newest session already imported.
+   *
+   * Everything hangs off this: nothing on disk is newer, so there is nothing
+   * to do, and asking the filesystem that question costs a stat per file
+   * rather than a read. Before this existed the watcher ran a full scan on
+   * every window focus — three thousand files opened, the better part of
+   * fifteen seconds — and the app stuttered every time it came to the front.
+   */
   const run = async () => {
     if (running) return;
     running = true;
@@ -604,6 +624,15 @@ export function initSessionWatch(
         "SELECT COUNT(*) AS n FROM session_watches"
       );
       if (!n) return;
+
+      const [{ seen }] = await db.select<{ seen: number }[]>(
+        "SELECT COALESCE(MAX(mtime), 0) AS seen FROM session_imports"
+      );
+      const changed = await invoke<boolean>("sessions_changed_since", { since: seen }).catch(
+        () => true
+      );
+      if (!changed) return;
+
       const results = await catchUpWatched();
       if (results.length > 0) announce(results);
     } catch {

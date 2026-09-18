@@ -155,6 +155,19 @@ test("importing reads other agents' history without owning it", async () => {
   assert.match(sessions, /if \(isImporting\(watch\.cwd\)\) continue;/);
   assert.match(sessions, /importing\.delete\(group\.cwd\)/);
 
+  /*
+   * And imported history never leaves this machine.
+   *
+   * It is read off somebody's disk for local context — on one machine here,
+   * 23,000 messages, much of it predating the workspace. The import screen
+   * promises only to read those files; republishing them to a shared web
+   * workspace is a different act entirely, and the volume would crowd out the
+   * conversation the sync exists for.
+   */
+  const portal = await readFile(new URL("../src/portal.ts", import.meta.url), "utf8");
+  const outbound = portal.slice(portal.indexOf("FROM messages") - 400);
+  assert.match(outbound.slice(0, 900), /WHERE import_key = ''/);
+
   // The watcher is local-only and must not be gated on portal pairing — a
   // machine that has never paired still has its own history to catch up on.
   assert.match(app, /initSessionWatch/);

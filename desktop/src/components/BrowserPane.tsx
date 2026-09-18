@@ -191,10 +191,15 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   // clicked inside pages keep Spaces's address field truthful.
   useEffect(() => {
     if (!native || !ready || !active) return;
+    /*
+     * Reading the URL is a cheap question for the webview handle. Reading the
+     * title is not — it evaluates a script inside the page and waits for the
+     * answer — so it happens when the page has actually changed rather than
+     * every tick. Doing both at 800ms was a WKWebView round trip per second
+     * for a string that changes when you navigate.
+     */
+    let lastUrl = "";
     const poll = window.setInterval(() => {
-      void browserEval<string>(label, "return document.title")
-        .then((result) => setPageTitle(result.ok ? String(result.value ?? "") : ""))
-        .catch(() => setPageTitle(""));
       void browserUrl(label)
         .then((url) => {
           if (!url) return;
@@ -202,6 +207,11 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
           // The poll catches up on the next tick after the field loses focus.
           if (!editingAddressRef.current) setAddress(url);
           window.localStorage.setItem(`spaces-browser:${projectId}`, url);
+          if (url === lastUrl) return;
+          lastUrl = url;
+          void browserEval<string>(label, "return document.title")
+            .then((result) => setPageTitle(result.ok ? String(result.value ?? "") : ""))
+            .catch(() => setPageTitle(""));
         })
         .catch(() => {});
     }, 800);

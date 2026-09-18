@@ -419,6 +419,11 @@ function saveDraft(key: string, text: string) {
   }, 400);
 }
 
+/** Messages rendered at once, and revealed per click of "show earlier". */
+const CHAT_PAGE = 150;
+/** Characters past which a message is folded until somebody asks for it. */
+const LONG_MESSAGE = 1600;
+
 export function ChatView({ channelId }: { channelId: string }) {
   const store = useStore();
   const channel = store.channels.find((c) => c.id === channelId);
@@ -449,6 +454,29 @@ export function ChatView({ channelId }: { channelId: string }) {
   const atBottomRef = useRef(true);
 
   const roots = useMemo(() => msgs.filter((m) => !m.parent_id), [msgs]);
+
+  /*
+   * How much of the channel is on screen.
+   *
+   * Every message used to be rendered, every one of them parsing markdown.
+   * That was survivable while a channel was a conversation and stopped being
+   * survivable the moment one could hold imported history: a channel with
+   * 1,275 messages in it made the whole app stutter, including typing in
+   * other views, because a single React tree that large re-renders on
+   * everything.
+   *
+   * A window over the end, with a way back through it. Not virtualisation:
+   * this keeps ordinary scrolling, selection and find-in-page working, and a
+   * hundred and fifty messages is already more than anyone scrolls through
+   * without reaching for search.
+   */
+  const [shown, setShown] = useState(CHAT_PAGE);
+  useEffect(() => setShown(CHAT_PAGE), [channelId]);
+  const visibleRoots = useMemo(
+    () => (roots.length > shown ? roots.slice(-shown) : roots),
+    [roots, shown]
+  );
+  const hidden = roots.length - visibleRoots.length;
   const repliesByRoot = useMemo(() => {
     const map: Record<string, Message[]> = {};
     for (const m of msgs) {
@@ -717,8 +745,16 @@ export function ChatView({ channelId }: { channelId: string }) {
                 )}
               </div>
             )}
-            {roots.map((m, i) => {
-              const prev = roots[i - 1];
+            {hidden > 0 && (
+              <button
+                className="btn tiny chat-earlier"
+                onClick={() => setShown((n) => n + CHAT_PAGE)}
+              >
+                Show {Math.min(CHAT_PAGE, hidden)} earlier of {hidden}
+              </button>
+            )}
+            {visibleRoots.map((m, i) => {
+              const prev = visibleRoots[i - 1];
               const newDay = !prev || !sameDay(prev.created_at, m.created_at);
               return (
                 <Fragment key={m.id}>
@@ -830,6 +866,16 @@ function MessageRow({
     prev.author_id === m.author_id &&
     m.created_at - prev.created_at < 5 * 60_000;
   const inspectable = m.author_type === "agent" && !!m.run_id && !!onInspect;
+  /*
+   * Long messages are folded until asked for.
+   *
+   * An agent's turn can run to thousands of words, and a channel of them is
+   * a wall nobody scrolls. Measured on the source rather than the rendered
+   * height: it needs no layout pass, it is stable across re-renders, and it
+   * never flickers between states while the markdown is being laid out.
+   */
+  const long = m.content.length > LONG_MESSAGE;
+  const [expanded, setExpanded] = useState(false);
 
   // A run held in the store is authoritative — it is patched as the turn ends.
   // `null` means "not loaded here", which is when the SQLite read stands in.
@@ -1050,7 +1096,16 @@ function MessageRow({
         {m.status === "running" && !m.content && (
           <div className="running-note"><Spinner /> {m.meta || "thinking…"}</div>
         )}
-        {m.content && <MessageBody body={body} />}
+        {m.content && (
+          <div className={long && !expanded ? "msg-clamp" : undefined}>
+            <MessageBody body={body} />
+          </div>
+        )}
+        {long && (
+          <button className="msg-more" onClick={() => setExpanded((open) => !open)}>
+            {expanded ? "Show less" : `Show all ${Math.round(m.content.length / 100) / 10}k characters`}
+          </button>
+        )}
         {m.status === "running" && m.content && (
           <div className="running-note"><Spinner /> {m.meta || "working…"}</div>
         )}

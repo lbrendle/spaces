@@ -43,6 +43,19 @@ export function mdToHtml(src: string): string {
   // Left boundary keeps emails (a@b.c), npm scopes and /@user URLs intact.
   text = text.replace(/(?<![\w@.\/-])@([a-z0-9-]+)/gi, `<span class="mention">@$1</span>`);
   text = text.replace(/\[([^\]]+)\]\((https?:[^\s)]+)\)/g, `<a href="$2" target="_blank" rel="noreferrer">$1</a>`);
+  /*
+   * A link to something that is not a URL is still a link to a reader.
+   *
+   * Only http(s) is turned into an anchor, on purpose — a relative path is not
+   * something this app can open. But leaving the rest as raw `[label](path)`
+   * put markdown syntax on screen, which is worse than either: agents write
+   * repository paths that way constantly. The label is what was meant; the
+   * path stays available on hover.
+   */
+  text = text.replace(
+    /(^|[^!])\[([^\]\n]+)\]\(([^\s)]+)\)/g,
+    (_m, before, label, target) => `${before}<span class="md-path" title="${target}">${label}</span>`
+  );
   text = text.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, `$1<a href="$2" target="_blank" rel="noreferrer">$2</a>`);
 
   const lines = text.split("\n");

@@ -955,6 +955,41 @@ fn summarise(path: &Path, source: &str) -> Option<SessionSummary> {
     })
 }
 
+/// Whether any session file has been written since a moment.
+///
+/// The cheap question that has to be asked before the expensive one. A scan
+/// opens three thousand files and takes the better part of fifteen seconds;
+/// this stats them and takes milliseconds, and the answer is no almost every
+/// time. Asking it first is the difference between a watcher nobody notices
+/// and an app that stutters whenever it comes to the front.
+#[tauri::command]
+async fn sessions_changed_since(since: i64) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = std::env::var("HOME").map_err(|_| "no home directory".to_string())?;
+        for root in [
+            PathBuf::from(&home).join(".claude").join("projects"),
+            PathBuf::from(&home).join(".codex").join("sessions"),
+        ] {
+            if !root.is_dir() {
+                continue;
+            }
+            let mut files = Vec::new();
+            jsonl_files(&root, &mut files, 0);
+            for path in files {
+                // Metadata only — nothing is opened, which is the whole point.
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    if modified_millis(&meta) > since {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 /// Every Claude Code and Codex session on this Mac, with the directory each
 /// one belongs to.
 ///
@@ -3944,6 +3979,7 @@ pub fn run() {
             send_to_app,
             screen_read,
             scan_agent_sessions,
+            sessions_changed_since,
             read_agent_session,
             check_app,
             start_agent_run,

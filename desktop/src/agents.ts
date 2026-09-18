@@ -4,6 +4,7 @@ import {
   isPermissionGranted, requestPermission, sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { getDb, uid, now } from "./db";
+import { threadSlice } from "./threading";
 import { useStore, channelAgents } from "./store";
 import { slug } from "./types";
 import type { EntityRef } from "./types";
@@ -825,6 +826,97 @@ function contextEnvelope(
   });
 }
 
+/** How many messages of a thread are quoted before the middle is elided. */
+const THREAD_LIMIT = 40;
+/** How many other channels the "elsewhere" digest names. */
+const ELSEWHERE_LIMIT = 6;
+
+/**
+ * The thread this turn belongs to, whole.
+ *
+ * Without this an agent answering in a thread was shown the channel's last
+ * twenty-five messages and nothing else — so a reply to a thread that started
+ * a hundred messages ago arrived with the question missing. It looked like an
+ * agent ignoring context; it was an agent that had never been given it.
+ *
+ * The thread is rendered separately from the ambient conversation and first,
+ * because it is what the turn is actually about. Long threads keep their head
+ * and their tail: the opening is what the thread is *for*, and the end is
+ * where it got to.
+ */
+function threadContext(channel: Channel, trigger: Trigger): { block: string; shown: Set<string> } {
+  const shown = new Set<string>();
+  if (!trigger.parentId) return { block: "", shown };
+
+  const all = useStore.getState().messages[channel.id] ?? [];
+  const slice = threadSlice(all, trigger.parentId, trigger.msgId, THREAD_LIMIT);
+  if (!slice.messages.length) return { block: "", shown };
+
+  const lines = [`\n## This thread`];
+  slice.messages.forEach((m, index) => {
+    shown.add(m.id);
+    // The gap goes where it actually is: after the head, before the tail.
+    if (slice.elided > 0 && index === Math.floor(THREAD_LIMIT / 2)) {
+      lines.push(`… ${slice.elided} replies in the middle of this thread are not shown …`);
+    }
+    lines.push(`[${label(m)}]: ${m.content.slice(0, 1500)}`);
+  });
+  return { block: lines.join("\n"), shown };
+}
+
+/**
+ * What the rest of this project has been doing.
+ *
+ * A channel is a thread of work, so its conversation is deliberately its own —
+ * but that left a new channel knowing the project's memory and tasks and
+ * nothing at all about what anyone was actually working on. One line per other
+ * active channel is what somebody gets by glancing at the sidebar, and it is
+ * most of the value for a fraction of the words.
+ *
+ * Asked of the database rather than the store: the store only holds channels
+ * somebody has opened, and the ones worth reporting are usually the ones this
+ * agent has never been in.
+ */
+export async function elsewhereInProject(
+  project: Project | undefined,
+  channelId: string
+): Promise<string> {
+  if (!project) return "";
+  try {
+    const db = await getDb();
+    const rows = await db.select<
+      { name: string; author_name: string; content: string; created_at: number }[]
+    >(
+      `SELECT c.name AS name, m.author_name AS author_name, m.content AS content,
+              m.created_at AS created_at
+         FROM channels c
+         JOIN messages m ON m.id = (
+           SELECT m2.id FROM messages m2
+            WHERE m2.channel_id = c.id AND m2.status <> 'running'
+            ORDER BY m2.created_at DESC LIMIT 1
+         )
+        WHERE c.project_id = $1 AND c.id <> $2
+        ORDER BY m.created_at DESC
+        LIMIT $3`,
+      [project.id, channelId, ELSEWHERE_LIMIT]
+    );
+    if (!rows.length) return "";
+    const lines = [`\n## Elsewhere in this project`];
+    for (const row of rows) {
+      const gist = row.content.replace(/\s+/g, " ").trim().slice(0, 140);
+      const when = new Date(row.created_at).toISOString().slice(0, 10);
+      lines.push(`- #${row.name} (${when}) — ${row.author_name}: ${gist}`);
+    }
+    lines.push(
+      `Use spaces_list_messages to read any of these properly before acting on them.`
+    );
+    return lines.join("\n");
+  } catch {
+    // Orientation is a nicety. A run must not fail because one query did.
+    return "";
+  }
+}
+
 function buildFreshPrompt(
   runId: string,
   agent: Agent,
@@ -908,7 +1000,15 @@ function buildFreshPrompt(
   const linked = sharedContext(anchors);
   if (linked) lines.push(linked);
 
-  const msgs = (s.messages[channel.id] ?? []).filter((m) => m.status !== "running").slice(-25);
+  // The thread first, because it is what this turn is about; then the ambient
+  // conversation with anything already quoted above left out, so a short
+  // thread is not printed twice.
+  const thread = threadContext(channel, trigger);
+  if (thread.block) lines.push(thread.block);
+
+  const msgs = (s.messages[channel.id] ?? [])
+    .filter((m) => m.status !== "running" && !thread.shown.has(m.id))
+    .slice(-25);
   if (msgs.length) {
     lines.push(`\n## Recent conversation`);
     for (const m of msgs) lines.push(`[${label(m)}]: ${m.content.slice(0, 1500)}`);
@@ -952,6 +1052,14 @@ function buildResumePrompt(
     contextEnvelope(runId, agent, channel, project, trigger, cwd, replyTo, "resume"),
     "",
   ];
+
+  /*
+   * A resumed session carries its own past turns, but not a thread it has
+   * never been in — and being resumed is exactly when an agent is most likely
+   * to be pulled into one. Quote it for the same reason as a fresh run.
+   */
+  const thread = threadContext(channel, trigger);
+  if (thread.block) lines.push(thread.block);
 
   // A resumed session carries the memory as it looked when the session started;
   // re-state anything the user has edited since this agent's last turn.
@@ -1645,7 +1753,11 @@ export async function runAgent(
   // If a teammate handed this turn over after committing, lead with their diff.
   const shared =
     collab +
-    (!remote && !opts.prebuiltPrompt ? await handoffFor(project, trigger) : "");
+    (!remote && !opts.prebuiltPrompt ? await handoffFor(project, trigger) : "") +
+    // What the rest of the project has been doing. Computed here rather than
+    // inside the builders because it needs the database, and it matters most
+    // in a channel that has no history of its own to offer.
+    (opts.prebuiltPrompt ? "" : await elsewhereInProject(project, channelId));
   const prompt =
     opts.prebuiltPrompt ??
     (remote

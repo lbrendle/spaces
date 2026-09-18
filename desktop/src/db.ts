@@ -734,6 +734,22 @@ ALTER TABLE messages ADD COLUMN import_key TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_messages_import ON messages (import_key);
 `;
 
+/**
+ * v26 — imported messages get an author id, so the chat can tell them apart.
+ *
+ * The chat groups consecutive messages by author and compares ids. Imported
+ * turns were written with an empty one, which made every agent turn the same
+ * author: a Claude reply and a Codex reply collapsed into one unattributed
+ * block. Backfilled from the name already stored on the row, so history that
+ * is already in does not have to be imported again to become readable.
+ */
+const MIGRATION_V26 = `
+UPDATE messages SET author_id = 'imported:codex'
+ WHERE import_key LIKE 'imported:codex:%' AND author_type <> 'user' AND author_id = '';
+UPDATE messages SET author_id = 'imported:claude'
+ WHERE import_key LIKE 'imported:claude:%' AND author_type <> 'user' AND author_id = '';
+`;
+
 async function importLegacyHqData(db: Database): Promise<void> {
   const legacyPath = await invoke<string | null>("legacy_hq_database_path");
   if (!legacyPath) return;
@@ -1174,6 +1190,10 @@ export async function getDb(): Promise<Database> {
       if (at < 25) {
         await applyStatements(db, MIGRATION_V25, true);
         await db.execute("PRAGMA user_version = 25");
+      }
+      if (at < 26) {
+        await applyStatements(db, MIGRATION_V26, true);
+        await db.execute("PRAGMA user_version = 26");
       }
       return db;
     })().catch((e) => {

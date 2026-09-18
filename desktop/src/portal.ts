@@ -627,10 +627,22 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       created_at: number;
     }>
   >(
+    /*
+     * Imported history stays on the machine that imported it.
+     *
+     * It is somebody's own Claude Code and Codex sessions, read off their disk
+     * for local context — tens of thousands of messages, much of it about
+     * work that predates the workspace and some of it about other projects
+     * entirely. The import screen promises only that it reads those files and
+     * does not change them; quietly republishing them to a shared web
+     * workspace is not something anyone asked for, and the volume alone would
+     * swamp the sync budget that real conversation needs.
+     */
     `SELECT * FROM (
        SELECT id, channel_id, author_type, author_id, author_name, content,
               status, meta, parent_id, run_id, created_at
          FROM messages
+        WHERE import_key = ''
         ORDER BY created_at DESC, id DESC
         LIMIT 2000
      ) ORDER BY created_at, id`,
