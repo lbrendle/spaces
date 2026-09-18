@@ -4,6 +4,7 @@ import {
   isPermissionGranted, requestPermission, sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { getDb, uid, now } from "./db";
+import { threadSlice } from "./threading";
 import { useStore, channelAgents } from "./store";
 import { slug } from "./types";
 import type { EntityRef } from "./types";
@@ -22,19 +23,28 @@ import type {
 } from "./types";
 import { ensureWorkspace, isGitRepo } from "./workspaces";
 import { collaborationBlock, handoffNote } from "./collab";
+import { isExternal } from "./capabilities";
+import {
+  composerMessage,
+  replyPath,
+  deliverToApp,
+  describeOutcome,
+  externalConfig,
+  externalWorkdir,
+  handOff,
+  handoffPath,
+  consumeReply,
+  replyWaiting,
+  settleHandOff,
+} from "./external";
 import { checkpointAfter, checkpointBefore, runDiff } from "./gitflow";
 import {
+  cliTokens,
   configuredEffort,
-  tokenize,
   resumeArgs,
-  ritzBody,
-  ritzBase,
-  ritzAuthHeaders,
-  parseArgs as parseOptionValues,
 } from "./capabilities";
 import { registerCanceller, trackRun, untrackRun } from "./runbus";
 import { dispatch } from "./orchestrator";
-import { config } from "./config";
 import { currentDeviceId } from "./deviceIdentity";
 import { confirmAction } from "./toast";
 import {
@@ -189,12 +199,22 @@ export async function ensureNotifyPermission() {
  */
 export interface AgentAdapter {
   id: AgentKind;
-  /** "cli" spawns a process via Rust; "http" streams from a local service. */
-  transport?: "cli" | "http";
+  /**
+   * "cli" spawns a process via Rust; "external" is never launched at all — the
+   * agent runs in its own app and meets Spaces in the shared repo (see
+   * external.ts).
+   */
+  transport?: "cli" | "external";
   /** Executable name; the Rust side resolves it on PATH. */
   program: string;
-  /** The prompt itself is delivered via stdin (see start_agent_run in Rust) —
-   *  argv would hit ARG_MAX with big contexts. Codex needs an explicit "-". */
+  /**
+   * Where the prompt goes. "stdin" is the default and the only one that scales:
+   * argv hits ARG_MAX with a big context. Harnesses that have no stdin reader
+   * (cursor-agent, aider) declare "argv", and runAgent spills an oversized
+   * prompt to a file rather than truncating it — see promptArg().
+   */
+  promptDelivery?: "stdin" | "argv";
+  /** Codex needs an explicit "-" to mean "prompt follows on stdin". */
   buildArgs(agent: Agent, resumeSession: string, runtimeContractPath: string): string[];
   /** Session/thread id carried by this event, '' when it carries none. */
   extractSessionId(obj: any): string;
@@ -208,7 +228,7 @@ const claudeAdapter: AgentAdapter = {
   program: "claude",
 
   buildArgs(agent, resumeSession, runtimeContractPath) {
-    const extra = parseArgs(agent.cli_args ?? "");
+    const extra = cliTokens(agent.kind, agent.cli_args ?? "");
     let hasPermissionMode = false;
     for (let index = 0; index < extra.length; index++) {
       const value = extra[index];
@@ -288,11 +308,11 @@ const codexAdapter: AgentAdapter = {
       // equivalent -c sandbox_mode="X", which resume does accept.
       const args = ["exec", "resume", resumeSession, "--json"];
       if (agent.model) args.push("-c", `model="${agent.model}"`);
-      return [...args, ...tokenize(resumeArgs("codex", agent.cli_args ?? "")), "-"];
+      return [...args, ...cliTokens(agent.kind, resumeArgs("codex", agent.cli_args ?? "")), "-"];
     }
     const args = ["exec", "--json"];
     if (agent.model) args.push("-m", agent.model);
-    return [...args, ...tokenize(agent.cli_args ?? ""), "-"];
+    return [...args, ...cliTokens(agent.kind, agent.cli_args ?? ""), "-"];
   },
 
   extractSessionId(obj) {
@@ -333,223 +353,108 @@ const codexAdapter: AgentAdapter = {
 };
 
 /**
- * Product-neutral escape hatch for local agent harnesses. The executable is
- * stored in Agent.model so it syncs through the existing schema; cli_args is
- * passed through exactly. A custom CLI reads the prompt from stdin and may
- * print plain text or common JSON/JSONL message shapes.
+ * Cursor Agent. Verified against `cursor-agent --help` (2026.06): it takes the
+ * prompt as a positional argument — there is no stdin reader — and streams the
+ * same broad shape as Claude's stream-json, so the parser tolerates both.
  */
-const customAdapter: AgentAdapter = {
-  id: "custom",
-  program: "",
+const cursorAdapter: AgentAdapter = {
+  id: "cursor",
+  program: "cursor-agent",
+  promptDelivery: "argv",
 
-  buildArgs(agent) {
-    return tokenize(agent.cli_args ?? "");
+  buildArgs(agent, resumeSession) {
+    const args = ["-p", "--output-format", "stream-json"];
+    if (resumeSession) args.push("--resume", resumeSession);
+    if (agent.model) args.push("--model", agent.model);
+    return [...args, ...cliTokens(agent.kind, agent.cli_args ?? "")];
   },
 
   extractSessionId(obj) {
-    return String(obj.session_id ?? obj.sessionId ?? obj.thread_id ?? "");
+    return String(obj.chat_id ?? obj.chatId ?? obj.session_id ?? obj.sessionId ?? "");
   },
 
   parseLine(obj, run) {
-    const candidate =
-      obj.text ??
-      obj.message?.content ??
-      obj.message ??
-      obj.content ??
-      obj.delta?.content ??
-      obj.delta?.text ??
-      obj.choices?.[0]?.delta?.content ??
-      obj.choices?.[0]?.message?.content;
-    if (typeof candidate === "string" && candidate) {
-      run.parts.push(candidate);
-      run.liveActivity = "";
-      pushActivity(run, "text", candidate.slice(0, 200));
+    if (obj.type === "system" && (obj.chat_id || obj.session_id)) {
+      pushActivity(run, "info", `chat ${String(obj.chat_id ?? obj.session_id).slice(0, 8)} · ${obj.model ?? ""}`);
+      return;
     }
-    if (obj.tool || obj.tool_name || obj.name && obj.type === "tool") {
-      const name = String(obj.tool ?? obj.tool_name ?? obj.name);
-      pushActivity(run, "tool", name);
-      run.liveActivity = `⚙︎ using ${name}…`;
+    if (obj.type === "assistant" && obj.message?.content) {
+      for (const block of obj.message.content) {
+        if (block.type === "text" && block.text?.trim()) {
+          run.parts.push(block.text);
+          run.liveActivity = "";
+          pushActivity(run, "text", block.text.slice(0, 200));
+        } else if (block.type === "tool_use" || block.type === "tool_call") {
+          const name = String(block.name ?? block.tool ?? "tool");
+          run.liveActivity = `⚙︎ using ${name}…`;
+          pushActivity(run, "tool", `${name} ${block.input ? JSON.stringify(block.input).slice(0, 200) : ""}`);
+        }
+      }
+      return;
     }
-    if (obj.error) pushActivity(run, "stderr", String(obj.error).slice(0, 300));
-  },
-};
-
-/* ------------------------------------------------------------------ *
- * Ritz — the user's local on-device engine. Not a CLI: an HTTP service
- * that streams Server-Sent Events. It is a different transport behind the
- * same adapter seam, which is exactly what that seam is for.
- *
- * Memory: the conversation id is namespaced "spaces-<channel>-<agent>", so
- * Ritz-in-Spaces starts blank and never touches the conversations its own app
- * has accumulated. Reusing that id per (channel, agent) is what gives us
- * resume for free.
- * ------------------------------------------------------------------ */
-
-/** Local model server for the `ritz` kind; overridable per deployment. */
-export const RITZ_URL = config().localAiUrl;
-
-export function ritzConversationId(channelId: string, agentId: string): string {
-  return `spaces-${channelId}-${agentId}`;
-}
-
-/** Ritz emits reasoning inline; it is useful live but noise in the transcript. */
-function stripThinking(s: string): string {
-  return s.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/<think>[\s\S]*$/, "").trim();
-}
-
-const ritzAborts = new Map<string, AbortController>();
-
-const ritzAdapter: AgentAdapter = {
-  id: "ritz",
-  transport: "http",
-  program: "ritz",
-
-  buildArgs() {
-    return []; // not a process
-  },
-
-  extractSessionId() {
-    // The conversation id is chosen by us, not returned by the stream.
-    return "";
-  },
-
-  parseLine(obj, run) {
-    if (obj.type === "start") {
-      pushActivity(run, "info", `model ${obj.model ?? ""}`);
-      run.liveActivity = "thinking…";
-    } else if (obj.type === "token" && typeof obj.text === "string") {
-      // Tokens arrive one fragment at a time; grow a single block.
-      if (!run.parts.length) run.parts.push("");
-      run.parts[0] += obj.text;
-      run.liveActivity = "";
-    } else if (obj.type === "step" && obj.name) {
-      const args = obj.arguments ? JSON.stringify(obj.arguments).slice(0, 200) : "";
-      pushActivity(run, "tool", `${obj.name} ${args}`);
-      run.liveActivity = `⚙︎ using ${obj.name}…`;
-      if (obj.result) pushActivity(run, "info", String(obj.result).slice(0, 300));
-    } else if (obj.type === "error" && obj.message) {
-      pushActivity(run, "stderr", String(obj.message).slice(0, 300));
-    } else if (obj.type === "done" || obj.type === "end") {
+    if (obj.type === "result") {
+      if (!run.parts.length && typeof obj.result === "string" && obj.result) run.parts.push(obj.result);
+      const bits: string[] = [];
+      if (obj.duration_ms) bits.push(`${Math.round(obj.duration_ms / 1000)}s`);
+      if (obj.usage?.total_tokens) bits.push(`${obj.usage.total_tokens} tokens`);
+      run.meta = bits.join(" · ");
       run.liveActivity = "";
     }
   },
 };
 
 /**
- * POST /chat and pump its SSE stream through the same funnel the CLI
- * adapters use, so streaming, activity, cancel and persistence behave
- * identically regardless of transport.
+ * An agent Spaces does not launch.
+ *
+ * Muse, the Cursor app, Zed's agent, a Claude Code terminal someone drives by
+ * hand — all of them edit the same repository, and none of them can be spawned
+ * headlessly. Representing them as agents is not cosmetic: it is what lets the
+ * branch lanes, the overlap check, the merge queue and every other agent's
+ * prompt account for work Spaces did not start.
+ *
+ * A "run" for one of these is a hand-off: external.ts writes the brief and
+ * records what the agent's tree looked like when it was handed over, so the
+ * next turn can say what actually changed. The adapter parses nothing.
  */
-async function startRitzRun(opts: {
-  runId: string;
-  agent: Agent;
-  conversationId: string;
-  prompt: string;
-  cwd: string;
-  trigger: Trigger;
-}): Promise<void> {
-  const ctrl = new AbortController();
-  ritzAborts.set(opts.runId, ctrl);
-  const values = {
-    ...parseOptionValues("ritz", opts.agent.cli_args ?? ""),
-    model: opts.agent.model ?? "",
-  };
-  const baseUrl = ritzBase(values);
-  const authHeaders = await ritzAuthHeaders(values);
+const externalAdapter: AgentAdapter = {
+  id: "external",
+  transport: "external",
+  program: "",
 
-  const res = await fetch(`${baseUrl}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders },
-    signal: ctrl.signal,
-    body: JSON.stringify(
-      ritzBody(
-        values,
-        {
-          conversationId: opts.conversationId,
-          message: opts.prompt,
-          workspace: opts.cwd || undefined,
-          principalActorId:
-            opts.trigger.authorType === "user" && opts.trigger.authorId === "user"
-              ? "local-user"
-              : `${opts.trigger.authorType}:${opts.trigger.authorId}`,
-          triggerOrigin:
-            opts.trigger.authorType === "user" && opts.trigger.authorId === "user"
-              ? "local-composer"
-              : "shared-or-automated",
-          attachments: opts.trigger.attachments,
-        }
-      ),
-    ),
-  });
-  if (!res.ok || !res.body) {
-    throw new Error(`${config().localAiName} returned ${res.status} ${res.statusText}`);
-  }
+  buildArgs() {
+    return [];
+  },
 
-  // Drain in the background; runAgent's promise settles off the done event.
-  void (async () => {
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    let failure = "";
-    // Ritz serialises all GPU work through one worker, and aborting an HTTP
-    // request does not stop generation server-side — so an abandoned request
-    // can block every later one. Fail loudly instead of spinning forever.
-    let sawData = false;
-    const stall = setTimeout(() => {
-      if (!sawData && !ctrl.signal.aborted) {
-        failure =
-          `${config().localAiName} accepted the request but produced no output in 2 minutes. Its worker is ` +
-          "probably busy with an earlier request — restart the engine if this persists.";
-        ctrl.abort();
-        void handleEvent({ runId: opts.runId, kind: "error", data: failure, exitCode: 1 });
-      }
-    }, 120_000);
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        // SSE frames are separated by a blank line; each "data:" is one JSON.
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
-          sawData = true;
-          await handleEvent({ runId: opts.runId, kind: "line", data: payload, exitCode: null });
-        }
-      }
-    } catch (e) {
-      if (!ctrl.signal.aborted) failure = String(e);
-    } finally {
-      clearTimeout(stall);
-      ritzAborts.delete(opts.runId);
-      if (!ctrl.signal.aborted) {
-        await handleEvent({
-          runId: opts.runId,
-          kind: failure ? "error" : "done",
-          data: failure,
-          exitCode: failure ? 1 : 0,
-        });
-      }
-    }
-  })();
-}
+  extractSessionId() {
+    return "";
+  },
 
-const ADAPTERS: Record<AgentKind, AgentAdapter> = {
-  claude: claudeAdapter,
-  codex: codexAdapter,
-  ritz: ritzAdapter,
-  custom: customAdapter,
+  parseLine() {
+    // nothing streams; external.ts drives the run to completion directly
+  },
 };
 
+/**
+ * The harness registry, keyed the same way capabilities.ts keys its manifest.
+ * Adding one is: write an adapter, register it here, add its HarnessMeta and
+ * option list. Nothing else in the app knows about CLI shapes.
+ */
+const ADAPTERS: Record<string, AgentAdapter> = {
+  claude: claudeAdapter,
+  codex: codexAdapter,
+  cursor: cursorAdapter,
+  external: externalAdapter,
+};
+
+/**
+ * An unknown kind — an agent row synced from a newer build, or from a paired
+ * device that supports a harness this one does not — is treated as external.
+ * It stays a visible teammate with a branch and a hand-off, and Spaces starts
+ * no process for it. Running an unrecognised value as an executable is the one
+ * thing that must not happen here.
+ */
 export function adapterFor(agent: Agent): AgentAdapter {
-  if (agent.kind === "custom") {
-    return { ...customAdapter, program: agent.model.trim() };
-  }
-  return ADAPTERS[agent.kind] ?? claudeAdapter;
+  return ADAPTERS[agent.kind] ?? externalAdapter;
 }
 
 /* ------------------------------------------------------------------ *
@@ -813,14 +718,17 @@ function handleLine(run: RunState, line: string) {
   // The transcript is the stream verbatim — recorded before parsing, so events
   // the adapters deliberately ignore (tool results) are still in it.
   recordTranscript(run, trimmed);
+  const adapter = adapterFor(run.agent);
   let obj: any;
   try {
     obj = JSON.parse(trimmed);
   } catch {
+    // Not a stream protocol. Every supported harness emits one, so a plain line
+    // is either a warning or a crash message — keep it verbatim rather than
+    // guessing at which half of it was meant to be the reply.
     run.raw.push(line);
     return;
   }
-  const adapter = adapterFor(run.agent);
   const sid = adapter.extractSessionId(obj);
   if (sid) run.sessionId = sid;
   adapter.parseLine(obj, run);
@@ -829,17 +737,11 @@ function handleLine(run: RunState, line: string) {
 function renderContent(run: RunState): string {
   if (run.parts.length) {
     const joined = run.parts.join("\n\n");
-    // Ritz streams its reasoning inline; keep it out of the saved transcript.
-    return run.agent.kind === "ritz" ? stripThinking(joined) : joined;
+    return joined;
   }
   return run.raw.join("\n");
 }
 
-/** Shared with the agent editor so quoting round-trips: capabilities.quoteArg
- *  is the exact inverse of tokenize. */
-function parseArgs(s: string): string[] {
-  return tokenize(s);
-}
 
 /* ------------------------------------------------------------------ *
  * Prompt composition
@@ -920,6 +822,97 @@ function contextEnvelope(
     taskId: trigger.taskId ?? "",
     sessionMode,
   });
+}
+
+/** How many messages of a thread are quoted before the middle is elided. */
+const THREAD_LIMIT = 40;
+/** How many other channels the "elsewhere" digest names. */
+const ELSEWHERE_LIMIT = 6;
+
+/**
+ * The thread this turn belongs to, whole.
+ *
+ * Without this an agent answering in a thread was shown the channel's last
+ * twenty-five messages and nothing else — so a reply to a thread that started
+ * a hundred messages ago arrived with the question missing. It looked like an
+ * agent ignoring context; it was an agent that had never been given it.
+ *
+ * The thread is rendered separately from the ambient conversation and first,
+ * because it is what the turn is actually about. Long threads keep their head
+ * and their tail: the opening is what the thread is *for*, and the end is
+ * where it got to.
+ */
+function threadContext(channel: Channel, trigger: Trigger): { block: string; shown: Set<string> } {
+  const shown = new Set<string>();
+  if (!trigger.parentId) return { block: "", shown };
+
+  const all = useStore.getState().messages[channel.id] ?? [];
+  const slice = threadSlice(all, trigger.parentId, trigger.msgId, THREAD_LIMIT);
+  if (!slice.messages.length) return { block: "", shown };
+
+  const lines = [`\n## This thread`];
+  slice.messages.forEach((m, index) => {
+    shown.add(m.id);
+    // The gap goes where it actually is: after the head, before the tail.
+    if (slice.elided > 0 && index === Math.floor(THREAD_LIMIT / 2)) {
+      lines.push(`… ${slice.elided} replies in the middle of this thread are not shown …`);
+    }
+    lines.push(`[${label(m)}]: ${m.content.slice(0, 1500)}`);
+  });
+  return { block: lines.join("\n"), shown };
+}
+
+/**
+ * What the rest of this project has been doing.
+ *
+ * A channel is a thread of work, so its conversation is deliberately its own —
+ * but that left a new channel knowing the project's memory and tasks and
+ * nothing at all about what anyone was actually working on. One line per other
+ * active channel is what somebody gets by glancing at the sidebar, and it is
+ * most of the value for a fraction of the words.
+ *
+ * Asked of the database rather than the store: the store only holds channels
+ * somebody has opened, and the ones worth reporting are usually the ones this
+ * agent has never been in.
+ */
+export async function elsewhereInProject(
+  project: Project | undefined,
+  channelId: string
+): Promise<string> {
+  if (!project) return "";
+  try {
+    const db = await getDb();
+    const rows = await db.select<
+      { name: string; author_name: string; content: string; created_at: number }[]
+    >(
+      `SELECT c.name AS name, m.author_name AS author_name, m.content AS content,
+              m.created_at AS created_at
+         FROM channels c
+         JOIN messages m ON m.id = (
+           SELECT m2.id FROM messages m2
+            WHERE m2.channel_id = c.id AND m2.status <> 'running'
+            ORDER BY m2.created_at DESC LIMIT 1
+         )
+        WHERE c.project_id = $1 AND c.id <> $2
+        ORDER BY m.created_at DESC
+        LIMIT $3`,
+      [project.id, channelId, ELSEWHERE_LIMIT]
+    );
+    if (!rows.length) return "";
+    const lines = [`\n## Elsewhere in this project`];
+    for (const row of rows) {
+      const gist = row.content.replace(/\s+/g, " ").trim().slice(0, 140);
+      const when = new Date(row.created_at).toISOString().slice(0, 10);
+      lines.push(`- #${row.name} (${when}) — ${row.author_name}: ${gist}`);
+    }
+    lines.push(
+      `Use spaces_list_messages to read any of these properly before acting on them.`
+    );
+    return lines.join("\n");
+  } catch {
+    // Orientation is a nicety. A run must not fail because one query did.
+    return "";
+  }
 }
 
 function buildFreshPrompt(
@@ -1005,7 +998,15 @@ function buildFreshPrompt(
   const linked = sharedContext(anchors);
   if (linked) lines.push(linked);
 
-  const msgs = (s.messages[channel.id] ?? []).filter((m) => m.status !== "running").slice(-25);
+  // The thread first, because it is what this turn is about; then the ambient
+  // conversation with anything already quoted above left out, so a short
+  // thread is not printed twice.
+  const thread = threadContext(channel, trigger);
+  if (thread.block) lines.push(thread.block);
+
+  const msgs = (s.messages[channel.id] ?? [])
+    .filter((m) => m.status !== "running" && !thread.shown.has(m.id))
+    .slice(-25);
   if (msgs.length) {
     lines.push(`\n## Recent conversation`);
     for (const m of msgs) lines.push(`[${label(m)}]: ${m.content.slice(0, 1500)}`);
@@ -1049,6 +1050,14 @@ function buildResumePrompt(
     contextEnvelope(runId, agent, channel, project, trigger, cwd, replyTo, "resume"),
     "",
   ];
+
+  /*
+   * A resumed session carries its own past turns, but not a thread it has
+   * never been in — and being resumed is exactly when an agent is most likely
+   * to be pulled into one. Quote it for the same reason as a fresh run.
+   */
+  const thread = threadContext(channel, trigger);
+  if (thread.block) lines.push(thread.block);
 
   // A resumed session carries the memory as it looked when the session started;
   // re-state anything the user has edited since this agent's last turn.
@@ -1570,6 +1579,64 @@ export function initRemoteAgentJobs(): () => void {
  * This does no dispatch policy at all — no busy check, no queueing, no
  * chaining. Callers go through orchestrator.dispatch(), which owns all of that.
  */
+/**
+ * macOS caps a process's whole argument block at 1 MB. Stay well under it: the
+ * environment shares that budget, and a prompt that lands at 900 KB fails with
+ * E2BIG rather than a message anyone can act on.
+ */
+const MAX_ARGV_PROMPT = 256 * 1024;
+
+/**
+ * The prompt as a single argument, for harnesses that cannot read stdin.
+ *
+ * Above the cap the prompt is written into `.hq/prompts/` and the argument
+ * becomes a short instruction pointing at it. Every harness that needs this
+ * can read a file in its own working directory, and a brief the agent has to
+ * open is strictly better than a brief that was silently truncated.
+ *
+ * The rest of `.hq/` is deliberately committed — it is the durable project
+ * brief. A prompt is not: it carries channel history, and the turn ends with
+ * `git add -A`, so without the ignore below every oversized brief would land
+ * in the repository and then in somebody's pull request.
+ */
+async function promptArg(
+  prompt: string,
+  project: Project | undefined,
+  runId: string,
+  agent: Agent
+): Promise<string> {
+  if (prompt.length <= MAX_ARGV_PROMPT) return prompt;
+  const root = project?.local_path ?? "";
+  const relative = `.hq/prompts/${runId}.md`;
+  if (root) {
+    try {
+      // Written first, and every time: a .gitignore that travels with the
+      // directory holds wherever the checkout is cloned, which a local
+      // .git/info/exclude does not.
+      await invoke("write_text_file", {
+        root,
+        relativePath: ".hq/prompts/.gitignore",
+        contents: "# Spaces writes oversized run briefs here. They are not project files.\n*\n",
+      });
+      await invoke("write_text_file", { root, relativePath: relative, contents: prompt });
+      return (
+        `Your full brief is too large to pass on the command line, so it is in ` +
+        `\`${relative}\` (relative to your working directory). Read that file first, ` +
+        `in full, and then carry out what it asks. Do not act before you have read it.`
+      );
+    } catch {
+      // fall through to truncation — a short brief still beats a failed run
+    }
+  }
+  const head = prompt.slice(0, MAX_ARGV_PROMPT - 400);
+  return (
+    `${head}\n\n---\n[Spaces truncated this brief: it exceeded the ${Math.round(
+      MAX_ARGV_PROMPT / 1024
+    )} KB this harness can accept on the command line, and there was no writable ` +
+    `project checkout to spill it into. ${agent.name}: say so rather than guessing at what is missing.]`
+  );
+}
+
 export async function runAgent(
   channelId: string,
   agent: Agent,
@@ -1598,7 +1665,11 @@ export async function runAgent(
   const msgId = opts.runId ?? uid();
   const store = useStore.getState();
 
-  let cwd = project?.local_path || "";
+  const external = isExternal(agent.kind);
+  // An external agent edits wherever its own app is pointed, which may be a
+  // different checkout entirely. Everything downstream — the git bracket, the
+  // hand-off baseline, the overlap check — has to agree about that directory.
+  let cwd = (external ? externalWorkdir(project, agent) : project?.local_path) || "";
   let mcpProject = project;
   if (!remote && project && !cwd) {
     try {
@@ -1610,7 +1681,7 @@ export async function runAgent(
     }
   }
   let isolated = false;
-  if (!remote && project?.isolate && project.local_path) {
+  if (!remote && !external && project?.isolate && project.local_path) {
     try {
       const ws = await ensureWorkspace(project, agent);
       if (ws) {
@@ -1667,15 +1738,12 @@ export async function runAgent(
     run_id: msgId,
   });
 
-  let session = remote ? "" : store.getSession(channelId, agent.id);
-  if (!remote && adapterFor(agent).transport === "http" && !session) {
-    // The conversation id is deterministic, so recording it makes the very
-    // next turn a resume rather than a fresh brief.
-    session = ritzConversationId(channelId, agent.id);
-    void store.setSession(channelId, agent.id, session);
-  }
+  const session = remote ? "" : store.getSession(channelId, agent.id);
   // Teammates share one git object database, so every turn gets an up-to-date
-  // picture of their branches and how to read them.
+  // picture of their branches, the files somebody else is holding, and how to
+  // read their work. Built from the whole roster — including agents Spaces
+  // never launches, because an overlap check that omits Muse is wrong exactly
+  // when it matters.
   const mates = channelAgents(store, channelId).filter((a) => a.id !== agent.id);
   const collab = project && !remote && !opts.prebuiltPrompt
     ? await collaborationBlock(project, agent, mates, { isolated, cwd }).catch(() => "")
@@ -1683,7 +1751,11 @@ export async function runAgent(
   // If a teammate handed this turn over after committing, lead with their diff.
   const shared =
     collab +
-    (!remote && !opts.prebuiltPrompt ? await handoffFor(project, trigger) : "");
+    (!remote && !opts.prebuiltPrompt ? await handoffFor(project, trigger) : "") +
+    // What the rest of the project has been doing. Computed here rather than
+    // inside the builders because it needs the database, and it matters most
+    // in a channel that has no history of its own to offer.
+    (opts.prebuiltPrompt ? "" : await elsewhereInProject(project, channelId));
   const prompt =
     opts.prebuiltPrompt ??
     (remote
@@ -1767,13 +1839,25 @@ export async function runAgent(
         error: "could not write the runtime contract",
       }))
     : { path: "", written: false, error: "" };
-  // Codex takes its MCP config as spawn arguments. Claude reads the .mcp.json
-  // we verified in the exact cwd above. Ritz has neither and reaches the same
-  // operations through .hq/actions.jsonl.
+  // Codex takes its MCP config as spawn arguments. Claude and Cursor read the
+  // config files we verified in the exact cwd above. An external agent has
+  // neither and reaches the same operations through .hq/actions.jsonl.
   const adapterArgs = [
     ...(agent.kind === "codex" && mcpProject ? mcpCodexArgs(mcpProject) : []),
     ...adapter.buildArgs(agent, session, runtimeContract.error ? "" : runtimeContract.path),
   ];
+  // Harnesses with no stdin reader take the prompt as the last argument. A
+  // Spaces prompt carries the whole project brief, which can outgrow ARG_MAX,
+  // so an oversized one is written next to the agent instead — losing the
+  // context would be a worse failure than one extra file read.
+  //
+  // Kept out of `adapterArgs`: that list is what the run row records as its
+  // command, and a run row is not where a whole prompt belongs. The spawn gets
+  // `launchArgs`, the inspector gets the command without it.
+  const launchArgs =
+    !remote && adapter.promptDelivery === "argv"
+      ? [...adapterArgs, await promptArg(prompt, mcpProject, msgId, agent)]
+      : adapterArgs;
 
   await store.insertRun({
     id: msgId,
@@ -1791,9 +1875,12 @@ export async function runAgent(
     command:
       remote
         ? `remote → ${agent.host_device_id}`
-        : adapter.transport === "http"
-        ? `POST ${ritzBase(parseOptionValues("ritz", agent.cli_args ?? ""))}/chat`
-        : displayCommand(adapter.program, adapterArgs),
+        : adapter.transport === "external"
+        ? `hand-off → ${handoffPath(agent)}`
+        : displayCommand(
+            adapter.program,
+            adapter.promptDelivery === "argv" ? [...adapterArgs, "<prompt>"] : adapterArgs
+          ),
     commit_before: commitBefore,
     commit_after: "",
     files_changed: "",
@@ -1803,8 +1890,17 @@ export async function runAgent(
   });
 
   try {
-    if (!remote && agent.kind === "custom" && !adapter.program) {
-      throw new Error("Choose an executable for this Custom CLI agent before running it.");
+    if (!remote && adapter.transport === "external") {
+      return await runHandOff({
+        run,
+        project,
+        agent,
+        channel,
+        trigger,
+        prompt,
+        msgId,
+        channelId,
+      });
     }
     if (remote) {
       const remoteAgentId = await portalIdForLocal("agent", agent.id);
@@ -1837,16 +1933,7 @@ export async function runAgent(
       await store.patchRun(msgId, { meta: run.liveActivity });
       return settled;
     }
-    if (adapter.transport === "http") {
-      await startRitzRun({
-        runId: msgId,
-        agent,
-        conversationId: ritzConversationId(channelId, agent.id),
-        prompt,
-        cwd,
-        trigger,
-      });
-    } else {
+    {
       await invoke("start_agent_run", {
         request: {
           runId: msgId,
@@ -1863,7 +1950,7 @@ export async function runAgent(
           runtime: agent.kind,
           harnessProtocol: SPACES_HARNESS_PROTOCOL,
           program: adapter.program,
-          args: adapterArgs,
+          args: launchArgs,
           cwd: cwd || null,
           prompt,
         },
@@ -1883,6 +1970,340 @@ export async function runAgent(
   }
 
   return settled;
+}
+
+/* ------------------------------------------------------------------ *
+ * Hand-offs — a turn for an agent Spaces cannot launch
+ * ------------------------------------------------------------------ */
+
+/**
+ * Run a turn for an external agent.
+ *
+ * There is no process to start, so the turn is a hand-off: write the same
+ * brief a spawned agent would have received, record the tree it was handed,
+ * and say plainly in the channel that Spaces has not done the work and will
+ * not until that agent's own app does.
+ *
+ * Two things make this worth more than a note to self. The brief is the *full*
+ * composed prompt — project instructions, channel charter, board, the shared
+ * workspace block — so an external teammate is briefed as well as a local one.
+ * And the recorded baseline (commit_before, files_changed) is what lets
+ * `reportHandOffs` later say exactly what that agent did with it, rather than
+ * asking someone to remember.
+ *
+ * The run is settled immediately and honestly: it is "done" because Spaces has
+ * finished its part of it, and the content says so in those words.
+ */
+async function runHandOff(opts: {
+  run: RunState;
+  project: Project | undefined;
+  agent: Agent;
+  channel: Channel;
+  trigger: Trigger;
+  prompt: string;
+  msgId: string;
+  channelId: string;
+}): Promise<RunResult> {
+  const { run, project, agent, channel, trigger, prompt, msgId, channelId } = opts;
+  const store = useStore.getState();
+
+  const result = await handOff({
+    project,
+    agent,
+    brief: prompt,
+    ask: trigger.content,
+    channelName: channel.name,
+    authorName: trigger.authorName,
+    runId: msgId,
+  });
+
+  const config = externalConfig(agent);
+  const where = externalWorkdir(project, agent);
+
+  // The brief is on disk either way — it is the durable record and the
+  // fallback. Auto-send is what turns it from a note somebody has to notice
+  // into work the agent is actually holding.
+  const delivery = result.error
+    ? { delivered: false, verified: false, method: "" as const, problem: "", previousApp: "" }
+    : await deliverToApp(
+        agent,
+        composerMessage({
+          agent,
+          ask: trigger.content,
+          workdir: where,
+          briefPath: result.path,
+          // Absolute, like the other two paths in this message: the agent is
+          // being told where to put a file, not where it sits in the repo.
+          replyFile: project?.local_path
+            ? `${project.local_path.replace(/\/+$/, "")}/${replyPath(agent)}`
+            : "",
+          channelName: channel.name,
+          authorName: trigger.authorName,
+        })
+      );
+
+  runs.delete(msgId);
+  untrackRun(msgId);
+  store.markRunActive(msgId, false);
+
+  /*
+   * "Sent" has to mean sent. Spaces posts the click and the paste, then reads
+   * the message box back — and only that read-back earns the confident wording
+   * below. A send it could not confirm falls to the hand-off text, which says
+   * where the brief is, because that is what somebody would need if the typing
+   * went nowhere.
+   */
+  const content = result.error
+    ? `⚠️ Couldn't leave a brief for ${agent.name}: ${result.error}`
+    : delivery.verified
+      ? [
+          `📤 **Sent to ${agent.name}.** Typed into ${config.app || "the app"} and sent.`,
+          "",
+          `- brief: \`${result.relativePath}\``,
+          where ? `- working directory: \`${where}\`` : "",
+          result.baselineSha ? `- tree at hand-off: \`${result.baselineSha.slice(0, 12)}\`` : "",
+          "",
+          `Spaces watches this repository — when ${agent.name} commits, its work appears in the shared workspace and in every other agent's next turn.`,
+        ]
+          .filter((l) => l !== "")
+          .join("\n")
+      : [
+          delivery.delivered
+            ? `📤 **Typed into ${config.app || "the app"} for ${agent.name}** — Spaces could not read the box back, so it cannot promise this landed.`
+            : `📋 **Handed off to ${agent.name}.** Spaces does not launch ${config.app || "this agent"}, so nothing has run yet.`,
+          "",
+          `- brief: \`${result.relativePath}\``,
+          where ? `- working directory: \`${where}\`` : "",
+          result.baselineSha ? `- tree at hand-off: \`${result.baselineSha.slice(0, 12)}\`` : "",
+          delivery.problem ? `\n⚠️ ${delivery.problem}` : "",
+          "",
+          config.autosend
+            ? `If nothing appeared, open ${config.app || "the app"} and point it at that brief.`
+            : `Open ${config.app || "the app"} and point it at that brief. Turn on **Send it automatically** in this agent's settings and Spaces will type it in for you.`,
+          `Spaces watches this repository — when ${agent.name} commits, its work shows up in the shared workspace and in every other agent's next turn, with no reporting back by hand.`,
+        ]
+          .filter((l) => l !== "")
+          .join("\n");
+
+  const status: "done" | "error" = result.error ? "error" : "done";
+  const meta = result.error
+    ? ""
+    : delivery.verified
+      ? "sent · awaiting external agent"
+      : delivery.delivered
+        ? "typed, unconfirmed · awaiting external agent"
+        : "awaiting external agent";
+  store.patchMessageLocal(channelId, msgId, { content, status, meta });
+  void store.persistMessage(msgId, { content, status, meta });
+  await store.patchRun(msgId, {
+    status,
+    meta,
+    // The baseline lives in the ordinary checkpoint columns, so a hand-off is
+    // inspectable and diffable with exactly the same machinery as a real run.
+    commit_before: result.baselineSha,
+    files_changed: result.baselineDirty.join("\n"),
+    finished_at: now(),
+  });
+
+  settle(run, status === "error" ? "error" : "done", content);
+  return {
+    runId: msgId,
+    agentId: agent.id,
+    agentName: agent.name,
+    status: status === "error" ? "error" : "done",
+    content,
+  };
+}
+
+/**
+ * Close the loop on every open hand-off in a project.
+ *
+ * Reads what each external agent has committed since its brief and posts the
+ * result into the channel the brief came from. Called when someone opens the
+ * shared-workspace view and before an external agent's next turn, so a teammate
+ * that worked overnight is credited without anyone typing a status update.
+ *
+ * Returns the number of hand-offs that had something to report.
+ */
+export async function reportHandOffs(projectId: string): Promise<number> {
+  const store = useStore.getState();
+  const project = store.projects.find((p) => p.id === projectId);
+  if (!project?.local_path) return 0;
+
+  const externals = store.agents.filter((a) => isExternal(a.kind));
+  if (!externals.length) return 0;
+
+  const channelIds = new Set(
+    store.channels.filter((c) => c.project_id === projectId).map((c) => c.id)
+  );
+  let reported = 0;
+
+  for (const agent of externals) {
+    const open = await store.openHandOffsFor(agent.id).catch(() => []);
+    /*
+     * One report per agent per sweep.
+     *
+     * `openHandOffsFor` returns every hand-off still waiting, newest first,
+     * and they all ask the same question: what has this agent done since. Ask
+     * someone twice in a minute and both are open, so the same work was
+     * announced once per hand-off — two identical messages, seconds apart.
+     * The newest baseline is the accurate one; the rest are settled quietly.
+     */
+    let said = false;
+    for (const row of open) {
+      if (!channelIds.has(row.channel_id)) continue;
+      if (said) {
+        await store.patchRun(row.id, { meta: "external work landed" });
+        continue;
+      }
+      const outcome = await settleHandOff(project, agent, {
+        sha: row.commit_before,
+        dirty: row.files_changed ? row.files_changed.split("\n").filter(Boolean) : [],
+      }).catch(() => null);
+      if (!outcome || outcome.untouched) continue;
+
+      const replyId = uid();
+      await store.insertMessage({
+        id: replyId,
+        channel_id: row.channel_id,
+        author_type: "agent",
+        author_id: agent.id,
+        author_name: agent.name,
+        content: [
+          `✅ ${describeOutcome(agent, outcome)}`,
+          "",
+          // The agent's own words first: when it answered a question, this is
+          // the reply, and the commit list is supporting detail.
+          outcome.reply,
+          outcome.reply && outcome.commits.length ? "" : "",
+          ...outcome.commits.slice(0, 5).map((c) => `- \`${c.sha.slice(0, 8)}\` ${c.subject}`),
+          outcome.newlyDirty.length
+            ? `\nStill uncommitted: ${outcome.newlyDirty.slice(0, 10).join(", ")}`
+            : "",
+        ]
+          .filter((l) => l !== "")
+          .join("\n"),
+        status: "done",
+        // Where it came from, because the two are read differently: git is
+        // observed fact, a written reply is the agent's own account.
+        meta: outcome.reply
+          ? outcome.commits.length || outcome.newlyDirty.length
+            ? "written reply and git"
+            : "written reply"
+          : "picked up from git",
+        parent_id: "",
+      });
+      // Mark it settled so the same work is never reported twice.
+      await store.patchRun(row.id, { meta: "external work landed" });
+      said = true;
+      if (outcome.reply) await consumeReply(project, agent);
+
+      /*
+       * An answer that arrives late is still an answer.
+       *
+       * When a CLI agent replies, the reply is dispatched again so teammates
+       * it names can pick it up — that is what makes a channel a conversation
+       * rather than a set of parallel monologues. An external teammate's reply
+       * was inserted and left there, so nothing could ever follow from it:
+       * Muse could be asked something, answer it well, name the teammate who
+       * should act on it, and no one would ever run.
+       *
+       * The ordinary chaining rules apply, which is what keeps this safe: an
+       * agent-authored trigger reaches only teammates it mentions explicitly,
+       * never @all, and never anyone already in the chain.
+       */
+      void triggerAgents(row.channel_id, {
+        content: outcome.reply || describeOutcome(agent, outcome),
+        authorType: "agent",
+        authorId: agent.id,
+        authorName: agent.name,
+        parentId: "",
+        msgId: replyId,
+        chain: [agent.id],
+      }).catch(() => {
+        // Chaining is fire-and-forget; the reply is already in the channel.
+      });
+      reported += 1;
+    }
+  }
+  return reported;
+}
+
+/**
+ * How often to look for an answer, and how often to look at git.
+ *
+ * Two cadences because the two checks cost wildly different things. Reading a
+ * reply file is a few bytes; settling a hand-off shells out to git several
+ * times per agent. Muse answers in about five seconds and was then sat on for
+ * up to forty-five, which reads as the agent being slow when it is only the
+ * workspace being asleep.
+ */
+const HANDOFF_POLL_MS = 4_000;
+const HANDOFF_GIT_MS = 45_000;
+
+/**
+ * Notice when an external teammate answers, without being asked to look.
+ *
+ * `reportHandOffs` was only ever called by the shared-workspace view opening,
+ * which made an answer conditional on the person navigating to the right
+ * screen for the right project. Ask Muse a question from #general, stay in
+ * #general, and the reply lands in a place nothing is reading — which is
+ * indistinguishable, from the channel, from an agent that ignored you.
+ *
+ * The common case is that nothing is outstanding, and that case costs one
+ * indexed query and no subprocesses: only projects with an open hand-off are
+ * settled, and git is touched only for those.
+ */
+export function initHandOffWatch(): () => void {
+  let stopped = false;
+  let running = false;
+  // Far enough back that the first tick looks at git too.
+  let lastGit = 0;
+
+  const tick = async () => {
+    // Overlapping sweeps would run git against the same tree twice and could
+    // report the same work in both.
+    if (stopped || running) return;
+    running = true;
+    try {
+      const db = await getDb();
+      const rows = await db.select<Array<{ project_id: string }>>(
+        `SELECT DISTINCT channels.project_id AS project_id
+           FROM runs
+           INNER JOIN channels ON channels.id = runs.channel_id
+          WHERE runs.meta LIKE '%awaiting external agent%'`
+      );
+      if (!rows.length) return;
+
+      const store = useStore.getState();
+      const externals = store.agents.filter((agent) => isExternal(agent.kind));
+      // Work that only shows up in git can wait for the slow cadence; a
+      // written answer should not.
+      const withGit = Date.now() - lastGit >= HANDOFF_GIT_MS;
+      if (withGit) lastGit = Date.now();
+
+      for (const row of rows) {
+        if (stopped) return;
+        if (!withGit) {
+          const project = store.projects.find((p) => p.id === row.project_id);
+          if (!(await replyWaiting(project, externals).catch(() => false))) continue;
+        }
+        await reportHandOffs(row.project_id).catch(() => 0);
+      }
+    } catch {
+      // Best effort: a sweep that fails is retried on the next tick, and the
+      // shared-workspace view still settles hand-offs the way it always did.
+    } finally {
+      running = false;
+    }
+  };
+
+  void tick();
+  const timer = window.setInterval(() => void tick(), HANDOFF_POLL_MS);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
+  };
 }
 
 /**
@@ -1914,11 +2335,6 @@ export async function cancelRun(msgId: string) {
   if (remoteJobId) {
     remoteJobIds.delete(msgId);
     await cancelRemoteJob(remoteJobId).catch(() => {});
-  }
-  const abort = ritzAborts.get(msgId);
-  if (abort) {
-    abort.abort();
-    ritzAborts.delete(msgId);
   }
   await invoke("cancel_agent_run", { runId: msgId }).catch(() => {});
   // The done event may have landed during the await — don't flip a run that

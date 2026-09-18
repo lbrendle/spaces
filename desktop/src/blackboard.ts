@@ -25,6 +25,7 @@ import {
 import { LINK_KIND_BY_ID } from "./links";
 import { ACTIONS_DOC, ensureActionsFile } from "./actions";
 import { setupMcp } from "./mcpsetup";
+import { adoptContext } from "./adopt";
 import { isGitRepo } from "./workspaces";
 
 export interface BlackboardResult {
@@ -644,6 +645,27 @@ async function generate(projectId: string, out: BlackboardResult): Promise<void>
   const root = (project?.local_path ?? "").trim();
   if (!project || !root) return;
   if (!(await isGitRepo(root))) return;
+
+  /*
+   * Read before writing.
+   *
+   * CONTEXT.md is generated and overwrites whatever is there, which is correct
+   * for a generated file and destructive for the situation it creates: a
+   * project's standing decisions end up in a file Spaces will blank the moment
+   * its database does not know them. Adopting first means anything on disk —
+   * from a previous Spaces, from Claude Code's CLAUDE.md, from Codex's
+   * AGENTS.md — is in the workspace before the workspace renders itself back
+   * out over it.
+   *
+   * It is append-only and idempotent, so on almost every sync it does nothing
+   * at all, and a failure must never stop the mirror: an un-adopted section is
+   * a missed opportunity, an unwritten blackboard is a broken feature.
+   */
+  try {
+    await adoptContext(project);
+  } catch (e) {
+    out.errors.push(`could not read existing context: ${e}`);
+  }
 
   // Every query is explicitly ordered: the files must be byte-stable.
   const [

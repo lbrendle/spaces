@@ -314,7 +314,16 @@ export async function dispatch(channelId: string, trigger: Trigger): Promise<voi
 
 /** Everyone addressed answers at once — the original v2 behaviour. */
 async function runBroadcast(channel: Channel, targets: Agent[], trigger: Trigger): Promise<void> {
-  const parentId = trigger.parentId || (targets.length > 1 ? trigger.msgId : "");
+  /*
+   * An answer to a channel message belongs in the channel.
+   *
+   * A round with more than one agent used to be filed as a thread under the
+   * message that started it, to keep the channel tidy. What that actually does
+   * is hide every reply behind a "1 reply" link: you ask the team something,
+   * the team answers, and the channel looks like nothing happened. Threading
+   * is for replies to a thread, which is what `trigger.parentId` already says.
+   */
+  const parentId = trigger.parentId;
   await boundedAll(
     targets.map((agent) => async () => {
       const res = await runOne(channel.id, agent, trigger, { parentId });
@@ -335,7 +344,8 @@ async function runSequential(
 ): Promise<void> {
   const order = new Map(members.map((a, i) => [a.id, i] as const));
   const line = [...targets].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9));
-  const parentId = trigger.parentId || (line.length > 1 ? trigger.msgId : "");
+  // Top-level unless the ask itself was in a thread — see runBroadcast.
+  const parentId = trigger.parentId;
   const names = line.map((a) => a.name).join(" → ");
 
   for (let i = 0; i < line.length; i++) {
@@ -364,7 +374,8 @@ async function runLead(channel: Channel, members: Agent[], trigger: Trigger): Pr
   if (mentioned.some((a) => a.id !== lead.id)) return runBroadcast(channel, mentioned, trigger);
 
   // The whole round lives in one thread under the triggering message.
-  const parentId = trigger.parentId || trigger.msgId;
+  // The round stays where it was asked — see runBroadcast.
+  const parentId = trigger.parentId;
   const roster = members.filter((a) => a.id !== lead.id);
   const canDelegate = !!channel.chaining && roster.length > 0 && trigger.chain.length < MAX_CHAIN;
 
@@ -438,7 +449,8 @@ async function runPanel(channel: Channel, members: Agent[], trigger: Trigger): P
     return runBroadcast(channel, mentioned, trigger);
   }
 
-  const parentId = trigger.parentId || (members.length > 1 ? trigger.msgId : "");
+  // Top-level unless the ask itself was in a thread — see runBroadcast.
+  const parentId = trigger.parentId;
   const note = `Everyone in #${channel.name} is answering this independently and at the same time — you cannot see the others' answers. Give your own best answer from your own area of ownership, and be explicit about what you are confident in and what you are not.`;
   const results = await boundedAll(
     members.map((a) => () => runOne(channel.id, a, trigger, { parentId, note }))

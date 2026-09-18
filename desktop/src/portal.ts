@@ -2,7 +2,7 @@ import { getDb, now } from "./db";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store";
 import { config } from "./config";
-import { configuredEffort, tokenize } from "./capabilities";
+import { configuredEffort, harnessKinds, tokenize } from "./capabilities";
 import {
   adoptPairedDevice,
   currentDeviceId,
@@ -627,10 +627,22 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       created_at: number;
     }>
   >(
+    /*
+     * Imported history stays on the machine that imported it.
+     *
+     * It is somebody's own Claude Code and Codex sessions, read off their disk
+     * for local context — tens of thousands of messages, much of it about
+     * work that predates the workspace and some of it about other projects
+     * entirely. The import screen promises only that it reads those files and
+     * does not change them; quietly republishing them to a shared web
+     * workspace is not something anyone asked for, and the volume alone would
+     * swamp the sync budget that real conversation needs.
+     */
     `SELECT * FROM (
        SELECT id, channel_id, author_type, author_id, author_name, content,
               status, meta, parent_id, run_id, created_at
          FROM messages
+        WHERE import_key = ''
         ORDER BY created_at DESC, id DESC
         LIMIT 2000
      ) ORDER BY created_at, id`,
@@ -723,11 +735,33 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       sortOrder: task.sort_order,
       createdAt: task.created_at,
     }));
-  const liveIds = new Map<string, Set<string>>([
-    ["project", new Set(state.projects.map((project) => project.id))],
-    ["channel", new Set(state.channels.map((channel) => channel.id))],
-    ["task", new Set(state.tasks.map((task) => task.id))],
-  ]);
+  /*
+   * Asking the portal to delete something is irreversible, so the evidence has
+   * to be the database, not the store.
+   *
+   * This used to read `state.projects` / `state.channels` / `state.tasks` — a
+   * Zustand snapshot, which is a cache of whatever has been loaded. Anything
+   * mapped in `portal_links` but missing from that snapshot was reported to
+   * the portal as deleted, and the portal wrote a tombstone that came back and
+   * removed it here for good. A snapshot that lagged the links table by one
+   * sync was therefore enough to destroy a live project: every project created
+   * in this session was mapped, then tombstoned minutes later, taking its
+   * channels and its memory with it.
+   *
+   * The rows below are the same question asked of the source of truth. A
+   * project the user really did delete is genuinely absent here, so the intent
+   * is unchanged — what goes away is the window where "not loaded yet" and
+   * "deleted" were indistinguishable.
+   */
+  const liveIds = new Map<string, Set<string>>();
+  for (const [entity, table] of [
+    ["project", "projects"],
+    ["channel", "channels"],
+    ["task", "tasks"],
+  ] as const) {
+    const rows = await localDb.select<Array<{ id: string }>>(`SELECT id FROM ${table}`);
+    liveIds.set(entity, new Set(rows.map((row) => row.id)));
+  }
   const deleteRequests = mirrorRows
     .filter(
       (row) =>
@@ -1066,9 +1100,11 @@ export async function syncPortal(): Promise<PortalConnection | null> {
       );
     }
     for (const remote of body.agents ?? []) {
-      const kind = ["claude", "codex", "ritz", "custom"].includes(remote.backend)
-        ? remote.backend
-        : "codex";
+      // An unregistered backend silently became "codex", so an agent synced
+      // from a newer build came back as a different harness than it left as.
+      // It becomes external instead: still a visible teammate, and Spaces
+      // starts no process for a value this build does not understand.
+      const kind = harnessKinds().includes(remote.backend) ? remote.backend : "external";
       const effort = remote.effort.trim();
       const cliArgs = remote.cliArgs?.length
         ? remote.cliArgs

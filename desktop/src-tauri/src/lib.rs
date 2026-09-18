@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -485,12 +485,1599 @@ async fn run_git_ex(
     .map_err(|e| format!("task failed: {e}"))?
 }
 
+/// Every harness binary Spaces knows how to launch, plus the two tools it needs
+/// itself. Keyed by *executable*, which is not always the harness id — the
+/// Cursor harness is `cursor` and its binary is `cursor-agent`.
+///
+/// The registry in desktop/src/capabilities.ts is the source of truth; this is
+/// its executable list, and tests/coordination.test.ts fails if the two drift.
+const HARNESS_BINS: [&str; 5] = ["claude", "codex", "cursor-agent", "gh", "node"];
+
+/* ── Reading what other agents already did ─────────────────────── */
+
+// Claude Code and Codex both keep every session on this Mac as JSONL, keyed by
+// the directory the work happened in. That is a complete record of the context
+// somebody already has — and until now Spaces started every project from
+// nothing while thousands of sessions sat on the same disk.
+//
+// Scanning is separated from reading on purpose. A scan touches ~3,000 files
+// and has to feel instant, so it reads the head of each one and takes the rest
+// from the directory entry. Reading a transcript is only done for sessions
+// somebody is actually importing.
+
+/// How far into a session file a scan will read before giving up on it.
+///
+/// A scan stops the moment it has the two things it needs — the working
+/// directory and a title — which for almost every file is within a handful of
+/// records. The caps are for the rest.
+///
+/// They are not generous by accident. A fixed 64 KB window looked ample and
+/// silently lost the title of 998 Codex sessions out of 1,307: Codex opens
+/// with a `session_meta` record carrying the model's entire base instructions,
+/// which on its own can run past 64 KB, so the first thing the user actually
+/// said lands beyond the window. Reading until the answer appears, rather than
+/// reading a guessed amount and hoping, costs nothing for the common file and
+/// recovers the rest.
+const SCAN_BYTES: usize = 1_000_000;
+const SCAN_LINES: usize = 600;
+
+/// How long to keep looking for a better title once a usable one exists.
+///
+/// Claude Code names a session itself and writes that name as an `ai-title`
+/// record — but only after the conversation has started, so it is always
+/// behind the opening prompt. Stopping at the prompt would mean never seeing
+/// the name the person actually recognises from Claude Code's own list.
+const TITLE_GRACE: usize = 60;
+
+/// The longest a single turn may be once imported.
+///
+/// A pasted file or a long tool result can run to hundreds of kilobytes, which
+/// is real content but not conversation. Truncating keeps a transcript legible
+/// and the database a sensible size; the original file is never modified and
+/// stays the complete record.
+const TURN_LIMIT: usize = 8_000;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSummary {
+    /// Which agent wrote it: "claude" or "codex".
+    source: String,
+    /**
+     * What identifies this session, which is its *file*, not the id inside it.
+     *
+     * Codex reuses `session_id` across every rollout a conversation resumes
+     * into: 1,307 files on this machine carry only 251 distinct ids, one of
+     * them shared by 212 files. Keying on that would have thrown away four
+     * fifths of the Codex history and, worse, made a re-import delete the
+     * siblings of whichever file it happened to read last. The file stem is
+     * unique in both formats — for Claude Code it *is* the session id — so
+     * that is the identity.
+     */
+    id: String,
+    /// The id the session records for itself, which several files may share.
+    /// Kept because it is how the agent's own tooling refers to a
+    /// conversation; never used as a key.
+    session_id: String,
+    /// Absolute path, so importing does not have to search again.
+    path: String,
+    /// The directory the work happened in. This is what makes a session
+    /// belong to a project rather than to a machine.
+    cwd: String,
+    /// The session's own title where it has one, else its opening prompt.
+    title: String,
+    /// Milliseconds since the epoch; 0 when the file carried no timestamp.
+    started_at: i64,
+    /// Last write, from the directory entry — near enough to when it ended,
+    /// and free.
+    ended_at: i64,
+    bytes: u64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionTurn {
+    /// "user" or "assistant".
+    role: String,
+    text: String,
+    at: i64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionTranscript {
+    source: String,
+    /// The file's identity — see `SessionSummary::id`.
+    id: String,
+    session_id: String,
+    cwd: String,
+    title: String,
+    started_at: i64,
+    ended_at: i64,
+    turns: Vec<SessionTurn>,
+}
+
+/// `2026-07-07T22:14:16.211Z` to milliseconds, without pulling in a date crate.
+///
+/// Both formats write RFC 3339 in UTC and nothing else, so this parses exactly
+/// that and returns 0 rather than guessing at anything it does not recognise —
+/// a wrong timestamp would sort a transcript into nonsense.
+fn iso_millis(text: &str) -> i64 {
+    let bytes = text.as_bytes();
+    if bytes.len() < 19 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' {
+        return 0;
+    }
+    let num = |from: usize, to: usize| -> i64 { text[from..to].parse().unwrap_or(-1) };
+    let (y, mo, d) = (num(0, 4), num(5, 7), num(8, 10));
+    let (h, mi, s) = (num(11, 13), num(14, 16), num(17, 19));
+    if y < 1970 || !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return 0;
+    }
+    // 60 seconds is allowed: a leap second is a real timestamp, not a typo.
+    if !(0..=23).contains(&h) || !(0..=59).contains(&mi) || !(0..=60).contains(&s) {
+        return 0;
+    }
+    // Days from the civil calendar, by Howard Hinnant's algorithm: exact for
+    // every proleptic Gregorian date and no leap-year special cases.
+    let y_adj = if mo <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
+    let yoe = y_adj - era * 400;
+    let mp = (mo + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    let millis = text
+        .get(19..)
+        .and_then(|rest| rest.strip_prefix('.'))
+        .map(|frac| {
+            let digits: String = frac.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let mut value: i64 = digits.get(..3).unwrap_or(&digits).parse().unwrap_or(0);
+            for _ in digits.len()..3 {
+                value *= 10;
+            }
+            value
+        })
+        .unwrap_or(0);
+
+    ((days * 24 + h) * 60 + mi) * 60_000 + s * 1_000 + millis
+}
+
+/// Last-modified, in milliseconds.
+fn modified_millis(meta: &std::fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Every `.jsonl` under a root, at any depth.
+///
+/// Codex files them by date — `sessions/2026/07/01/rollout-*.jsonl` — and
+/// Claude Code by encoded working directory, one level down. One recursive
+/// walk handles both and will keep handling both if either changes its mind.
+fn jsonl_files(root: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+    if depth > 6 || out.len() > 20_000 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => jsonl_files(&path, out, depth + 1),
+            Ok(t) if t.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") => {
+                out.push(path);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Flatten a message body to plain text.
+///
+/// Both formats allow a string or a list of blocks, and the blocks that matter
+/// are the ones with text in them. Thinking and tool calls are deliberately
+/// dropped: they are the agent talking to itself, they dwarf the conversation,
+/// and what is wanted here is what was asked and what was answered.
+fn block_text(value: &serde_json::Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.trim().to_string();
+    }
+    let Some(items) = value.as_array() else {
+        return String::new();
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for item in items {
+        let kind = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if matches!(kind, "thinking" | "tool_use" | "tool_result" | "reasoning") {
+            continue;
+        }
+        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+    }
+    parts.join("\n\n")
+}
+
+/// Headings that mean "everything under here is context I added for you".
+///
+/// Codex fills the first user message with material of its own and heads each
+/// kind with one of these: inlined attachments, an app list, the repository's
+/// AGENTS.md — which in this repository Spaces wrote — and references to other
+/// conversations. A message that opens with one of them contains no prompt,
+/// and the person's actual words are in the turn after it.
+const INJECTED_SECTIONS: [&str; 4] = [
+    "# Files mentioned by the user:",
+    "# Applications mentioned by the user:",
+    "# AGENTS.md instructions for ",
+    "## Referenced ",
+];
+
+/// Where the person's own words start, when they are in the same message.
+///
+/// Matched anywhere rather than only at the top, and case-insensitively,
+/// because it appears as both "## My request:" and "## My request for Codex:"
+/// and arrives after whichever section Codex chose to inject.
+const REQUEST_HEADING: &str = "## my request";
+
+/// The first line of a message that a person actually wrote.
+///
+/// Neither agent's first user turn is reliably the prompt, because both wrap
+/// it, and Codex wraps it three different ways: tag blocks it injects ahead of
+/// the conversation (`<recommended_plugins>`, `<environment_context>`), the
+/// section headings above, and a `## My request:` marker after them.
+///
+/// Taking "the first line" left 1,121 of 1,307 Codex sessions on this machine
+/// titled with something that described none of them — mostly
+/// `<recommended_plugins>` and `# Files mentioned by the user:`, hundreds of
+/// sessions sharing each. Walking past the wrapper leaves 516, and 392 of
+/// those have no user prose at all in their first twenty turns, which is a
+/// fact about the session rather than a parsing failure.
+///
+/// Returning an empty string for a message that is *entirely* wrapper is the
+/// important part: it is what lets the caller move on to the next turn instead
+/// of titling the session with Codex's furniture.
+///
+/// Anything not of these shapes comes back as written. A prompt is allowed to
+/// start with a heading or a less-than sign; only the specific shapes above
+/// are treated as wrapper.
+fn first_prose_line(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+
+    // The request marker wins wherever it is, because it is Codex saying
+    // "the wrapper ends here" in its own words.
+    if let Some(at) = lines
+        .iter()
+        .position(|line| line.to_ascii_lowercase().starts_with(REQUEST_HEADING))
+    {
+        return lines[at + 1..]
+            .iter()
+            .find(|line| !line.is_empty())
+            .map(|line| line.chars().take(160).collect())
+            .unwrap_or_default();
+    }
+
+    let first = lines
+        .iter()
+        .find(|line| !line.is_empty())
+        .copied()
+        .unwrap_or("");
+    if INJECTED_SECTIONS.iter().any(|head| first.starts_with(head)) {
+        return String::new();
+    }
+
+    let mut inside: Option<String> = None;
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(tag) = &inside {
+            if line == format!("</{tag}>") {
+                inside = None;
+            }
+            continue;
+        }
+        if let Some(name) = opening_tag(line) {
+            // A tag that opens and closes on one line — `<command-message>x
+            // </command-message>` — opens no block. Treating it as one made
+            // the rest of the message invisible.
+            if !(line.ends_with(&format!("</{name}>")) || line.ends_with("/>")) {
+                inside = Some(name);
+            }
+            continue;
+        }
+        return line.chars().take(160).collect();
+    }
+    String::new()
+}
+
+/// The tag name a line opens with, when the line begins with one.
+fn opening_tag(line: &str) -> Option<String> {
+    let rest = line.strip_prefix('<')?;
+    if rest.starts_with('/') {
+        return None;
+    }
+    let name: String = rest
+        .split(['>', ' '])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_string();
+    let tagish = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    tagish.then_some(name)
+}
+
+/// Keep a turn to a readable size, on a character boundary.
+fn clamp(text: String) -> String {
+    if text.chars().count() <= TURN_LIMIT {
+        return text;
+    }
+    let kept: String = text.chars().take(TURN_LIMIT).collect();
+    format!("{kept}\n\n… truncated — the full session is in the original file.")
+}
+
+/// What a scan can learn from the head of one file.
+fn summarise(path: &Path, source: &str) -> Option<SessionSummary> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() == 0 {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut cwd = String::new();
+    let mut title = String::new();
+    let mut id = String::new();
+    let mut started_at = 0i64;
+    let mut used = 0usize;
+    // Whether the title came from the agent naming the session, rather than
+    // from falling back to its opening prompt.
+    let mut named = false;
+
+    for (seen, line) in std::io::BufRead::lines(reader).enumerate() {
+        // Stop as soon as there is nothing left to learn, which for nearly
+        // every file is the first few records — but hold on a little longer
+        // when the title is only a fallback and this format has a real one.
+        let settled = named || source != "claude" || seen >= TITLE_GRACE;
+        if !cwd.is_empty() && !title.is_empty() && settled {
+            break;
+        }
+        let Ok(line) = line else { break };
+        used += line.len();
+        if seen >= SCAN_LINES || used >= SCAN_BYTES {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let kind = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if started_at == 0 {
+            if let Some(stamp) = record.get("timestamp").and_then(|v| v.as_str()) {
+                started_at = iso_millis(stamp);
+            }
+        }
+
+        match source {
+            "claude" => {
+                if cwd.is_empty() {
+                    if let Some(value) = record.get("cwd").and_then(|v| v.as_str()) {
+                        cwd = value.to_string();
+                    }
+                }
+                if id.is_empty() {
+                    if let Some(value) = record.get("sessionId").and_then(|v| v.as_str()) {
+                        id = value.to_string();
+                    }
+                }
+                // The agent's own title beats the opening prompt, and beats one
+                // already taken from it.
+                if kind == "ai-title" {
+                    if let Some(value) = record.get("aiTitle").and_then(|v| v.as_str()) {
+                        if !value.trim().is_empty() {
+                            title = value.trim().to_string();
+                            named = true;
+                        }
+                    }
+                } else if kind == "user" && title.is_empty() {
+                    let body = record.get("message").and_then(|m| m.get("content"));
+                    if let Some(body) = body {
+                        let line = first_prose_line(&block_text(body));
+                        if !line.is_empty() {
+                            title = line;
+                        }
+                    }
+                }
+            }
+            _ => {
+                if kind == "session_meta" {
+                    let payload = record.get("payload");
+                    if let Some(payload) = payload {
+                        if let Some(value) = payload.get("cwd").and_then(|v| v.as_str()) {
+                            cwd = value.to_string();
+                        }
+                        if let Some(value) = payload.get("session_id").and_then(|v| v.as_str()) {
+                            id = value.to_string();
+                        }
+                        if started_at == 0 {
+                            if let Some(stamp) = payload.get("timestamp").and_then(|v| v.as_str()) {
+                                started_at = iso_millis(stamp);
+                            }
+                        }
+                    }
+                } else if kind == "response_item" && title.is_empty() {
+                    let payload = record.get("payload");
+                    let is_user = payload.and_then(|p| p.get("role")).and_then(|v| v.as_str())
+                        == Some("user");
+                    if is_user {
+                        if let Some(content) = payload.and_then(|p| p.get("content")) {
+                            let line = first_prose_line(&block_text(content));
+                            if !line.is_empty() {
+                                title = line;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let file_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_string();
+    if file_id.is_empty() {
+        return None;
+    }
+    // A session with no working directory cannot be placed in a project, and a
+    // project is the whole point — so it is not offered rather than offered
+    // wrongly.
+    if cwd.trim().is_empty() {
+        return None;
+    }
+
+    let title = title.chars().take(160).collect::<String>();
+    Some(SessionSummary {
+        source: source.to_string(),
+        id: file_id,
+        session_id: id,
+        path: path.to_string_lossy().to_string(),
+        cwd,
+        title,
+        started_at,
+        ended_at: modified_millis(&meta),
+        bytes: meta.len(),
+    })
+}
+
+/// Whether any session file has been written since a moment.
+///
+/// The cheap question that has to be asked before the expensive one. A scan
+/// opens three thousand files and takes the better part of fifteen seconds;
+/// this stats them and takes milliseconds, and the answer is no almost every
+/// time. Asking it first is the difference between a watcher nobody notices
+/// and an app that stutters whenever it comes to the front.
+#[tauri::command]
+async fn sessions_changed_since(since: i64) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = std::env::var("HOME").map_err(|_| "no home directory".to_string())?;
+        for root in [
+            PathBuf::from(&home).join(".claude").join("projects"),
+            PathBuf::from(&home).join(".codex").join("sessions"),
+        ] {
+            if !root.is_dir() {
+                continue;
+            }
+            let mut files = Vec::new();
+            jsonl_files(&root, &mut files, 0);
+            for path in files {
+                // Metadata only — nothing is opened, which is the whole point.
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    if modified_millis(&meta) > since {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// Every Claude Code and Codex session on this Mac, with the directory each
+/// one belongs to.
+///
+/// Returns what it can read and says nothing about what it cannot: an
+/// unreadable or half-written file is skipped, because a scan that fails
+/// because one session of three thousand is malformed is useless.
+#[tauri::command]
+async fn scan_agent_sessions() -> Result<Vec<SessionSummary>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let home = std::env::var("HOME").map_err(|_| "no home directory".to_string())?;
+        let mut found: Vec<SessionSummary> = Vec::new();
+
+        for (source, root) in [
+            (
+                "claude",
+                PathBuf::from(&home).join(".claude").join("projects"),
+            ),
+            (
+                "codex",
+                PathBuf::from(&home).join(".codex").join("sessions"),
+            ),
+        ] {
+            if !root.is_dir() {
+                continue;
+            }
+            let mut files = Vec::new();
+            jsonl_files(&root, &mut files, 0);
+            for path in files {
+                if let Some(summary) = summarise(&path, source) {
+                    found.push(summary);
+                }
+            }
+        }
+
+        // Newest first: the sessions somebody wants are the recent ones, and
+        // this is the order every caller would otherwise impose itself.
+        found.sort_by_key(|s| std::cmp::Reverse(s.ended_at));
+        Ok(found)
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// One session in full, as an alternating conversation.
+#[tauri::command]
+async fn read_agent_session(path: String, source: String) -> Result<SessionTranscript, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::BufRead;
+        let file = std::fs::File::open(&path).map_err(|e| format!("could not open {path}: {e}"))?;
+        let meta = std::fs::metadata(&path).ok();
+        let reader = std::io::BufReader::new(file);
+
+        let mut turns: Vec<SessionTurn> = Vec::new();
+        let mut cwd = String::new();
+        let mut title = String::new();
+        let mut id = String::new();
+        let mut started_at = 0i64;
+        let mut last_at = 0i64;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            let kind = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let at = record
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .map(iso_millis)
+                .unwrap_or(0);
+            if at > 0 {
+                if started_at == 0 {
+                    started_at = at;
+                }
+                last_at = at;
+            }
+
+            if source == "claude" {
+                if cwd.is_empty() {
+                    if let Some(value) = record.get("cwd").and_then(|v| v.as_str()) {
+                        cwd = value.to_string();
+                    }
+                }
+                if id.is_empty() {
+                    if let Some(value) = record.get("sessionId").and_then(|v| v.as_str()) {
+                        id = value.to_string();
+                    }
+                }
+                if kind == "ai-title" {
+                    if let Some(value) = record.get("aiTitle").and_then(|v| v.as_str()) {
+                        if !value.trim().is_empty() {
+                            title = value.trim().to_string();
+                        }
+                    }
+                    continue;
+                }
+                if kind != "user" && kind != "assistant" {
+                    continue;
+                }
+                let Some(body) = record.get("message").and_then(|m| m.get("content")) else {
+                    continue;
+                };
+                let text = block_text(body);
+                if text.is_empty() {
+                    continue;
+                }
+                if title.is_empty() && kind == "user" {
+                    title = first_prose_line(&text);
+                }
+                turns.push(SessionTurn {
+                    role: kind.to_string(),
+                    text: clamp(text),
+                    at,
+                });
+            } else {
+                if kind == "session_meta" {
+                    if let Some(payload) = record.get("payload") {
+                        if let Some(value) = payload.get("cwd").and_then(|v| v.as_str()) {
+                            cwd = value.to_string();
+                        }
+                        if let Some(value) = payload.get("session_id").and_then(|v| v.as_str()) {
+                            id = value.to_string();
+                        }
+                        if started_at == 0 {
+                            if let Some(stamp) = payload.get("timestamp").and_then(|v| v.as_str()) {
+                                started_at = iso_millis(stamp);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if kind != "response_item" {
+                    continue;
+                }
+                let Some(payload) = record.get("payload") else {
+                    continue;
+                };
+                if payload.get("type").and_then(|v| v.as_str()) != Some("message") {
+                    continue;
+                }
+                let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                if role != "user" && role != "assistant" {
+                    continue;
+                }
+                let Some(content) = payload.get("content") else {
+                    continue;
+                };
+                let text = block_text(content);
+                if text.is_empty() {
+                    continue;
+                }
+                if title.is_empty() && role == "user" {
+                    title = first_prose_line(&text);
+                }
+                turns.push(SessionTurn {
+                    role: role.to_string(),
+                    text: clamp(text),
+                    at,
+                });
+            }
+        }
+
+        let file_id = Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let ended_at = if last_at > 0 {
+            last_at
+        } else {
+            meta.as_ref().map(modified_millis).unwrap_or(0)
+        };
+
+        Ok(SessionTranscript {
+            source,
+            id: file_id,
+            session_id: id,
+            cwd,
+            title: title.chars().take(160).collect(),
+            started_at,
+            ended_at,
+            turns,
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/* ── Accessibility permission ──────────────────────────────────── */
+
+// Driving another application needs the Accessibility grant, and there is a
+// real API for both asking and checking. The alternative — inferring it from
+// whether `System Events` answers within a timeout — cannot tell a denied
+// permission from a busy machine, and takes seconds to be wrong.
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    // CoreFoundation's `Boolean` is an unsigned char, not C's `_Bool`. Reading
+    // it as a Rust `bool` is undefined behaviour for any value other than 0 or
+    // 1, and silently wrong rather than loudly wrong.
+    fn AXIsProcessTrusted() -> u8;
+    fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef) -> u8;
+    static kAXTrustedCheckOptionPrompt: core_foundation::string::CFStringRef;
+}
+
+/// Whether Spaces may drive other applications. Instant, and never prompts.
+#[tauri::command]
+fn accessibility_trusted() -> bool {
+    unsafe { AXIsProcessTrusted() != 0 }
+}
+
+/// Ask for the Accessibility grant, with macOS's own dialog.
+///
+/// Worth preferring over sending somebody to System Settings by hand: the
+/// system prompt deep-links to the right pane *and* registers the app in the
+/// list, so the whole task becomes one toggle instead of finding a hidden
+/// window, clicking +, and typing a path into a file picker.
+///
+/// Returns the trust state as it is *now*. It is almost always false on the
+/// first call — the dialog is not modal and the grant lands later — so callers
+/// poll `accessibility_trusted` rather than believing this answer.
+#[tauri::command]
+fn request_accessibility() -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+
+    unsafe {
+        let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
+        let options = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
+        AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0
+    }
+}
+
+/* ── Driving an app Spaces cannot launch ───────────────────────── */
+
+// Everything below runs *in this process* on purpose.
+//
+// The obvious implementation shells out to `osascript`, and it does not work:
+// macOS attributes the Accessibility check to the child, so the script is
+// refused with "osascript is not allowed assistive access (-25211)" no matter
+// how thoroughly Spaces itself has been granted the permission. Whoever grants
+// it would have no way to tell why. Calling the same APIs directly means the
+// process being checked is the one the user allowed.
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXUIElementCreateApplication(pid: i32) -> core_foundation::base::CFTypeRef;
+    fn AXUIElementCopyAttributeValue(
+        element: core_foundation::base::CFTypeRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: *mut core_foundation::base::CFTypeRef,
+    ) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: core_foundation::base::CFTypeRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: core_foundation::base::CFTypeRef,
+    ) -> i32;
+    fn AXValueGetValue(
+        value: core_foundation::base::CFTypeRef,
+        the_type: u32,
+        out: *mut std::ffi::c_void,
+    ) -> bool;
+}
+
+const AX_VALUE_CGPOINT: u32 = 1;
+const AX_VALUE_CGSIZE: u32 = 2;
+
+/// The frontmost app's process id, so focus can be handed back afterwards.
+///
+/// `lsappinfo`, not AppleScript: asking System Events who is in front is
+/// itself an accessibility operation attributed to the child process, which is
+/// the trap this whole module exists to avoid. Launch Services will answer the
+/// same question without any permission at all.
+fn frontmost_pid() -> Option<i32> {
+    let front = Command::new("/usr/bin/lsappinfo")
+        .arg("front")
+        .output()
+        .ok()?;
+    let asn = String::from_utf8_lossy(&front.stdout).trim().to_string();
+    if asn.is_empty() {
+        return None;
+    }
+    let info = Command::new("/usr/bin/lsappinfo")
+        .args(["info", "-only", "pid", &asn])
+        .output()
+        .ok()?;
+    // Answers as `"pid"=1234`; the number is the only digits in it.
+    String::from_utf8_lossy(&info.stdout)
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+/// Ask an AX element for one attribute, as a retained value.
+///
+/// `AXUIElementCopyAttributeValue` follows the Create Rule, so the result owns
+/// a reference. Wrapping it in `CFType` is what makes a tree walk safe: raw
+/// `CFTypeRef`s handed around by hand either leak on every node or dangle once
+/// the array they came from is dropped.
+unsafe fn ax_get(
+    element: &core_foundation::base::CFType,
+    name: &str,
+) -> Option<core_foundation::base::CFType> {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::string::CFString;
+    let key = CFString::new(name);
+    let mut value: core_foundation::base::CFTypeRef = std::ptr::null();
+    if AXUIElementCopyAttributeValue(
+        element.as_CFTypeRef(),
+        key.as_concrete_TypeRef(),
+        &mut value,
+    ) != 0
+    {
+        return None;
+    }
+    if value.is_null() {
+        None
+    } else {
+        Some(CFType::wrap_under_create_rule(value))
+    }
+}
+
+/// An AX attribute as a string, for roles and for reading a field back.
+unsafe fn ax_string(element: &core_foundation::base::CFType, name: &str) -> Option<String> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::{CFString, CFStringRef};
+    let value = ax_get(element, name)?;
+    if value.type_of() != CFString::type_id() {
+        return None;
+    }
+    Some(CFString::wrap_under_get_rule(value.as_CFTypeRef() as CFStringRef).to_string())
+}
+
+/// An AX element's children, or an empty list for a leaf.
+unsafe fn ax_children(
+    element: &core_foundation::base::CFType,
+) -> Vec<core_foundation::base::CFType> {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+    let Some(value) = ax_get(element, "AXChildren") else {
+        return Vec::new();
+    };
+    if value.type_of() != CFArray::<CFType>::type_id() {
+        return Vec::new();
+    }
+    let list = CFArray::<CFType>::wrap_under_get_rule(value.as_CFTypeRef() as _);
+    list.iter().map(|item| item.clone()).collect()
+}
+
+/// An element's rectangle in screen points: x, y, width, height.
+unsafe fn ax_frame(element: &core_foundation::base::CFType) -> Option<(f64, f64, f64, f64)> {
+    use core_foundation::base::TCFType;
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct Pair {
+        a: f64,
+        b: f64,
+    }
+
+    let pos = ax_get(element, "AXPosition")?;
+    let size = ax_get(element, "AXSize")?;
+    let mut point = Pair::default();
+    let mut extent = Pair::default();
+    let ok_point = AXValueGetValue(
+        pos.as_CFTypeRef(),
+        AX_VALUE_CGPOINT,
+        &mut point as *mut _ as *mut _,
+    );
+    let ok_size = AXValueGetValue(
+        size.as_CFTypeRef(),
+        AX_VALUE_CGSIZE,
+        &mut extent as *mut _ as *mut _,
+    );
+    if !ok_point || !ok_size {
+        return None;
+    }
+    Some((point.a, point.b, extent.a, extent.b))
+}
+
+/// The window Spaces should aim at.
+///
+/// Not `AXWindows[0]`: an app that has been running a while has more than one
+/// window, and the order is arbitrary. Muse keeps a stale "Log in" window on
+/// another Space — first in the list, 1200 points wide, and completely wrong.
+/// Focused first, then main, and only then the arbitrary one.
+unsafe fn target_window(
+    app: &core_foundation::base::CFType,
+) -> Option<core_foundation::base::CFType> {
+    for attribute in ["AXFocusedWindow", "AXMainWindow"] {
+        if let Some(window) = ax_get(app, attribute) {
+            if ax_frame(&window).is_some() {
+                return Some(window);
+            }
+        }
+    }
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+    let value = ax_get(app, "AXWindows")?;
+    if value.type_of() != CFArray::<CFType>::type_id() {
+        return None;
+    }
+    let list = CFArray::<CFType>::wrap_under_get_rule(value.as_CFTypeRef() as _);
+    list.get(0).map(|item| item.clone())
+}
+
+/// A text box in a window, and where it is.
+struct Composer {
+    element: core_foundation::base::CFType,
+    frame: (f64, f64, f64, f64),
+}
+
+/// How deep to walk, and how many nodes to look at.
+///
+/// A chat window's accessibility tree contains every message ever rendered —
+/// Muse's runs to several thousand nodes, and does not contain its composer at
+/// all. The depth is generous because an Electron window is a web
+/// page: the composer in one sits twenty-odd levels down inside wrappers that
+/// a native app would not have. Finding it is a bonus, not the mechanism —
+/// what it buys is a box Spaces can focus precisely and then read back, rather
+/// than trusting the app to have focused the right thing. Not finding one
+/// costs nothing but the search.
+const WALK_DEPTH: usize = 32;
+const WALK_NODES: usize = 2500;
+/// And how long to spend, which is the cap that actually bites.
+///
+/// Every step of the walk is a call into another process, and an Electron chat
+/// window can absorb thousands of them before admitting it has nothing — Muse
+/// takes several seconds to say no. Since the search only buys a read-back,
+/// not the send itself, it gets a fixed slice of time and no more.
+const WALK_BUDGET: Duration = Duration::from_millis(300);
+
+/// What has the caret right now, as text.
+///
+/// The one question that matters after a click, and the one the tree walk can
+/// get wrong: this is the element about to receive the keystrokes, whatever it
+/// is and however deep it lives. Apps that bury their composer past any
+/// sensible walk still answer this.
+unsafe fn focused_text(app: &core_foundation::base::CFType) -> Option<String> {
+    let focused = ax_get(app, "AXFocusedUIElement")?;
+    ax_string(&focused, "AXValue")
+}
+
+/// Find the message box in a window, by looking for one.
+///
+/// Optional, and worth doing anyway. Raising a chat app already puts the caret
+/// in its message box, so this is not how the text is aimed — but an element
+/// found here can be focused explicitly and, more to the point, read back
+/// afterwards. That is the whole difference between reporting that a send
+/// worked and knowing it did.
+///
+/// The heuristic is deliberately narrow, because a wrong text field is worse
+/// than none: an editable text area reaching into the bottom two fifths of the
+/// window, wide enough to be a composer rather than a search box. Ties go to the lowest,
+/// then the widest — a chat window's composer is the bottom-most thing you can
+/// type into.
+unsafe fn find_composer(window: &core_foundation::base::CFType) -> Option<Composer> {
+    let (wx, wy, ww, wh) = ax_frame(window)?;
+    if ww <= 0.0 || wh <= 0.0 {
+        return None;
+    }
+    let floor = wy + wh * 0.6;
+
+    let mut best: Option<Composer> = None;
+    let mut stack = vec![(window.clone(), 0usize)];
+    let mut seen = 0usize;
+    let deadline = Instant::now() + WALK_BUDGET;
+
+    while let Some((element, depth)) = stack.pop() {
+        seen += 1;
+        // Checked every 32 nodes: reading the clock is cheap, but not as cheap
+        // as the arithmetic it would otherwise dominate.
+        if seen > WALK_NODES || (seen.is_multiple_of(32) && Instant::now() > deadline) {
+            break;
+        }
+
+        let frame = ax_frame(&element);
+
+        /*
+         * Prune by geometry before doing anything else.
+         *
+         * A container's rectangle encloses its children, so one entirely above
+         * the composer line cannot hold the composer — and in a chat window
+         * that is every message ever rendered. Without this the walk visits
+         * thousands of nodes over a process boundary and takes seconds to
+         * conclude nothing; with it, it visits the bottom strip and finishes
+         * in the noise. The scroll container itself is not pruned, which is
+         * correct: it spans the window, so it might.
+         */
+        if let Some((_, y, _, h)) = frame {
+            if h > 0.0 && y + h < floor {
+                continue;
+            }
+        }
+
+        if let Some((x, y, w, h)) = frame {
+            let role = ax_string(&element, "AXRole").unwrap_or_default();
+            let entry = role == "AXTextArea" || role == "AXTextField";
+            let fits = w >= 120.0
+                && h >= 14.0
+                && h <= wh * 0.5
+                && y + h >= floor
+                && x >= wx - 1.0
+                && x + w <= wx + ww + 1.0;
+            if entry && fits {
+                let better = match &best {
+                    None => true,
+                    Some(current) => {
+                        let (_, cy, cw, ch) = current.frame;
+                        (y + h, w) > (cy + ch, cw)
+                    }
+                };
+                if better {
+                    best = Some(Composer {
+                        element: element.clone(),
+                        frame: (x, y, w, h),
+                    });
+                }
+            }
+        }
+
+        if depth < WALK_DEPTH {
+            for child in ax_children(&element) {
+                stack.push((child, depth + 1));
+            }
+        }
+    }
+
+    best
+}
+
+/// Bring an application forward without launching anything.
+unsafe fn raise(app: &core_foundation::base::CFType) {
+    ax_set_true(app, "AXFrontmost");
+}
+
+/// Activate an app the way clicking its Dock icon does.
+///
+/// `AXFrontmost` raises the window; it does not reliably make the app *active*
+/// — and the difference is the whole feature. An app decides what has the
+/// caret when it becomes active, which for a chat window means its message
+/// box. Muse raised by `AXFrontmost` alone took the paste nowhere; the same
+/// app activated properly put it straight in the composer.
+///
+/// `open` is a subprocess, which everything else in this module avoids. It is
+/// allowed here for the same reason `lsappinfo` is: activation goes through
+/// Launch Services, not the accessibility API, so there is no permission to be
+/// attributed to the wrong process. `-g` is deliberately *not* passed —
+/// bringing the app forward is the point — and the app is known to be running
+/// already, so nothing is launched.
+fn activate(bundle_id: &str, name: &str) {
+    let mut command = Command::new("/usr/bin/open");
+    if bundle_id.trim().is_empty() {
+        command.arg("-a").arg(name);
+    } else {
+        command.arg("-b").arg(bundle_id.trim());
+    }
+    let _ = command.output();
+}
+
+/// Set a boolean AX attribute, for the two things worth asking for directly:
+/// which app is in front, and which element has the caret.
+unsafe fn ax_set_true(element: &core_foundation::base::CFType, name: &str) -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::string::CFString;
+    let key = CFString::new(name);
+    AXUIElementSetAttributeValue(
+        element.as_CFTypeRef(),
+        key.as_concrete_TypeRef(),
+        CFBoolean::true_value().as_CFTypeRef(),
+    ) == 0
+}
+
+/// A single left click at a screen point.
+fn click(x: f64, y: f64) {
+    use core_graphics::event::{CGEvent, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
+    let at = CGPoint::new(x, y);
+    for kind in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
+        if let Ok(event) = CGEvent::new_mouse_event(source.clone(), kind, at, CGMouseButton::Left) {
+            event.post(core_graphics::event::CGEventTapLocation::HID);
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+/// Where to click in a window that will not say where its message box is.
+///
+/// Measured from the window, every time, so there is nothing to store and
+/// nothing to re-measure when the window moves or resizes. The two constants
+/// describe the shape of a chat window rather than any particular app: the
+/// composer is the bottom strip, and it lives in the *first* column — the
+/// conversation — because that is what the reading order of a chat client is.
+/// A window wide enough to hold a second panel puts that panel to the right,
+/// so aiming near the left edge stays inside the conversation.
+///
+/// Checked against Muse: a 1101-point window whose composer spans 100 to 529
+/// points from the left and sits 30 points off the bottom.
+///
+/// This is a last resort and is treated as one. An app that publishes its
+/// message box gets clicked in the middle of that box instead, which is exact.
+fn composer_guess(wx: f64, wy: f64, ww: f64, wh: f64) -> (f64, f64) {
+    (wx + (ww * 0.25).min(160.0), wy + wh - 40.0)
+}
+
+/// Press one key, optionally with command held.
+fn key(code: u16, command: bool) {
+    use core_graphics::event::{CGEvent, CGEventFlags};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
+        return;
+    };
+    for down in [true, false] {
+        if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), code, down) {
+            if command {
+                event.set_flags(CGEventFlags::CGEventFlagCommand);
+            }
+            event.post(core_graphics::event::CGEventTapLocation::HID);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+const KEY_V: u16 = 9;
+const KEY_RETURN: u16 = 36;
+
+/// Put text on the clipboard, returning whatever was there before.
+///
+/// `LC_CTYPE` is not a detail. `pbcopy` and `pbpaste` encode according to it,
+/// and a GUI app launched by launchd inherits no locale at all — so without
+/// this they fall back to Mac OS Roman and every character above ASCII arrives
+/// mangled. An em dash pasted into Muse came out as `‚Äî`, which is exactly
+/// what UTF-8 looks like when it is read one byte at a time.
+fn set_clipboard(text: &str) -> String {
+    let previous = Command::new("/usr/bin/pbpaste")
+        .env("LC_CTYPE", "UTF-8")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    write_clipboard(text);
+    previous
+}
+
+/// Put the clipboard back, unless there is nothing to put back.
+///
+/// An empty read does not mean an empty clipboard — it means no *text* on it.
+/// Somebody who had copied an image or a file would otherwise find it replaced
+/// by nothing, because Spaces sent a message.
+fn restore_clipboard(previous: &str) {
+    if !previous.is_empty() {
+        write_clipboard(previous);
+    }
+}
+
+fn write_clipboard(text: &str) {
+    if let Ok(mut child) = Command::new("/usr/bin/pbcopy")
+        .env("LC_CTYPE", "UTF-8")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut sink) = child.stdin.take() {
+            use std::io::Write;
+            let _ = sink.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+    }
+}
+
+#[derive(serde::Serialize)]
+struct AppSendResult {
+    /// Spaces raised the app and pasted. On its own this means the keystrokes
+    /// were posted, not that they arrived — see `verified`.
+    delivered: bool,
+    /// The message box was read back and had the text in it. The only field
+    /// that means the message arrived; false for an app that does not publish
+    /// its message box, where nobody but a human can tell.
+    verified: bool,
+    /// How the text was aimed: "composer" when Spaces found the message box in
+    /// the app's own window contents, "shape" when the app publishes nothing
+    /// and Spaces went by where a chat window keeps its composer.
+    method: String,
+    /// What went wrong, in a sentence the UI can show as-is.
+    problem: String,
+    /// The app that was frontmost before, so the UI can say what it interrupted.
+    previous_app: String,
+    /// The target window, in screen points: x, y, width, height.
+    window: [f64; 4],
+    /// The message box, when one was found: x, y, width, height. Zeroes when
+    /// the app publishes nothing.
+    composer: [f64; 4],
+    /// Where Spaces clicked, in screen points — so a miss is measurable
+    /// instead of mysterious.
+    clicked: [f64; 2],
+}
+
+/// Type a message into another application's composer and optionally send it.
+///
+/// This exists because some agents have no other door. Muse has no CLI, no
+/// scripting dictionary, no local port, no local database, and its `hatch://`
+/// scheme drops every host it is handed. Its threads live on Meta's servers
+/// behind an authenticated socket. Typing into the window is not a shortcut
+/// past an API — it is the only interface the app has.
+///
+/// It does not click anything, and it stores no coordinates.
+///
+/// That was the first design and it was wrong: an offset from the window's
+/// bottom-left corner cannot be got right without a screenshot and some
+/// arithmetic, it is wrong again the moment a toolbar or a side panel appears,
+/// and being wrong looks exactly like the permission being missing. It was
+/// also unnecessary. A chat window puts the caret in its message box when you
+/// switch to it — that is what makes it a chat window — so raising the app is
+/// the whole of "aim". Muse focuses its composer on activation; so do Slack,
+/// Messages and every other app in this shape.
+///
+/// Where the app does publish its message box, Spaces focuses that element
+/// directly and reads it back afterwards, which is the difference between
+/// believing the send worked and knowing it did.
+///
+/// Text arrives by clipboard rather than keystroke: a brief is longer than
+/// anyone wants typed one event at a time, and paste cannot interleave with
+/// whatever the app does between characters. The previous clipboard goes back.
+#[tauri::command]
+async fn send_to_app(
+    bundle_id: String,
+    app_name: String,
+    text: String,
+    submit: bool,
+) -> Result<AppSendResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = if app_name.trim().is_empty() {
+            bundle_id.trim().to_string()
+        } else {
+            app_name.trim().to_string()
+        };
+        if name.is_empty() {
+            return Err("no application named".to_string());
+        }
+        if text.trim().is_empty() {
+            return Err("nothing to send".to_string());
+        }
+
+        let fail = |problem: String| {
+            Ok(AppSendResult {
+                delivered: false,
+                verified: false,
+                method: String::new(),
+                problem,
+                previous_app: String::new(),
+                window: [0.0; 4],
+                composer: [0.0; 4],
+                clicked: [0.0; 2],
+            })
+        };
+
+        // pgrep, not AX: finding the process is not an accessibility operation,
+        // and the executable inside an .app bundle is named after the bundle.
+        let pid: i32 = match Command::new("/usr/bin/pgrep").arg("-x").arg(&name).output() {
+            Ok(out) => match String::from_utf8_lossy(&out.stdout).lines().next() {
+                Some(line) => match line.trim().parse() {
+                    Ok(value) => value,
+                    Err(_) => return fail(format!("{name} is not running.")),
+                },
+                None => {
+                    return fail(format!(
+                        "{name} is not running, so there was nowhere to put the message."
+                    ))
+                }
+            },
+            Err(e) => return fail(format!("could not look for {name}: {e}")),
+        };
+
+        let was_front = frontmost_pid();
+        /*
+         * The clipboard is loaded first, before anything is activated or
+         * clicked, and put back last.
+         *
+         * Setting it just before pressing ⌘V looks tidier and is a race. A
+         * synthetic keystroke is delivered asynchronously, and an app that has
+         * just been brought forward can take most of a second to get round to
+         * it — long enough that Muse pasted whatever had been on the clipboard
+         * *before* the send, having read the pasteboard after Spaces put the
+         * old contents back. Widening the window on both sides costs nothing
+         * and removes the race rather than shortening it.
+         */
+        let previous_clipboard = set_clipboard(&text);
+        let frame;
+        let mut box_frame = [0.0f64; 4];
+        let point;
+        let method;
+        // Three states, not two: `None` is "could not tell", which is a
+        // different thing from "looked and it was not there" and leads to
+        // different wording — and to whether return is pressed at all.
+        let seen: Option<bool>;
+
+        unsafe {
+            use core_foundation::base::{CFType, TCFType};
+            let raw = AXUIElementCreateApplication(pid);
+            if raw.is_null() {
+                return fail(format!("macOS would not describe {name}'s windows."));
+            }
+            let app = CFType::wrap_under_create_rule(raw);
+            raise(&app);
+            activate(&bundle_id, &name);
+            // Long enough for the app to come forward and put the caret where
+            // it puts it. This is the aiming step, and the only one.
+            std::thread::sleep(Duration::from_millis(500));
+
+            let Some(window) = target_window(&app) else {
+                return fail(format!(
+                    "{name} is running but has no window Spaces can address."
+                ));
+            };
+            let Some((wx, wy, ww, wh)) = ax_frame(&window) else {
+                return fail(format!("{name}'s window would not say where it is."));
+            };
+            frame = [wx, wy, ww, wh];
+
+            /*
+             * Put the caret in the message box.
+             *
+             * Setting `AXFocused` is the polite way and works when the app
+             * publishes the element. When it does not — Muse's composer is
+             * absent from its accessibility tree entirely — a click is the
+             * only thing that focuses a web composer: activating the app does
+             * not, and Muse will swallow every keystroke sent to an unfocused
+             * window without a word. So click either way, at the box when
+             * there is one and at the shape of a chat window when there is
+             * not.
+             */
+            let composer = find_composer(&window);
+            let (cx, cy) = match &composer {
+                Some(found) => {
+                    let (x, y, w, h) = found.frame;
+                    box_frame = [x, y, w, h];
+                    method = "composer".to_string();
+                    ax_set_true(&found.element, "AXFocused");
+                    (x + w / 2.0, y + h / 2.0)
+                }
+                None => {
+                    method = "shape".to_string();
+                    composer_guess(wx, wy, ww, wh)
+                }
+            };
+            point = [cx, cy];
+            click(point[0], point[1]);
+            std::thread::sleep(Duration::from_millis(220));
+
+            key(KEY_V, true);
+            std::thread::sleep(Duration::from_millis(700));
+
+            /*
+             * Read it back before sending, while there is still something to
+             * read: submitting empties the box.
+             *
+             * The two sources are not equally trustworthy, and treating them
+             * as though they were produces a confident lie. Reading the
+             * composer found by the walk is authoritative both ways — it is
+             * the right element by construction. Reading "whatever is focused"
+             * only proves a positive: Muse reports a focused element that is
+             * not its composer and never contains the text, so believing its
+             * negative would report every successful send as a failure, and
+             * would stop the real hand-off pressing return.
+             *
+             * So: a match from either source is proof. A mismatch is only
+             * proof from the box itself; otherwise the answer is "cannot tell",
+             * which is a thing this type can say.
+             */
+            seen = match composer
+                .as_ref()
+                .and_then(|found| ax_string(&found.element, "AXValue"))
+            {
+                Some(value) => Some(contains_trimmed(&value, &text)),
+                None => match focused_text(&app) {
+                    Some(value) if contains_trimmed(&value, &text) => Some(true),
+                    _ => None,
+                },
+            };
+
+            // Don't press return into a box Spaces has just read and found
+            // empty — that is the one case where sending is known to do
+            // something other than send this message.
+            if submit && seen != Some(false) {
+                key(KEY_RETURN, false);
+                std::thread::sleep(Duration::from_millis(250));
+            }
+
+            // Put the user back where they were. Stealing focus is unavoidable
+            // — the app only accepts input when it is frontmost — but keeping
+            // it is not.
+            if let Some(back) = was_front {
+                if back != pid {
+                    let previous = AXUIElementCreateApplication(back);
+                    if !previous.is_null() {
+                        raise(&CFType::wrap_under_create_rule(previous));
+                    }
+                }
+            }
+        }
+
+        restore_clipboard(&previous_clipboard);
+
+        // Never a gate — only a note. macOS drops synthetic input from an
+        // untrusted process without telling anyone, so an unverified send by a
+        // process with no permission has an obvious first suspect.
+        let trusted = unsafe { AXIsProcessTrusted() != 0 };
+        let problem = match seen {
+            Some(true) => String::new(),
+            _ if !trusted => format!(
+                "macOS reports no Accessibility permission for Spaces, so it may have dropped the \
+                 paste. If nothing appeared in {name}, that is why."
+            ),
+            Some(false) => format!(
+                "Spaces pasted into {name} and then read its message box, which did not contain \
+                 the text. {name} may have had something else focused."
+            ),
+            None => format!(
+                "{name} does not publish its message box, so Spaces clicked where a chat window \
+                 keeps one and cannot read back what happened next. Look at {name} once: if the \
+                 line is there, this works, and it will keep working — the point is measured from \
+                 the window every time, so it follows the window around."
+            ),
+        };
+
+        Ok(AppSendResult {
+            delivered: true,
+            verified: seen == Some(true),
+            method,
+            problem,
+            previous_app: String::new(),
+            window: frame,
+            composer: box_frame,
+            clicked: point,
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// How much of an app's window a read will walk, and return.
+///
+/// The same reasoning as the composer search: an app's accessibility tree
+/// holds everything it has ever rendered, and the caller is an agent's tool
+/// call with somebody waiting behind it.
+const SCREEN_NODES: usize = 4000;
+const SCREEN_BUDGET: Duration = Duration::from_millis(800);
+const SCREEN_CHARS: usize = 12_000;
+
+/// Read what an application is showing, as text.
+///
+/// This is the counterpart to typing into one. Spaces could already drive an
+/// app it cannot otherwise reach; it could not look at one, which meant an
+/// agent acting on a window was acting blind and reporting its own hopes.
+///
+/// Reads the accessibility tree rather than taking a screenshot: it is what
+/// the app itself publishes, it needs no screen recording permission, and it
+/// comes back as text an agent can actually reason about instead of an image
+/// it has to describe to itself first. What an app does not publish, this
+/// cannot see — which is a real limit, and one Muse demonstrates.
+#[tauri::command]
+async fn screen_read(app_name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = app_name.trim().to_string();
+        if name.is_empty() {
+            return Err("name the app to read".to_string());
+        }
+        let pid: i32 = Command::new("/usr/bin/pgrep")
+            .arg("-x")
+            .arg(&name)
+            .output()
+            .ok()
+            .and_then(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .and_then(|line| line.trim().parse().ok())
+            })
+            .ok_or_else(|| format!("{name} is not running."))?;
+
+        unsafe {
+            use core_foundation::base::{CFType, TCFType};
+            let raw = AXUIElementCreateApplication(pid);
+            if raw.is_null() {
+                return Err(format!("macOS would not describe {name}'s windows."));
+            }
+            let app = CFType::wrap_under_create_rule(raw);
+            let window = target_window(&app)
+                .ok_or_else(|| format!("{name} has no window Spaces can read."))?;
+
+            let mut out = String::new();
+            let mut stack = vec![window];
+            let mut seen = 0usize;
+            let deadline = Instant::now() + SCREEN_BUDGET;
+
+            while let Some(element) = stack.pop() {
+                seen += 1;
+                if seen > SCREEN_NODES
+                    || out.len() > SCREEN_CHARS
+                    || (seen.is_multiple_of(64) && Instant::now() > deadline)
+                {
+                    break;
+                }
+                let role = ax_string(&element, "AXRole").unwrap_or_default();
+                // The attribute that carries the words differs by role, and a
+                // button's label is in its title while a field's is in its
+                // value. Taking the first that answers keeps this one pass.
+                let text = match role.as_str() {
+                    "AXStaticText" | "AXTextArea" | "AXTextField" => ax_string(&element, "AXValue"),
+                    "AXButton" | "AXMenuItem" | "AXCheckBox" | "AXRadioButton" | "AXLink" => {
+                        ax_string(&element, "AXTitle")
+                            .or_else(|| ax_string(&element, "AXDescription"))
+                    }
+                    _ => None,
+                };
+                if let Some(text) = text {
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        if !role.starts_with("AXStatic") && !role.starts_with("AXText") {
+                            out.push_str(&format!("[{}] ", role.trim_start_matches("AX")));
+                        }
+                        out.push_str(text);
+                        out.push('\n');
+                    }
+                }
+                for child in ax_children(&element) {
+                    stack.push(child);
+                }
+            }
+
+            if out.trim().is_empty() {
+                return Err(format!(
+                    "{name} publishes nothing readable — some apps, Muse among them, put almost \
+                     none of their window in the accessibility tree."
+                ));
+            }
+            out.truncate(SCREEN_CHARS);
+            Ok(out)
+        }
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// Whether a composer's contents include what was pasted.
+///
+/// Not equality: a box that already had a draft in it keeps the draft, and
+/// some apps normalise whitespace or newlines on the way in. Comparing the
+/// first line is enough to tell "the paste landed" from "nothing happened",
+/// which is the only question being asked.
+fn contains_trimmed(seen: &str, sent: &str) -> bool {
+    let needle: String = sent
+        .trim()
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if needle.is_empty() {
+        return false;
+    }
+    seen.contains(&needle)
+}
+
 /// Which agent/GitHub CLIs are available on this machine.
 #[tauri::command]
 async fn check_tools() -> HashMap<String, bool> {
     tauri::async_runtime::spawn_blocking(|| {
         let mut m = HashMap::new();
-        for name in ["claude", "codex", "gh", "node"] {
+        for name in HARNESS_BINS {
             let found = std::path::Path::new(&resolve_bin(name)).is_absolute();
             m.insert(name.to_string(), found);
         }
@@ -520,38 +2107,202 @@ async fn check_program(program: String) -> bool {
     .unwrap_or(false)
 }
 
-/// Read only the bearer credential created by Universal Personal Agent.
-/// The value is resolved at request time and is never persisted in Spaces.
+/// One harness probe: run a short, non-interactive command (`--version`,
+/// `status`) and report what came back.
+#[derive(serde::Serialize)]
+struct ProbeResult {
+    found: bool,
+    path: String,
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+}
+
+/// Ask a harness about itself.
+///
+/// Deliberately narrow: no stdin, a hard wall-clock cap, and output truncated,
+/// because this runs against third-party binaries whose `--version` may decide
+/// to prompt, update itself, or print a megabyte of banner. A probe that hangs
+/// would freeze the agent editor, so a timeout is a normal result rather than
+/// an error.
 #[tauri::command]
-async fn read_upa_spaces_token() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let output = Command::new("/usr/bin/security")
-            .args([
-                "find-generic-password",
-                "-s",
-                "ai.personalagent.upa.spaces",
-                "-a",
-                "localhost-bearer",
-                "-w",
-            ])
-            .output()
-            .map_err(|error| format!("could not read Universal Personal Agent token: {error}"))?;
-        if !output.status.success() {
-            return Err(
-                "Universal Personal Agent token is unavailable in Mac Keychain".to_string(),
-            );
+async fn probe_program(
+    program: String,
+    args: Vec<String>,
+    timeout_ms: Option<u64>,
+) -> Result<ProbeResult, String> {
+    const MAX_OUTPUT: usize = 8 * 1024;
+    let limit = Duration::from_millis(timeout_ms.unwrap_or(6_000).clamp(500, 30_000));
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let program = program.trim().to_string();
+        if program.is_empty() {
+            return Err("no program given".to_string());
         }
-        let token = String::from_utf8(output.stdout)
-            .map_err(|_| "Universal Personal Agent token is not valid UTF-8".to_string())?
-            .trim()
-            .to_string();
-        if token.len() < 32 {
-            return Err("Universal Personal Agent token is invalid".to_string());
+        let resolved =
+            if Path::new(&program).is_absolute() || Path::new(&program).components().count() > 1 {
+                program.clone()
+            } else {
+                resolve_bin(&program)
+            };
+        if !Path::new(&resolved).is_absolute() || !Path::new(&resolved).is_file() {
+            return Ok(ProbeResult {
+                found: false,
+                path: String::new(),
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: String::new(),
+                timed_out: false,
+            });
         }
-        Ok(token)
+
+        let mut cmd = Command::new(&resolved);
+        cmd.args(&args)
+            .env("PATH", login_path())
+            // Some CLIs render a progress UI when they think they own a
+            // terminal; tell them plainly that they do not.
+            .env("NO_COLOR", "1")
+            .env("CI", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| format!("failed to launch: {e}"))?;
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) => {
+                    if started.elapsed() >= limit {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break None;
+                    }
+                    std::thread::sleep(Duration::from_millis(40));
+                }
+                Err(e) => return Err(format!("probe failed: {e}")),
+            }
+        };
+
+        let out = child
+            .wait_with_output()
+            .map_err(|e| format!("probe did not finish: {e}"))?;
+        let clip = |bytes: &[u8]| {
+            let text = String::from_utf8_lossy(bytes).to_string();
+            if text.len() > MAX_OUTPUT {
+                format!("{}…", &text[..MAX_OUTPUT])
+            } else {
+                text
+            }
+        };
+        Ok(ProbeResult {
+            found: true,
+            path: resolved,
+            exit_code: status.and_then(|s| s.code()).unwrap_or(-1),
+            stdout: clip(&out.stdout),
+            stderr: clip(&out.stderr),
+            timed_out: status.is_none(),
+        })
     })
     .await
-    .map_err(|error| format!("Keychain task failed: {error}"))?
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+#[derive(serde::Serialize)]
+struct AppPresence {
+    installed: bool,
+    path: String,
+    running: bool,
+    version: String,
+}
+
+/// Whether a macOS app is installed and running.
+///
+/// This is how Spaces sees an agent it does not launch — Muse, Cursor, Zed. The
+/// bundle id is authoritative and `mdfind` answers it wherever the app lives;
+/// the `/Applications` fallback covers a Spotlight index that is off or stale.
+#[tauri::command]
+async fn check_app(bundle_id: String, app_name: String) -> Result<AppPresence, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle_id = bundle_id.trim().to_string();
+        let app_name = app_name.trim().to_string();
+        let mut path = String::new();
+
+        if !bundle_id.is_empty() {
+            let mut cmd = Command::new("/usr/bin/mdfind");
+            cmd.arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"));
+            if let Ok(out) = blocking_output(cmd) {
+                if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                    if !first.trim().is_empty() {
+                        path = first.trim().to_string();
+                    }
+                }
+            }
+        }
+        if path.is_empty() && !app_name.is_empty() {
+            for base in ["/Applications", "/System/Applications"] {
+                let candidate = format!("{base}/{app_name}.app");
+                if Path::new(&candidate).is_dir() {
+                    path = candidate;
+                    break;
+                }
+            }
+            if path.is_empty() {
+                if let Ok(home) = std::env::var("HOME") {
+                    let candidate = format!("{home}/Applications/{app_name}.app");
+                    if Path::new(&candidate).is_dir() {
+                        path = candidate;
+                    }
+                }
+            }
+        }
+
+        let version = if path.is_empty() {
+            String::new()
+        } else {
+            let mut cmd = Command::new("/usr/bin/defaults");
+            cmd.arg("read")
+                .arg(format!("{path}/Contents/Info.plist"))
+                .arg("CFBundleShortVersionString");
+            blocking_output(cmd)
+                .ok()
+                .filter(|out| out.status.success())
+                .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+                .unwrap_or_default()
+        };
+
+        // pgrep matches the executable name, which for an app bundle is the
+        // binary inside Contents/MacOS — usually, but not always, the app name.
+        let running = {
+            let needle = if !path.is_empty() {
+                Path::new(&path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| app_name.clone())
+            } else {
+                app_name.clone()
+            };
+            if needle.is_empty() {
+                false
+            } else {
+                let mut cmd = Command::new("/usr/bin/pgrep");
+                cmd.arg("-x").arg(&needle);
+                blocking_output(cmd)
+                    .map(|out| out.status.success())
+                    .unwrap_or(false)
+            }
+        };
+
+        Ok(AppPresence {
+            installed: !path.is_empty(),
+            path,
+            running,
+            version,
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
 }
 
 fn unquote_frontmatter(value: &str) -> String {
@@ -587,14 +2338,11 @@ fn parse_agent_profile(path: &Path, kind: &str) -> Option<DiscoveredAgentProfile
                 match key.trim() {
                     "name" if !value.is_empty() => name = value,
                     "description" => description = value,
-                    "model" if kind != "custom" => model = value,
+                    "model" => model = value,
                     _ => {}
                 }
             }
         }
-    }
-    if kind == "custom" {
-        model = "opencode".to_string();
     }
     if persona.is_empty() {
         persona = description.clone();
@@ -610,8 +2358,8 @@ fn parse_agent_profile(path: &Path, kind: &str) -> Option<DiscoveredAgentProfile
 }
 
 /// Discover agent instruction profiles from the conventional user and project
-/// locations used by Claude Code, Codex, OpenCode and tool-neutral repos.
-/// Read-only, bounded, and restricted to fixed subdirectories.
+/// locations used by Claude Code, Codex and tool-neutral repos. Read-only,
+/// bounded, and restricted to fixed subdirectories.
 #[tauri::command]
 async fn discover_agent_profiles(project_roots: Vec<String>) -> Vec<DiscoveredAgentProfile> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -624,10 +2372,6 @@ async fn discover_agent_profiles(project_roots: Vec<String>) -> Vec<DiscoveredAg
             (
                 PathBuf::from(&home).join(".codex/agents"),
                 "codex".to_string(),
-            ),
-            (
-                PathBuf::from(&home).join(".config/opencode/agents"),
-                "custom".to_string(),
             ),
         ];
         for root in project_roots.into_iter().take(50) {
@@ -1697,17 +3441,102 @@ fn pty_kill(state: State<'_, LivePtys>, session_id: String) -> Result<(), String
  * Project browser
  *
  * The browser surface itself is a Tauri child webview created from the trusted
- * Spaces frontend. These commands deliberately address only hq-browser-* labels,
- * so an arbitrary frontend call cannot navigate or evaluate the main app
- * webview.
+ * Spaces frontend. These commands deliberately address only labels with the
+ * project-browser prefix, so an arbitrary frontend call cannot navigate or
+ * evaluate the main app webview.
  * ------------------------------------------------------------------ */
 
+/// The prefix every project browser's label carries.
+///
+/// It has to be the one the frontend actually generates. It was not: the
+/// rename from HQ to Spaces changed `BrowserPane` to `spaces-browser-…` and
+/// left this guard on `hq-browser-`, so every call — open included — was
+/// refused as "not an Spaces project browser" and the built-in browser could
+/// not be opened at all. Named once here now, rather than spelled out at each
+/// call site, so the two cannot drift apart again.
+const PROJECT_BROWSER_PREFIX: &str = "spaces-browser-";
+
+/// Suffix for the same browser while it is floating in its own window.
+///
+/// Popping out has to be invisible to everything that addresses the browser —
+/// the pane, and every tool an agent calls. So the floating window keeps the
+/// project's label with this on the end, and resolution tries both: a browser
+/// that stops answering because somebody moved it into the corner of the
+/// screen would be a worse feature than not having the corner at all.
+const PIP_SUFFIX: &str = "-pip";
+
 fn project_browser(app: &AppHandle, label: &str) -> Result<tauri::Webview, String> {
-    if !label.starts_with("hq-browser-") {
-        return Err("not an Spaces project browser".into());
+    if !label.starts_with(PROJECT_BROWSER_PREFIX) {
+        return Err("not a Spaces project browser".into());
     }
     app.get_webview(label)
+        .or_else(|| app.get_webview(&format!("{label}{PIP_SUFFIX}")))
         .ok_or_else(|| format!("project browser {label} is not open"))
+}
+
+/// Float the project browser above everything, in its own small window.
+///
+/// The window *is* the browser rather than a window containing a copy of it:
+/// one webview, moved, so there is never a second page pretending to be the
+/// first. What that costs is the page's own state — it reloads at the same
+/// address — and what it buys is that every tool, and the pane, keep talking
+/// to the thing the person is actually looking at.
+#[tauri::command]
+async fn browser_popout(app: AppHandle, label: String) -> Result<String, String> {
+    let pip = format!("{label}{PIP_SUFFIX}");
+    if let Some(existing) = app.get_webview_window(&pip) {
+        let _ = existing.set_focus();
+        return existing
+            .url()
+            .map(|u| u.to_string())
+            .map_err(|e| format!("could not read the browser address: {e}"));
+    }
+
+    let browser = project_browser(&app, &label)?;
+    let url = browser
+        .url()
+        .map_err(|e| format!("could not read the browser address: {e}"))?;
+    browser.close().map_err(|e| e.to_string())?;
+
+    tauri::WebviewWindowBuilder::new(&app, &pip, tauri::WebviewUrl::External(url.clone()))
+        .title("Spaces — browser")
+        .inner_size(520.0, 400.0)
+        .min_inner_size(260.0, 200.0)
+        .always_on_top(true)
+        .resizable(true)
+        .skip_taskbar(false)
+        .build()
+        .map_err(|e| format!("could not float the browser: {e}"))?;
+    Ok(url.to_string())
+}
+
+/// Put the floating browser back, and say where it had got to.
+#[tauri::command]
+async fn browser_dock(app: AppHandle, label: String) -> Result<String, String> {
+    let pip = format!("{label}{PIP_SUFFIX}");
+    let Some(window) = app.get_webview_window(&pip) else {
+        return Ok(String::new());
+    };
+    // Read before closing: afterwards there is nothing to ask.
+    let url = window.url().map(|u| u.to_string()).unwrap_or_default();
+    /*
+     * `destroy`, not `close`.
+     *
+     * `close` asks the window to close and waits for the event loop to run the
+     * close-requested handling — from inside a command, that is the loop this
+     * call is already holding, so it never returns. The symptom is precisely
+     * nothing: no error to show, no state change, a button that appears dead.
+     * `destroy` takes the window down without the round trip.
+     */
+    window.destroy().map_err(|e| e.to_string())?;
+    Ok(url)
+}
+
+/// Whether this project's browser is currently floating.
+#[tauri::command]
+fn browser_floating(app: AppHandle, label: String) -> bool {
+    app.get_webview_window(&format!("{label}{PIP_SUFFIX}"))
+        .is_some()
 }
 
 fn browser_http_url(value: &str) -> Result<tauri::Url, String> {
@@ -1728,8 +3557,8 @@ async fn browser_open(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    if !label.starts_with("hq-browser-") {
-        return Err("not an Spaces project browser".into());
+    if !label.starts_with(PROJECT_BROWSER_PREFIX) {
+        return Err("not a Spaces project browser".into());
     }
     if let Some(stale) = app.get_webview(&label) {
         stale.close().map_err(|e| e.to_string())?;
@@ -1818,6 +3647,85 @@ fn browser_action(app: AppHandle, label: String, action: String) -> Result<(), S
     }
 }
 
+/// How long to wait for a page to answer before giving up on it.
+///
+/// A script that never returns would otherwise hold the calling thread for as
+/// long as the page felt like it — and the caller here is an agent's tool
+/// call, which has somebody waiting on the other end of it.
+const BROWSER_EVAL_TIMEOUT: Duration = Duration::from_secs(12);
+
+/**
+ * Run a script in the project browser and bring back what it produced.
+ *
+ * Tauri's `eval` cannot do this. It hands a script to the webview and returns
+ * immediately with no channel back, which is enough to press Back and useless
+ * for letting an agent read a page. WKWebView's own
+ * `evaluateJavaScript:completionHandler:` does return a value, so this reaches
+ * through `with_webview` to the real WKWebView and calls it.
+ *
+ * The completion handler fires on the main thread some time later, so the
+ * result comes back over a channel and this blocks on it. That is also why
+ * there is a timeout: without one, a page that never calls the handler holds
+ * the caller forever.
+ *
+ * The script is wrapped so that whatever happens, the value is a JSON string —
+ * WKWebView can only hand back a handful of types, and a page that throws
+ * should produce an explanation rather than a null nobody can interpret.
+ */
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn browser_eval(app: AppHandle, label: String, script: String) -> Result<String, String> {
+    use block2::RcBlock;
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_web_kit::WKWebView;
+
+    let browser = project_browser(&app, &label)?;
+    // Every path returns a JSON string, so the Rust side has one shape to
+    // parse and a thrown error arrives as an error rather than as nothing.
+    let wrapped = format!(
+        "(function(){{try{{return JSON.stringify({{ok:true,value:(function(){{{script}}})()}})}}         catch(e){{return JSON.stringify({{ok:false,error:String(e&&e.message||e)}})}}}})()"
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    browser
+        .with_webview(move |platform| unsafe {
+            let view = &*(platform.inner() as *const WKWebView);
+            let handler = RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
+                if !error.is_null() {
+                    let message = (*error).localizedDescription().to_string();
+                    let _ = tx.send(Err(message));
+                    return;
+                }
+                if value.is_null() {
+                    let _ = tx.send(Ok(String::new()));
+                    return;
+                }
+                // The wrapper guarantees a string; anything else means the
+                // script escaped it, and `description` is still readable.
+                let text = (*(value as *mut NSString)).to_string();
+                let _ = tx.send(Ok(text));
+            });
+            view.evaluateJavaScript_completionHandler(
+                &NSString::from_str(&wrapped),
+                Some(&handler),
+            );
+        })
+        .map_err(|e| format!("could not reach the browser: {e}"))?;
+
+    match rx.recv_timeout(BROWSER_EVAL_TIMEOUT) {
+        Ok(result) => result,
+        Err(_) => Err("the page did not answer in time".to_string()),
+    }
+}
+
+/// Every other platform has no built-in browser to drive yet.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn browser_eval(_app: AppHandle, _label: String, _script: String) -> Result<String, String> {
+    Err("driving the built-in browser is macOS-only for now".to_string())
+}
+
 #[tauri::command]
 fn browser_url(app: AppHandle, label: String) -> Result<String, String> {
     project_browser(&app, &label)?
@@ -1832,6 +3740,137 @@ fn browser_url(app: AppHandle, label: String) -> Result<String, String> {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+
+    /*
+     * Timestamps decide the order a transcript reads in, and a date parser
+     * that is wrong is wrong silently — the session still imports, it just
+     * comes out shuffled or stamped in 1970. Known-good values from real
+     * session files, plus the cases a hand-rolled civil-calendar conversion
+     * gets wrong: a leap day, a century that is not a leap year, one that is,
+     * and the epoch itself.
+     */
+    #[test]
+    fn iso_timestamps_convert_to_milliseconds() {
+        assert_eq!(iso_millis("1970-01-01T00:00:00.000Z"), 0);
+        assert_eq!(iso_millis("2026-07-07T22:14:16.211Z"), 1_783_462_456_211);
+        assert_eq!(iso_millis("2026-07-01T12:41:44.488Z"), 1_782_909_704_488);
+        // Leap day, and a leap year divisible by 100 but also by 400.
+        assert_eq!(iso_millis("2024-02-29T00:00:00.000Z"), 1_709_164_800_000);
+        assert_eq!(iso_millis("2000-02-29T00:00:00.000Z"), 951_782_400_000);
+        // 2100 is divisible by 100 and not by 400, so it is not a leap year —
+        // the case a naive every-fourth-year rule gets wrong by a day.
+        assert_eq!(iso_millis("2100-03-01T00:00:00.000Z"), 4_107_542_400_000);
+        // Fractions are optional, and shorter than three digits scales up.
+        assert_eq!(iso_millis("2026-07-07T22:14:16Z"), 1_783_462_456_000);
+        assert_eq!(iso_millis("2026-07-07T22:14:16.2Z"), 1_783_462_456_200);
+        // Anything not recognised is refused rather than guessed at. A
+        // timestamp before the epoch is in that class on purpose: no session
+        // file predates Unix, so one that claims to is corrupt, and a
+        // plausible-looking negative would sort a transcript into nonsense.
+        assert_eq!(iso_millis(""), 0);
+        assert_eq!(iso_millis("07/07/2026"), 0);
+        assert_eq!(iso_millis("2026-13-07T22:14:16.211Z"), 0);
+        assert_eq!(iso_millis("1969-12-31T23:59:59.999Z"), 0);
+    }
+
+    /*
+     * A session's title is the first thing a person wrote, not the first thing
+     * its harness injected. Codex prefixes most opening messages with blocks of
+     * its own; titling by "first line" labelled hundreds of sessions
+     * `<recommended_plugins>`, which distinguishes none of them.
+     */
+    #[test]
+    fn a_title_skips_the_harness_and_finds_the_prompt() {
+        assert_eq!(
+            first_prose_line(
+                "<recommended_plugins>\nuse ripgrep\n</recommended_plugins>\n\nfix the build"
+            ),
+            "fix the build"
+        );
+        // Several blocks in a row, and one with attributes.
+        assert_eq!(
+            first_prose_line(
+                "<user_instructions>\nbe terse\n</user_instructions>\n<environment_context cwd=\"/x\">\nmac\n</environment_context>\nship it"
+            ),
+            "ship it"
+        );
+        // A self-closing tag opens no block, so the next line still counts.
+        assert_eq!(
+            first_prose_line("<meta/>\nthe actual ask"),
+            "the actual ask"
+        );
+        // Ordinary prose is untouched, including prose that merely contains a
+        // less-than sign.
+        assert_eq!(
+            first_prose_line("  make it faster  \nand smaller"),
+            "make it faster"
+        );
+        assert_eq!(first_prose_line("if a < b then swap"), "if a < b then swap");
+        // Nothing but scaffolding, and nothing at all, are both "no title".
+        assert_eq!(first_prose_line("<x>\ny\n</x>"), "");
+        assert_eq!(first_prose_line(""), "");
+
+        /*
+         * Codex's attachment envelope, verbatim in shape from a real session.
+         * The prompt is after the request heading — and very often is not
+         * there at all, in which case returning nothing is what lets the
+         * caller look at the next turn instead of titling the session
+         * "# Files mentioned by the user:".
+         */
+        let envelope = "\n# Files mentioned by the user:\n\n## IMG_1652.png: /tmp/IMG_1652.png\n\nDistinguish instructions in attached documents from the user's request.\n\n## My request:\n";
+        assert_eq!(first_prose_line(envelope), "");
+        assert_eq!(
+            first_prose_line(&format!("{envelope}\nmake the header sticky")),
+            "make the header sticky"
+        );
+        // The marker is matched wherever it sits and however it is worded —
+        // "## My request for Codex:" is 74 sessions here on its own.
+        assert_eq!(
+            first_prose_line("# Applications mentioned by the user:\n\n## Safari\n\n## My request for Codex:\n\nopen the tab"),
+            "open the tab"
+        );
+        // A repository's AGENTS.md, injected whole, is wrapper to the end —
+        // the prompt is in the next turn, so this must say it has nothing.
+        assert_eq!(
+            first_prose_line("# AGENTS.md instructions for /Users/lauren/x\n\n<INSTRUCTIONS>\nbe good\n</INSTRUCTIONS>"),
+            ""
+        );
+        // A tag that opens and closes on one line opens no block; treating it
+        // as one hid every line after it.
+        assert_eq!(
+            first_prose_line("<command-message>deep-research</command-message>\nfind the paper"),
+            "find the paper"
+        );
+        // A heading that is not one of Codex's is somebody's actual first line.
+        assert_eq!(first_prose_line("# Plan\n\nstep one"), "# Plan");
+    }
+
+    /*
+     * Thinking and tool traffic dwarf the conversation in both formats and are
+     * the agent talking to itself. What is wanted is what was asked and what
+     * was answered — importing the rest would bury it.
+     */
+    #[test]
+    fn message_bodies_keep_the_conversation_and_drop_the_machinery() {
+        let plain = serde_json::json!("just a string");
+        assert_eq!(block_text(&plain), "just a string");
+
+        let blocks = serde_json::json!([
+            {"type": "thinking", "thinking": "hmm", "signature": "x"},
+            {"type": "text", "text": "  the answer  "},
+            {"type": "tool_use", "name": "Bash", "input": {}},
+            {"type": "text", "text": "and a second paragraph"},
+        ]);
+        assert_eq!(block_text(&blocks), "the answer\n\nand a second paragraph");
+
+        // Codex writes the same idea with its own block names.
+        let codex = serde_json::json!([{"type": "input_text", "text": "do the thing"}]);
+        assert_eq!(block_text(&codex), "do the thing");
+
+        // Nothing sayable is an empty string, not a panic and not whitespace.
+        assert_eq!(block_text(&serde_json::json!([{"type": "thinking"}])), "");
+        assert_eq!(block_text(&serde_json::json!({})), "");
+    }
 
     fn open(cols: u16, rows: u16) -> portable_pty::PtyPair {
         native_pty_system()
@@ -2023,10 +4062,18 @@ pub fn run() {
             run_git_ex,
             check_tools,
             check_program,
-            read_upa_spaces_token,
             discover_agent_profiles,
             apple_calendar_snapshot,
             apple_calendar_create,
+            probe_program,
+            accessibility_trusted,
+            request_accessibility,
+            send_to_app,
+            screen_read,
+            scan_agent_sessions,
+            sessions_changed_since,
+            read_agent_session,
+            check_app,
             start_agent_run,
             cancel_agent_run,
             write_text_file,
@@ -2041,6 +4088,10 @@ pub fn run() {
             browser_visibility,
             browser_close,
             browser_navigate,
+            browser_eval,
+            browser_popout,
+            browser_dock,
+            browser_floating,
             browser_action,
             browser_url
         ])

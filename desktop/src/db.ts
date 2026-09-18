@@ -657,6 +657,120 @@ CREATE INDEX IF NOT EXISTS idx_portal_message_dispatch_status
   ON portal_message_dispatches (status, created_at);
 `;
 
+/**
+ * v23 — sessions imported from Claude Code and Codex.
+ *
+ * One row per session file, so a re-import is a no-op and the watcher can tell
+ * a new session from one it has already read. `mtime` and `bytes` are what
+ * make "has this changed?" answerable without opening the file: a session that
+ * is still being written grows, and the row is updated rather than duplicated.
+ */
+const MIGRATION_V23 = `
+CREATE TABLE IF NOT EXISTS session_imports (
+  source TEXT NOT NULL,
+  /*
+   * The session FILE, not the id inside it. Codex reuses its own session id
+   * across every rollout a conversation resumes into — 1,307 files on one
+   * machine carried 251 distinct ids, one of them shared by 212 files — so
+   * keying on that silently discards most of the history and makes a
+   * re-import delete the siblings of whichever file was read last.
+   */
+  session_id TEXT NOT NULL,
+  /* What the session calls itself. Context, never a key. */
+  agent_session_id TEXT NOT NULL DEFAULT '',
+  project_id TEXT NOT NULL,
+  channel_id TEXT NOT NULL DEFAULT '',
+  path TEXT NOT NULL DEFAULT '',
+  cwd TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  turns INTEGER NOT NULL DEFAULT 0,
+  mtime INTEGER NOT NULL DEFAULT 0,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER NOT NULL DEFAULT 0,
+  imported_at INTEGER NOT NULL,
+  PRIMARY KEY (source, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_imports_project
+  ON session_imports (project_id, started_at);
+/*
+ * Which directories somebody chose to keep up to date, and how. Separate from
+ * the sessions themselves because the choice outlives them: a project watched
+ * today should pick up a session written tomorrow without anyone re-opening
+ * the import screen.
+ */
+CREATE TABLE IF NOT EXISTS session_watches (
+  cwd TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'index',
+  created_at INTEGER NOT NULL
+);
+`;
+
+/**
+ * v24 — the id a session records for itself, alongside the file that is its key.
+ *
+ * A separate migration rather than an edit to v23, because v23 had already run
+ * on machines that were testing this: `CREATE TABLE IF NOT EXISTS` does
+ * nothing for a table that exists, so a column added to it reaches only fresh
+ * installs. v23 keeps the column for those, and this adds it for everyone
+ * else — which is why the statement below is also in the table above.
+ */
+const MIGRATION_V24 = `
+ALTER TABLE session_imports ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT '';
+`;
+
+/**
+ * v25 — the session a message was imported from.
+ *
+ * Its own column rather than a marker inside `meta`, for two reasons. `meta`
+ * is rendered: an internal key put there showed up under every imported
+ * message as "imported:claude:6815ecec-…". And `run_id` is resolved against
+ * the runs table, so a key parked in it would be a lookup that can only miss.
+ * A column that is never displayed and never joined is the honest place for
+ * an identity that exists purely so a re-import can replace what it wrote.
+ */
+const MIGRATION_V25 = `
+ALTER TABLE messages ADD COLUMN import_key TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_messages_import ON messages (import_key);
+`;
+
+/**
+ * v26 — imported messages get an author id, so the chat can tell them apart.
+ *
+ * The chat groups consecutive messages by author and compares ids. Imported
+ * turns were written with an empty one, which made every agent turn the same
+ * author: a Claude reply and a Codex reply collapsed into one unattributed
+ * block. Backfilled from the name already stored on the row, so history that
+ * is already in does not have to be imported again to become readable.
+ */
+const MIGRATION_V26 = `
+UPDATE messages SET author_id = 'imported:codex'
+ WHERE import_key LIKE 'imported:codex:%' AND author_type <> 'user' AND author_id = '';
+UPDATE messages SET author_id = 'imported:claude'
+ WHERE import_key LIKE 'imported:claude:%' AND author_type <> 'user' AND author_id = '';
+`;
+
+/**
+ * v27 — what Spaces has already taken in from a project's own context files.
+ *
+ * One row per section adopted, keyed by a digest of its title and body, so
+ * running adoption again adopts nothing and an *edited* section arrives as
+ * something new rather than as a duplicate. `memory_id` is empty for a section
+ * recognised but deliberately not added — same heading, different wording —
+ * which still has to be remembered or it would be offered forever.
+ */
+const MIGRATION_V27 = `
+CREATE TABLE IF NOT EXISTS adopted_context (
+  project_id TEXT NOT NULL,
+  digest TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  memory_id TEXT NOT NULL DEFAULT '',
+  adopted_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, digest)
+);
+`;
+
 async function importLegacyHqData(db: Database): Promise<void> {
   const legacyPath = await invoke<string | null>("legacy_hq_database_path");
   if (!legacyPath) return;
@@ -1085,6 +1199,26 @@ export async function getDb(): Promise<Database> {
       if (at < 22) {
         await applyStatements(db, MIGRATION_V22, true);
         await db.execute("PRAGMA user_version = 22");
+      }
+      if (at < 23) {
+        await applyStatements(db, MIGRATION_V23, true);
+        await db.execute("PRAGMA user_version = 23");
+      }
+      if (at < 24) {
+        await applyStatements(db, MIGRATION_V24, true);
+        await db.execute("PRAGMA user_version = 24");
+      }
+      if (at < 25) {
+        await applyStatements(db, MIGRATION_V25, true);
+        await db.execute("PRAGMA user_version = 25");
+      }
+      if (at < 26) {
+        await applyStatements(db, MIGRATION_V26, true);
+        await db.execute("PRAGMA user_version = 26");
+      }
+      if (at < 27) {
+        await applyStatements(db, MIGRATION_V27, true);
+        await db.execute("PRAGMA user_version = 27");
       }
       return db;
     })().catch((e) => {

@@ -154,6 +154,16 @@ function oneOf<T extends string>(
     : fallback;
 }
 
+/**
+ * Harnesses an agent profile may declare.
+ *
+ * The desktop registry (desktop/src/capabilities.ts) is the source of truth;
+ * this list is the portal's copy of its ids, and the two have to move together.
+ * `oneOf` falls back silently, so a kind missing here does not fail loudly —
+ * it quietly turns somebody's Cursor agent into a Codex one on the next sync.
+ */
+export const AGENT_BACKENDS = ["claude", "codex", "cursor", "external"] as const;
+
 function jsonArray(value: string): string[] {
   try {
     const parsed = JSON.parse(value);
@@ -2074,7 +2084,7 @@ export async function mutateWorkspace(
       name,
       text(input.role, 120),
       text(input.owns, 500),
-      oneOf(input.backend, ["claude", "codex", "ritz", "custom"] as const, "codex"),
+      oneOf(input.backend, AGENT_BACKENDS, "codex"),
       text(input.model, 160),
       oneOf(
         input.effort,
@@ -3260,11 +3270,7 @@ export async function syncDevice(token: string, payload: unknown) {
         name,
       ));
     const agentId = adoptable?.id ?? id("agent");
-    const backend = oneOf(
-      agent.backend,
-      ["claude", "codex", "ritz", "custom"] as const,
-      "codex",
-    );
+    const backend = oneOf(agent.backend, AGENT_BACKENDS, "codex");
     const visibility = oneOf(
       agent.visibility,
       ["private", "workspace"] as const,

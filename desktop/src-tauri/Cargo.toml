@@ -1,6 +1,6 @@
 [package]
 name = "spaces"
-version = "0.1.21"
+version = "0.1.22"
 description = "Spaces — the local operating system for people and agents"
 authors = ["Spaces"]
 edition = "2021"
@@ -32,4 +32,22 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 libc = "0.2.189"
+# Accessibility trust is a real API; the alternative was inferring it from a
+# timeout, which cannot tell "denied" from "slow".
+core-foundation = "0.10"
+core-graphics = "0.25"
 portable-pty = "0.9.0"
+
+# Reading a page back out of the built-in browser.
+#
+# Tauri's `eval` is fire-and-forget: it runs a script and cannot tell you what
+# the script produced, which is enough to press Back and useless for letting an
+# agent see what is on screen. WKWebView's own
+# `evaluateJavaScript:completionHandler:` does return a value, and these are
+# what it takes to call it. All four are already in the tree as transitive
+# dependencies of wry; naming them here makes that reliance explicit.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-web-kit = "0.3"
+block2 = "0.6"

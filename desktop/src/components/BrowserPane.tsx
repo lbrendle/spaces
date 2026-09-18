@@ -6,6 +6,11 @@ import {
   browserClose,
   browserNavigate,
   browserOpen,
+  browserDock,
+  browserEval,
+  browserIsFloating,
+  browserLabel,
+  browserPopout,
   browserUrl,
   browserVisibility,
   normalizeBrowserInput,
@@ -13,6 +18,8 @@ import {
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconContract,
+  IconExpand,
   IconGlobe,
   IconRefresh,
 } from "./icons";
@@ -35,7 +42,10 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editingAddressRef = useRef(false);
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const labelRef = useRef(`spaces-browser-${projectId.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+  // One definition of the label, shared with the tools agents call — they have
+  // to address the same webview this pane is showing, or an agent browses
+  // something nobody can see.
+  const labelRef = useRef(browserLabel(projectId));
   const label = labelRef.current;
 
   const [firstUrl] = useState(() => {
@@ -48,6 +58,22 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   const [address, setAddress] = useState(firstUrl);
   const [fallbackUrl, setFallbackUrl] = useState(firstUrl);
   const [error, setError] = useState("");
+  /*
+   * The page's own title.
+   *
+   * Worth showing for its own sake — an address bar full of query parameters
+   * says much less than "Pull requests · spaces" — and it is also the honest
+   * proof that Spaces can read the page at all. The same call underlies every
+   * browser tool an agent has; if the title is right, so is the bridge.
+   */
+  const [pageTitle, setPageTitle] = useState("");
+  /*
+   * True while the browser is in its own floating window.
+   *
+   * The pane must not recreate its webview while that is the case — there is
+   * only one browser, and two would be two different pages that look like one.
+   */
+  const [floating, setFloating] = useState(false);
   const [ready, setReady] = useState(!native);
 
   const enqueue = useCallback((fn: () => Promise<unknown>) => {
@@ -68,8 +94,18 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
     });
   }, [label]);
 
+  // A browser can already be floating when this pane mounts — after switching
+  // channels, or on the next launch — so ask rather than assume.
+  useEffect(() => {
+    void browserIsFloating(label).then(setFloating).catch(() => {});
+  }, [label]);
+
   useEffect(() => {
     if (!native) return;
+    // Floating means the browser already exists in its own window. Opening a
+    // second one here would put two different pages on screen that both claim
+    // to be this project's browser.
+    if (floating) return;
     let live = true;
     let settleTimer = 0;
 
@@ -113,7 +149,7 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
         await browserClose(label).catch(() => {});
       });
     };
-  }, [enqueue, firstUrl, label, native, place]);
+  }, [enqueue, firstUrl, floating, label, native, place]);
 
   useEffect(() => {
     if (!native) return;
@@ -155,6 +191,14 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   // clicked inside pages keep Spaces's address field truthful.
   useEffect(() => {
     if (!native || !ready || !active) return;
+    /*
+     * Reading the URL is a cheap question for the webview handle. Reading the
+     * title is not — it evaluates a script inside the page and waits for the
+     * answer — so it happens when the page has actually changed rather than
+     * every tick. Doing both at 800ms was a WKWebView round trip per second
+     * for a string that changes when you navigate.
+     */
+    let lastUrl = "";
     const poll = window.setInterval(() => {
       void browserUrl(label)
         .then((url) => {
@@ -163,6 +207,11 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
           // The poll catches up on the next tick after the field loses focus.
           if (!editingAddressRef.current) setAddress(url);
           window.localStorage.setItem(`spaces-browser:${projectId}`, url);
+          if (url === lastUrl) return;
+          lastUrl = url;
+          void browserEval<string>(label, "return document.title")
+            .then((result) => setPageTitle(result.ok ? String(result.value ?? "") : ""))
+            .catch(() => setPageTitle(""));
         })
         .catch(() => {});
     }, 800);
@@ -203,6 +252,30 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
       setAddress(url);
       setFallbackUrl(url);
       window.localStorage.setItem(`spaces-browser:${projectId}`, url);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+
+  async function popOut() {
+    setError("");
+    try {
+      const url = await browserPopout(label);
+      setFloating(true);
+      if (url) setAddress(url);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+
+  async function dock() {
+    setError("");
+    try {
+      const url = await browserDock(label);
+      if (url) setAddress(url);
+      // Clearing this lets the open effect run again and rebuild the webview
+      // in the pane, at wherever the floating window had got to.
+      setFloating(false);
     } catch (reason) {
       setError(String(reason));
     }
@@ -264,8 +337,20 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
             autoCorrect="off"
           />
         </form>
-        <span className={"cc-browser-state" + (ready ? " ready" : "")}>
-          {ready ? "live" : "opening"}
+        {pageTitle && (
+          <span className="cc-browser-title" title={pageTitle}>
+            {pageTitle}
+          </span>
+        )}
+        <button
+          className="icon-btn"
+          title={floating ? "Put the browser back in this panel" : "Float the browser above everything"}
+          onClick={() => void (floating ? dock() : popOut())}
+        >
+          {floating ? <IconContract size={15} /> : <IconExpand size={15} />}
+        </button>
+        <span className={"cc-browser-state" + (ready || floating ? " ready" : "")}>
+          {floating ? "floating" : ready ? "live" : "opening"}
         </span>
       </div>
       {error && <div className="banner warn cc-browser-error">{error}</div>}
@@ -277,7 +362,16 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
             src={fallbackUrl.replace(/#spaces-reload=\d+$/, "")}
           />
         )}
-        {native && !ready && !error && (
+        {native && floating && (
+          <div className="cc-browser-loading">
+            <IconGlobe size={22} />
+            This browser is floating above your other windows.
+            <button className="btn tiny" onClick={() => void dock()}>
+              Put it back
+            </button>
+          </div>
+        )}
+        {native && !floating && !ready && !error && (
           <div className="cc-browser-loading">
             <IconGlobe size={22} />
             Opening the project browser…

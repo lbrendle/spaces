@@ -9,9 +9,15 @@
  * as an error, "not found" is neutral, and every install path says out loud
  * that one runtime is enough.
  *
- * Detection is deliberately two different mechanisms, because the runtimes
- * are: claude/codex/gh are binaries on PATH (the Rust `check_tools`), Ritz is
- * an HTTP service that either answers on 127.0.0.1:8765 or does not.
+ * Detection is deliberately several mechanisms, because the runtimes are:
+ * CLI harnesses are binaries on PATH (the Rust `check_tools`), an HTTP engine
+ * either answers on its port or does not, and an external agent is a GUI app
+ * Spaces never launches at all.
+ *
+ * The two install paths below stay curated rather than listing the whole
+ * registry: this is somebody's first five minutes, and nine options is not a
+ * better answer to "what do I install" than two. Agents & Teams has the full
+ * set, with a per-harness check.
  */
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -19,8 +25,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../store";
 import { getDb } from "../db";
 import { toast } from "../toast";
-import { fetchRitzModels, RITZ_BASE } from "../capabilities";
-import { config } from "../config";
 import { Spinner } from "./ui";
 import { IconBolt, IconCheck, IconGitHub } from "./icons";
 import "./setup.css";
@@ -205,65 +209,18 @@ function RuntimeCard({ spec }: { spec: RuntimeSpec }) {
   );
 }
 
-/* ── Ritz probe ───────────────────────────────────────────────── */
-
-interface RitzProbe {
-  state: "checking" | "up" | "down";
-  models: number;
-}
-
-/**
- * Ritz is not on PATH, so PATH detection cannot see it: the only truthful
- * answer is whether the engine replies right now. GET /models is the cheapest
- * question it answers.
- */
-function useRitzProbe(): [RitzProbe, () => void] {
-  const [probe, setProbe] = useState<RitzProbe>({ state: "checking", models: 0 });
-  const [nonce, setNonce] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    const ac = new AbortController();
-    // A dead port refuses instantly; the timeout is for the other case —
-    // something else holding 8765 and never answering.
-    const timer = window.setTimeout(() => ac.abort(), 2500);
-    setProbe((p) => ({ ...p, state: "checking" }));
-
-    fetchRitzModels(ac.signal).then(
-      (list) => {
-        if (live) setProbe({ state: "up", models: list.models.length });
-      },
-      () => {
-        if (live) setProbe({ state: "down", models: 0 });
-      }
-    );
-
-    return () => {
-      live = false;
-      clearTimeout(timer);
-      ac.abort();
-    };
-  }, [nonce]);
-
-  const recheck = useCallback(() => setNonce((n) => n + 1), []);
-  return [probe, recheck];
-}
-
 /* ── the guide ────────────────────────────────────────────────── */
 
 export function SetupGuide() {
   const tools = useStore((s) => s.tools);
   const [checking, setChecking] = useState(false);
-  const [ritz, recheckRitz] = useRitzProbe();
 
   const installed = RUNTIMES.filter((r) => !!tools[r.id]);
   const missing = RUNTIMES.filter((r) => !tools[r.id]);
   const gh = !!tools.gh;
-  const host = RITZ_BASE.replace("http://", "");
 
   const recheck = useCallback(async () => {
     setChecking(true);
-    recheckRitz();
     try {
       const found = await invoke<Record<string, boolean>>("check_tools");
       useStore.setState({ tools: found });
@@ -272,7 +229,7 @@ export function SetupGuide() {
     } finally {
       setChecking(false);
     }
-  }, [recheckRitz]);
+  }, []);
 
   return (
     <section className="dash-card setup-guide">
@@ -291,9 +248,10 @@ export function SetupGuide() {
 
       <p className="rt-lede">
         Agents belong to this workspace, not to a person — everyone here can use anyone's.
-        Each one wraps a runtime on somebody's machine: the <code>claude</code> or{" "}
-        <code>codex</code> CLI, a Custom CLI, or {config().localAiName} over HTTP. It answers while its host device is
-        online.
+        Most wrap a runtime on somebody's machine: the <code>claude</code>, <code>codex</code> or{" "}
+        <code>cursor-agent</code> CLI. Those answer while their host device is online. An agent
+        can also be an app Spaces doesn&apos;t launch at all — it works in the same repository,
+        and Spaces reads what it did out of git.
       </p>
       <p className="rt-lede">
         <strong>You need none of this installed to use the workspace's agents.</strong> A
@@ -406,42 +364,6 @@ export function SetupGuide() {
         )}
       </div>
 
-      {/* Ritz — a service, not a CLI. Nothing to install from here. */}
-      <div className="rt-group">
-        {ritz.state === "up" ? (
-          <Fold
-            summary={
-              <>
-                <Dot tone="ok" />
-                {config().localAiName} is answering on {host}
-                {ritz.models > 0 && ` — ${ritz.models} model${ritz.models === 1 ? "" : "s"}`}.
-              </>
-            }
-          >
-            <p className="rt-card-good">
-              Your configured on-device engine, reached over local HTTP. Local HTTP agents run
-              here, with no CLI and no cloud round-trip.
-            </p>
-          </Fold>
-        ) : (
-          <Fold
-            summary={
-              <>
-                <Dot tone={ritz.state === "checking" ? "wait" : "idle"} />
-                {ritz.state === "checking"
-                  ? `Looking for ${config().localAiName} on ${host}…`
-                  : `${config().localAiName} is not running — optional, and nothing to install from here.`}
-              </>
-            }
-          >
-            <p className="rt-card-good">
-              {config().localAiName} is a local engine rather than a CLI, so it never appears on your PATH. Start
-              it and Spaces picks it up at the address below on the next re-check.
-            </p>
-            <CopyLine cmd={RITZ_BASE} />
-          </Fold>
-        )}
-      </div>
     </section>
   );
 }
@@ -525,7 +447,7 @@ export function FirstRunChecklist() {
     {
       id: "agent",
       title: "Add an agent",
-      hint: "A named Claude Code, Codex, local HTTP, or Custom CLI teammate. It runs on whichever machine hosts it.",
+      hint: "A named Claude Code, Codex, Cursor, local HTTP or external-app teammate. It runs on whichever machine hosts it.",
       done: agents.length > 0,
       run: () => setView({ type: "agents" }),
     },

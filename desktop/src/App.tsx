@@ -4,6 +4,7 @@ import { IconLogo } from "./components/icons";
 import {
   initAgentListener,
   ensureNotifyPermission,
+  initHandOffWatch,
   initRemoteAgentJobs,
 } from "./agents";
 import { initOrchestrator } from "./orchestrator";
@@ -16,6 +17,9 @@ import { TasksView } from "./components/TasksView";
 import { MemoryView } from "./components/MemoryView";
 import { AgentsView } from "./components/AgentsView";
 import { WorkspacesView } from "./components/WorkspacesView";
+import { ImportSessions } from "./components/ImportSessions";
+import { initSessionWatch } from "./sessions";
+import { toast } from "./toast";
 import { GitActivity } from "./components/GitActivity";
 import { SettingsView } from "./components/SettingsView";
 import { Palette } from "./components/Palette";
@@ -93,7 +97,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!portal) return;
+    /*
+     * Nothing here may start before the store has read the database.
+     *
+     * Every one of these acts on loaded state, and portal sync in particular
+     * used to schedule its first run 1.5s after this effect regardless — so it
+     * could describe the workspace to the portal while the store still held
+     * its initial empty arrays. Reporting an empty workspace is not a harmless
+     * no-op there: it is how the app says things have been deleted.
+     */
+    if (!portal || !loaded) return;
     void initAgentListener();
     void initOrchestrator();
     void ensureNotifyPermission();
@@ -102,14 +115,35 @@ export default function App() {
     void syncAllProjects();
     const stopPortal = initPortalSync();
     const stopRemoteJobs = initRemoteAgentJobs();
+    const stopHandOffs = initHandOffWatch();
     const refreshAgentMirrors = () => void syncAllProjects(100);
     window.addEventListener("hq:content-change", refreshAgentMirrors);
     return () => {
       window.removeEventListener("hq:content-change", refreshAgentMirrors);
+      stopHandOffs();
       stopRemoteJobs();
       stopPortal();
     };
-  }, [portal?.device_id]);
+  }, [portal?.device_id, loaded]);
+
+  /*
+   * Picking up sessions written elsewhere.
+   *
+   * Not folded into the effect above, which is gated on being paired with a
+   * portal: reading Claude Code and Codex history is entirely local, and a
+   * machine that has never paired should still catch up on its own work.
+   */
+  useEffect(
+    () =>
+      initSessionWatch((results) => {
+        const sessions = results.reduce((n, r) => n + r.sessions, 0);
+        toast.success(
+          `${sessions} new session${sessions === 1 ? "" : "s"} imported`,
+          results.map((r) => r.projectName).join(", ")
+        );
+      }),
+    []
+  );
 
   const activeWorkspaceId = view.type === "workspace" ? view.projectId : "";
   useEffect(() => {
@@ -171,6 +205,7 @@ export default function App() {
       {view.type === "memory" && <MemoryView />}
       {view.type === "agents" && <AgentsView />}
       {view.type === "workspaces" && <WorkspacesView />}
+      {view.type === "import" && <ImportSessions />}
       {view.type === "git" && <GitActivity />}
       {view.type === "graph" && <GraphView />}
       {view.type === "knowledge" && <KnowledgeView />}

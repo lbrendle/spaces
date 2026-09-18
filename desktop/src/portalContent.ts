@@ -843,6 +843,9 @@ async function removeRemoteMirror(tombstone: RemoteTombstone): Promise<void> {
     );
     await db.execute("DELETE FROM tasks WHERE project_id = $1", [localId]);
     await db.execute("DELETE FROM memory WHERE project_id = $1", [localId]);
+    // Adoption's ledger goes with the memory it describes — leaving it would
+    // make a later adoption skip sections whose entries no longer exist.
+    await db.execute("DELETE FROM adopted_context WHERE project_id = $1", [localId]);
     await db.execute("UPDATE documents SET project_id = '' WHERE project_id = $1", [localId]);
     await db.execute("UPDATE content_items SET project_id = '' WHERE project_id = $1", [localId]);
     await db.execute("DELETE FROM projects WHERE id = $1", [localId]);

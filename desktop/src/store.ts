@@ -80,6 +80,7 @@ interface SpacesState {
   patchRun(id: string, patch: Partial<Run>, persist?: boolean): Promise<void>;
   loadRun(id: string): Promise<Run | null>;
   loadProjectRuns(projectId: string): Promise<void>;
+  openHandOffsFor(agentId: string): Promise<Run[]>;
   markRunActive(id: string, active: boolean): void;
 
   getSession(channelId: string, agentId: string): string;
@@ -358,6 +359,26 @@ export const useStore = create<SpacesState>((set, get) => ({
     );
     await get().refreshAll();
     requestPortalSync();
+    /*
+     * A project pointed at an existing folder should arrive knowing what is in
+     * it. The blackboard adopts `CLAUDE.md`, `AGENTS.md` and any previous
+     * `.hq/CONTEXT.md` into memory before it renders the database back out over
+     * them — but it only ran at startup and on agent runs, so a project created
+     * mid-session sat there un-adopted until something else happened to trigger
+     * a sync. Whatever context is already on disk is most wanted in the minute
+     * after you point Spaces at the folder, not whenever the next run lands.
+     *
+     * Imported dynamically because `blackboard` reaches back into this store
+     * through `adopt`; deferring the import to call time keeps that cycle from
+     * having to resolve while this module is still being evaluated.
+     */
+    if (proj.local_path.trim()) {
+      void import("./blackboard")
+        .then(({ syncBlackboard }) => syncBlackboard(proj.id))
+        .catch(() => {
+          // best-effort: a project is still a project without its mirror
+        });
+    }
     return proj;
   },
 
@@ -403,6 +424,10 @@ export const useStore = create<SpacesState>((set, get) => ({
     await db.execute("DELETE FROM channels WHERE project_id = $1", [id]);
     await db.execute("DELETE FROM tasks WHERE project_id = $1", [id]);
     await db.execute("DELETE FROM memory WHERE project_id = $1", [id]);
+    // The record of what has been adopted must not outlive the memory it
+    // describes: it is what makes adoption skip a section, so a ledger left
+    // behind would silently refuse to bring that context back.
+    await db.execute("DELETE FROM adopted_context WHERE project_id = $1", [id]);
     await db.execute("UPDATE documents SET project_id = '' WHERE project_id = $1", [id]);
     await db.execute("UPDATE content_items SET project_id = '' WHERE project_id = $1", [id]);
     await db.execute("DELETE FROM projects WHERE id = $1", [id]);
@@ -659,6 +684,29 @@ export const useStore = create<SpacesState>((set, get) => ({
     if (!rows.length) return null;
     set((s) => ({ runs: { ...s.runs, [id]: rows[0] } }));
     return rows[0];
+  },
+
+  /**
+   * Hand-offs to one external agent that have not been reported on yet.
+   *
+   * A hand-off is a finished run whose meta still says it is waiting; the meta
+   * is flipped once its result has been posted, which is what stops the same
+   * commits being announced on every refresh. Unlike the other run readers this
+   * one goes straight to SQLite — it is polled from a background refresh and
+   * has no business warming the in-memory run cache.
+   */
+  async openHandOffsFor(agentId) {
+    const db = await getDb();
+    // LIKE, not equality: a hand-off that was typed straight into the app
+    // records that it was sent as well as that it is waiting, and both are
+    // still open until the agent's work shows up in git.
+    return db.select<Run[]>(
+      `SELECT * FROM runs
+        WHERE agent_id = $1 AND meta LIKE '%awaiting external agent%'
+        ORDER BY started_at DESC
+        LIMIT 20`,
+      [agentId]
+    );
   },
 
   async loadProjectRuns(projectId) {

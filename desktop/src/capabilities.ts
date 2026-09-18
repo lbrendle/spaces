@@ -1,21 +1,21 @@
 /**
  * capabilities.ts — a declarative manifest of what each agent harness can do.
  *
- * Spaces spawns three very different things:
+ * Spaces spawns:
  *
  *   claude  →  claude -p --output-format stream-json --verbose [flags]   (prompt on stdin)
  *   codex   →  codex exec --json [flags] -                               (prompt on stdin)
- *   ritz    →  POST <ritz endpoint>/chat                            (JSON body, SSE reply)
+ *   cursor  →  cursor-agent -p --output-format stream-json [flags] <prompt>
  *
- * The first two are configured with CLI flags, the third with JSON body
- * fields — so every option declares `kind: "flag" | "json"` and the
- * serializer emits the right wire form.
+ * and represents agents it cannot spawn at all. CLI options are emitted as
+ * flags; settings that are not flags — an external app's bundle identifier —
+ * are stored as `key=value`, so every option declares which wire form it uses.
  *
  * The agent row only has two columns to store all of this: `model` and
  * `cli_args`. So:
  *   • options with `storage: "model"` live in the `model` column;
  *   • everything else round-trips through `cli_args` via
- *     serializeArgs() / parseArgs(), including Ritz's JSON fields (stored
+ *     serializeArgs() / parseArgs(), including non-flag settings (stored
  *     as `key=value` tokens so a single text column keeps working).
  *
  * Anything in `cli_args` that the manifest does not recognise is kept
@@ -26,9 +26,13 @@
  * machine — do not "tidy" them.
  */
 import { config } from "./config";
-import { invoke } from "@tauri-apps/api/core";
+import type { BuiltinAgentKind } from "./types";
 
-export type HarnessKind = "claude" | "codex" | "ritz" | "custom";
+/**
+ * Open by design — see AgentKind in types.ts. The registry below is the source
+ * of truth for which ids exist; this alias only supplies autocomplete.
+ */
+export type HarnessKind = BuiltinAgentKind | (string & {});
 
 /** Widget used to edit an option. */
 export type ControlKind = "text" | "enum" | "boolean" | "number" | "repeatable";
@@ -66,8 +70,6 @@ export interface HarnessOption {
   storage?: "model";
   /** Rejected by `codex exec resume` — translated or dropped on resume. */
   execOnly?: boolean;
-  /** Choices come from a live source rather than `choices`. */
-  dynamic?: "ritz-models";
   /** Summarised as a chip on the agent card. */
   chip?: boolean;
   /** Connection metadata stored with the agent but never sent in the request body. */
@@ -78,160 +80,129 @@ export interface HarnessOption {
   max?: string;
 }
 
+/**
+ * What a harness can actually do, so the rest of the app can ask instead of
+ * branching on `kind`. Every field is answerable for any harness, including
+ * ones Spaces never spawns.
+ */
+export interface HarnessCaps {
+  /** Can continue a prior session, so a turn is a reply rather than a re-brief. */
+  resume: boolean;
+  /**
+   * How the Spaces MCP server reaches it.
+   *
+   * "repo" is not a quieter kind of MCP — it means there is none. An external
+   * agent runs in its own app, never reads the checkout's `.mcp.json`, and
+   * meets Spaces only through the repository. Saying "config-file" for those
+   * was a claim nobody had checked, and the editor repeated it: Muse's card
+   * said Spaces tools arrived "from the config Spaces writes in its working
+   * directory", which is not a thing Muse does.
+   */
+  mcp: "config-file" | "args" | "repo" | "none";
+  /** Emits structured tool-call events (so the inspector can show live steps). */
+  toolEvents: boolean;
+  /** Reports tokens/cost at the end of a turn. */
+  usage: boolean;
+  /** Can be pointed at its own git worktree. */
+  worktrees: boolean;
+  /** Where the model list comes from in the editor. */
+  models: "suggestions" | "dynamic" | "free";
+  /** Spaces streams its output live rather than learning about it afterwards. */
+  streaming: boolean;
+  /**
+   * Whether this agent can reach outside its own process — the screen, and the
+   * workspace browser — through Spaces.
+   *
+   * "spaces" means Spaces lends it the ones it has: the built-in browser, and
+   * reading or typing into another app under the Accessibility permission
+   * Spaces itself was granted. That is the only kind Spaces can honestly
+   * describe, because it is the only kind it provides. Whatever a harness does
+   * with its own computer-use tooling is between it and its own sandbox, and
+   * claiming to model that would be the same mistake as telling people Muse
+   * reads a config file it has never opened.
+   *
+   * "none" is for an agent Spaces never launches: it runs in its own app, so
+   * it cannot be handed Spaces's tools at all.
+   */
+  reach: "spaces" | "none";
+}
+
+/**
+ * How Spaces checks whether this harness exists on the current Mac. CLI
+ * harnesses are looked up on PATH; external ones are macOS app bundles.
+ */
+export interface HarnessProbe {
+  /** Executable to resolve on PATH. "" when the user supplies it. */
+  bin?: string;
+  /** Args that print a version cheaply and exit non-interactively. */
+  versionArgs?: readonly string[];
+  /**
+   * Args that report whether the user is signed in, for the harnesses that
+   * have such a command. Omitted where Spaces has not verified one — an
+   * unknown sign-in state is reported as unknown, never guessed.
+   */
+  authArgs?: readonly string[];
+  /** Substring in the auth command's output that means "signed in". */
+  authOkMatch?: string;
+  /** Bundle identifier of a GUI app, for `wire: "external"` harnesses. */
+  bundleId?: string;
+  /** Conventional install location, shown when the probe fails. */
+  appPath?: string;
+  /** Where to get it, shown when it is missing. */
+  installHint?: string;
+}
+
 export interface HarnessMeta {
   kind: HarnessKind;
   label: string;
   blurb: string;
-  /** "cli" harnesses are spawned as processes; "http" ones are called over the network. */
-  wire: "cli" | "http";
+  /**
+   * "cli" harnesses are spawned as processes; "external" ones Spaces never
+   * starts at all — they run in their own app against the same checkout and
+   * collaborate through git and .hq.
+   */
+  wire: "cli" | "external";
   /** Fixed prefix Spaces always passes — shown in the preview, never editable. */
   base: string;
   /** Copy for the Advanced → raw disclosure. */
   rawLabel: string;
   rawHelp: string;
   rawPlaceholder: string;
-}
-
-/* ── Ritz (local engine) ──────────────────────────────────────── */
-
-/**
- * Local model server for the `ritz` kind. Read through config() so a fork can
- * point it elsewhere — or run none at all — without editing this manifest.
- */
-export const RITZ_BASE = config().localAiUrl;
-export const RITZ_CHAT_URL = `${RITZ_BASE}/chat`;
-export const RITZ_MODELS_URL = `${RITZ_BASE}/models`;
-
-export interface RitzModel {
-  key: string;
-  name: string;
-  notes?: string;
-  tier?: string;
-  status?: string;
-}
-
-export interface RitzModelList {
-  /** The engine's own default model key. */
-  default: string;
-  models: RitzModel[];
-}
-
-/**
- * GET /models on the local engine. Tolerates a bare array, {models:[…]} or
- * {data:[…]}, and entries that are plain strings. Throws if unreachable —
- * callers fall back to free text.
- */
-export function ritzBase(values?: OptionValues): string {
-  const configured = typeof values?.endpoint === "string" ? values.endpoint.trim() : "";
-  return (configured || RITZ_BASE).replace(/\/+$/, "");
-}
-
-export function ritzHealthRoute(values?: OptionValues): string {
-  const configured = typeof values?.health_route === "string" ? values.health_route.trim() : "";
-  if (!configured) return "/health";
-  return configured.startsWith("/") ? configured : `/${configured}`;
-}
-
-export async function fetchRitzModels(
-  signal?: AbortSignal,
-  baseUrl: string = RITZ_BASE,
-  headers: Record<string, string> = {}
-): Promise<RitzModelList> {
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, { signal, headers });
-  if (!res.ok) throw new Error(`${config().localAiName} returned ${res.status}`);
-  const raw: unknown = await res.json();
-  const box = (raw ?? {}) as Record<string, unknown>;
-  const list: unknown = Array.isArray(raw) ? raw : box.models ?? box.data ?? [];
-  const models: RitzModel[] = (Array.isArray(list) ? list : []).map((m) => {
-    if (typeof m === "string") return { key: m, name: m };
-    const o = (m ?? {}) as Record<string, unknown>;
-    const key = String(o.key ?? o.id ?? o.name ?? "");
-    return {
-      key,
-      name: String(o.name ?? key),
-      notes: o.notes ? String(o.notes) : undefined,
-      tier: o.tier ? String(o.tier) : undefined,
-      status: o.status ? String(o.status) : undefined,
-    };
-  }).filter((m) => m.key !== "");
-  return { default: typeof box.default === "string" ? box.default : "", models };
-}
-
-/** Verify both the configured liveness route and the HTTP agent contract. */
-export async function checkRitzRuntime(
-  signal: AbortSignal | undefined,
-  baseUrl: string,
-  healthRoute: string,
-  headers: Record<string, string> = {}
-): Promise<void> {
-  const base = baseUrl.replace(/\/+$/, "");
-  const route = healthRoute.trim();
-  if (route) {
-    const health = await fetch(`${base}${route.startsWith("/") ? route : `/${route}`}`, { signal, headers });
-    if (!health.ok) throw new Error(`${config().localAiName} health check returned ${health.status}`);
-  }
-  await fetchRitzModels(signal, base, headers);
-}
-
-/** Resolve HTTP credentials at request time; secret material never enters agent configuration. */
-export async function ritzAuthHeaders(values?: OptionValues): Promise<Record<string, string>> {
-  if (values?.authentication !== "upa-keychain-bearer") return {};
-  const token = await invoke<string>("read_upa_spaces_token");
-  if (!token) throw new Error("Universal Personal Agent bearer token is unavailable in Mac Keychain");
-  return { Authorization: `Bearer ${token}` };
-}
-
-/**
- * The JSON body Spaces posts to /chat. `values` supplies the configured fields;
- * `runtime` supplies the per-run ones. Empty options are omitted so the
- * engine's own defaults apply.
- */
-export function ritzBody(
-  values: OptionValues,
-  runtime?: {
-    conversationId?: string;
-    message?: string;
-    workspace?: string;
-    systemPrompt?: string;
-    principalActorId?: string;
-    triggerOrigin?: string;
-    attachments?: Array<{
-      name: string;
-      mime_type: string;
-      data_base64: string;
-      sha256?: string;
-    }>;
-  }
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    conversation_id: runtime?.conversationId ?? "<channel>:<agent>",
-    message: runtime?.message ?? "<prompt>",
-  };
-  if (runtime?.workspace !== undefined) body.workspace = runtime.workspace;
-  if (runtime?.systemPrompt) body.system_prompt = runtime.systemPrompt;
-  if (runtime?.principalActorId) body.principal_actor_id = runtime.principalActorId;
-  if (runtime?.triggerOrigin) body.trigger_origin = runtime.triggerOrigin;
-  if (runtime?.attachments?.length) body.attachments = runtime.attachments;
-  for (const opt of RITZ_OPTIONS) {
-    if (opt.transportOnly) continue;
-    const v = values[opt.key];
-    if (opt.control === "boolean") {
-      body[opt.key] = v === true;
-      continue;
-    }
-    const s = typeof v === "string" ? v.trim() : "";
-    if (!s) continue;
-    if (opt.control === "number") {
-      const n = Number(s);
-      if (Number.isFinite(n)) body[opt.key] = n;
-      continue;
-    }
-    body[opt.key] = s;
-  }
-  return body;
+  caps: HarnessCaps;
+  probe?: HarnessProbe;
+  /** Who makes it — shown on the picker so a long list stays scannable. */
+  vendor?: string;
 }
 
 /* ── Manifest ─────────────────────────────────────────────────── */
+
+/**
+ * Letting an agent out of the terminal.
+ *
+ * Off by default, and one switch rather than several, because the question a
+ * person is actually answering is "may this teammate touch things outside its
+ * own working directory". Splitting that into browser-yes/screen-no invites
+ * nobody to think about it and makes the risky half arrive unnoticed.
+ *
+ * Reading a window needs the same macOS Accessibility grant as typing into
+ * one, which Spaces already asks for and reports on; the agent editor says so
+ * next to this switch rather than letting it fail silently later.
+ */
+const REACH_OPTION: HarnessOption = {
+  key: "reach",
+  label: "Can use the browser and the screen",
+  help:
+    "Lets this agent drive the workspace browser and read or type into other apps on this Mac, through Spaces. Everything happens in the browser you can see, and typing into another app needs Accessibility permission. Off means it stays in its working directory.",
+  control: "boolean",
+  kind: "json",
+  default: false,
+  group: "Reach",
+  chip: true,
+  risky: {
+    true:
+      "This agent will be able to open pages and act in other applications on this Mac. It cannot enter passwords — Spaces refuses that — but everything else it does is real.",
+  },
+};
 
 const CLAUDE_OPTIONS: readonly HarnessOption[] = [
   {
@@ -336,6 +307,7 @@ const CLAUDE_OPTIONS: readonly HarnessOption[] = [
     placeholder: "./.claude/settings.json",
     group: "Advanced",
   },
+  REACH_OPTION,
 ];
 
 const CODEX_OPTIONS: readonly HarnessOption[] = [
@@ -435,132 +407,164 @@ const CODEX_OPTIONS: readonly HarnessOption[] = [
     placeholder: 'model_reasoning_effort="high"',
     group: "Advanced",
   },
+  REACH_OPTION,
 ];
 
-const RITZ_OPTIONS: readonly HarnessOption[] = [
-  {
-    key: "protocol",
-    label: "Protocol preset",
-    help: "Spaces-compatible HTTP uses GET /models and streaming POST /chat.",
-    control: "enum",
-    kind: "json",
-    choices: ["spaces-compatible-http"],
-    default: "spaces-compatible-http",
-    group: "Connection",
-    transportOnly: true,
-    chip: true,
-  },
-  {
-    key: "endpoint",
-    label: "Endpoint",
-    help: `Blank inherits the installation default (${RITZ_BASE}); set this to give this agent its own engine.`,
-    control: "text",
-    kind: "json",
-    placeholder: RITZ_BASE,
-    group: "Connection",
-    transportOnly: true,
-    chip: true,
-  },
-  {
-    key: "health_route",
-    label: "Health route",
-    help: "A lightweight route used by connection checks before a run.",
-    control: "text",
-    kind: "json",
-    default: "/health",
-    placeholder: "/health",
-    group: "Connection",
-    transportOnly: true,
-  },
-  {
-    key: "authentication",
-    label: "Authentication",
-    help: "Trusted local origin works with a localhost-only engine; bearer credentials belong in the Mac Keychain, never this field.",
-    control: "enum",
-    kind: "json",
-    choices: ["trusted-local-origin", "upa-keychain-bearer", "none"],
-    default: "trusted-local-origin",
-    group: "Connection",
-    transportOnly: true,
-  },
+
+
+/* ── Cursor Agent ─────────────────────────────────────────────── */
+
+const CURSOR_OPTIONS: readonly HarnessOption[] = [
   {
     key: "model",
     label: "Model",
-    help: `Fetched live from ${config().localAiName}. Blank lets the engine route the message itself.`,
+    help: "Model id as Cursor names it. Blank uses your Cursor default. `cursor-agent models` lists them.",
     control: "text",
-    kind: "json",
+    kind: "flag",
+    flag: "--model",
     storage: "model",
-    dynamic: "ritz-models",
-    placeholder: "auto",
+    suggestions: ["gpt-5", "sonnet-4-thinking", "opus-4-thinking"],
+    placeholder: "sonnet-4-thinking",
     group: "Model",
     chip: true,
   },
   {
-    key: "use_tools",
-    label: "Tools",
-    help: "Lets the engine call its local tools (files, shell, search). Off means chat only.",
+    key: "mode",
+    label: "Mode",
+    help: "plan and ask are read-only. Leave blank for the normal read/write agent.",
+    control: "enum",
+    kind: "flag",
+    flag: "--mode",
+    choices: ["", "plan", "ask"],
+    group: "Model",
+    chip: true,
+  },
+  {
+    key: "force",
+    label: "Run everything",
+    help: "Allows every command unless explicitly denied. Spaces runs headless, so a tool that stops to ask just stalls the turn.",
     control: "boolean",
-    kind: "json",
+    kind: "flag",
+    flag: "--force",
     default: true,
-    group: "Behavior",
+    group: "Permissions",
     chip: true,
+    risky: {
+      true: "Every shell command and file write runs unattended, anywhere this agent can reach. Pair it with an isolated worktree.",
+    },
   },
   {
-    key: "deep",
-    label: "Deep thinking",
-    help: "Longer multi-pass reasoning before answering. Slower, better on hard problems.",
+    key: "sandbox",
+    label: "Sandbox",
+    help: "Overrides the sandbox setting in your Cursor config for this agent.",
+    control: "enum",
+    kind: "flag",
+    flag: "--sandbox",
+    choices: ["", "enabled", "disabled"],
+    group: "Permissions",
+  },
+  {
+    key: "trust",
+    label: "Trust workspace",
+    help: "Skips the workspace-trust prompt, which headless runs cannot answer.",
     control: "boolean",
-    kind: "json",
-    default: false,
-    group: "Behavior",
-    chip: true,
+    kind: "flag",
+    flag: "--trust",
+    default: true,
+    group: "Permissions",
   },
   {
-    key: "research",
-    label: "Research",
-    help: "Lets the engine gather sources before answering.",
+    key: "approve_mcps",
+    label: "Approve MCP servers",
+    help: "Auto-approves MCP servers so the Spaces tool surface is reachable without a prompt.",
     control: "boolean",
-    kind: "json",
-    default: false,
-    group: "Behavior",
-    chip: true,
+    kind: "flag",
+    flag: "--approve-mcps",
+    default: true,
+    group: "Permissions",
   },
-  {
-    key: "temperature",
-    label: "Temperature",
-    help: "0 is deterministic, 1 is loose. Blank uses the engine default.",
-    control: "number",
-    kind: "json",
-    placeholder: "0.7",
-    step: "0.05",
-    min: "0",
-    max: "2",
-    group: "Generation",
-  },
-  {
-    key: "max_tokens",
-    label: "Max tokens",
-    help: "Upper bound on the reply length. Blank uses the engine default.",
-    control: "number",
-    kind: "json",
-    placeholder: "4096",
-    step: "256",
-    min: "1",
-    group: "Generation",
-  },
+  REACH_OPTION,
 ];
 
-const CUSTOM_OPTIONS: readonly HarnessOption[] = [
+
+
+
+/* ── External (an agent Spaces does not launch) ───────────────── */
+
+/**
+ * Settings, not flags — Spaces never builds a command for these, so they are
+ * stored as `key=value` (the `json` wire form) in the one text column agents
+ * have. Declared as flags they would serialize as bare values with nothing to
+ * key them by, and every setting would be lost the next time the agent loaded.
+ */
+const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
   {
     key: "model",
-    label: "Executable",
-    help: "Command name on PATH or an absolute executable path. Spaces sends the prompt on stdin and reads stdout.",
+    label: "App",
+    help: "The app this teammate runs in — used for the roster, and to check it is installed.",
     control: "text",
-    kind: "flag",
+    kind: "json",
     storage: "model",
-    placeholder: "aider",
-    group: "Command",
+    suggestions: ["Muse", "Cursor", "Zed", "Claude", "Windsurf"],
+    placeholder: "Muse",
+    group: "App",
     chip: true,
+  },
+  {
+    key: "bundle_id",
+    label: "Bundle id",
+    help: "macOS bundle identifier, so Spaces can tell whether the app is installed and running. Blank skips that check.",
+    control: "text",
+    kind: "json",
+    placeholder: "com.meta.endo",
+    suggestions: ["com.meta.endo", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed", "com.anthropic.claudefordesktop"],
+    group: "App",
+  },
+  {
+    key: "workdir",
+    label: "Working directory",
+    help:
+      "Where this agent edits code. A directory of its own — a second checkout or a worktree — is what lets Spaces tell its commits from everyone else's. Blank means the shared project checkout, where it can only be credited with uncommitted changes.",
+    control: "text",
+    kind: "json",
+    placeholder: "/Users/you/code/project",
+    group: "Git",
+  },
+  {
+    key: "git_author",
+    label: "Git author match",
+    help:
+      "Substring matched against commit author name or email. Use it when this agent shares a checkout but commits under its own identity — most local agents commit as you, so check `git log` before relying on it. With neither this nor a working directory of its own set, Spaces will not attribute any commit to this agent rather than guess.",
+    control: "text",
+    kind: "json",
+    placeholder: "muse",
+    group: "Git",
+    chip: true,
+  },
+  {
+    key: "handoff",
+    label: "Hand-off file",
+    help: "Where Spaces writes a brief when this agent is addressed. Relative to the project root.",
+    control: "text",
+    kind: "json",
+    default: ".hq/inbox",
+    placeholder: ".hq/inbox",
+    group: "Hand-off",
+  },
+  {
+    key: "autosend",
+    label: "Send it automatically",
+    help:
+      "Type the ask straight into the app's composer and press send, instead of only leaving a brief. Spaces brings the app forward — macOS only delivers input to the frontmost app, and a chat window puts the caret in its message box when you switch to it — pastes, and puts you back. Nothing to calibrate. Needs Accessibility permission.",
+    control: "boolean",
+    kind: "json",
+    default: false,
+    group: "Hand-off",
+    chip: true,
+    risky: {
+      true:
+        "Spaces will take over the keyboard for about a second each time this agent is addressed, and it sends the message for real. Stop typing while it does.",
+    },
   },
 ];
 
@@ -569,60 +573,155 @@ export const HARNESSES: readonly HarnessMeta[] = [
     kind: "claude",
     label: "Claude Code",
     blurb: "Runs the claude CLI in the project checkout, on your Claude subscription.",
+    vendor: "Anthropic",
     wire: "cli",
     base: "claude -p --output-format stream-json --verbose",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
     rawPlaceholder: "--permission-mode acceptEdits",
+    caps: {
+      resume: true,
+      mcp: "config-file",
+      toolEvents: true,
+      usage: true,
+      worktrees: true,
+      models: "suggestions",
+      reach: "spaces",
+      streaming: true,
+    },
+    probe: { bin: "claude", versionArgs: ["--version"], installHint: "claude.com/claude-code" },
   },
   {
     kind: "codex",
     label: "Codex",
     blurb: "Runs codex exec in the project checkout, on your ChatGPT subscription.",
+    vendor: "OpenAI",
     wire: "cli",
     base: "codex exec --json",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
     rawPlaceholder: "--sandbox workspace-write --skip-git-repo-check",
+    caps: {
+      resume: true,
+      mcp: "args",
+      toolEvents: true,
+      usage: true,
+      worktrees: true,
+      models: "suggestions",
+      reach: "spaces",
+      streaming: true,
+    },
+    probe: { bin: "codex", versionArgs: ["--version"], installHint: "npm i -g @openai/codex" },
   },
   {
-    kind: "ritz",
-    label: `${config().localAiName} (HTTP)`,
-    blurb: `A configurable local or self-hosted engine at ${RITZ_BASE} — no vendor lock-in.`,
-    wire: "http",
-    base: `POST ${RITZ_CHAT_URL}`,
-    rawLabel: "Raw body fields",
-    rawHelp: "The JSON body fields, as key=value pairs. Edit them and the controls follow; unknown fields are kept and sent as-is.",
-    rawPlaceholder: "use_tools=true deep=false",
-  },
-  {
-    kind: "custom",
-    label: "Custom CLI",
-    blurb: "Runs any local stdin/stdout agent or harness in the project checkout.",
+    kind: "cursor",
+    label: "Cursor Agent",
+    blurb: "Runs cursor-agent headless in the project checkout, on your Cursor account.",
+    vendor: "Cursor",
     wire: "cli",
-    base: "<executable>",
-    rawLabel: "Arguments",
-    rawHelp: "Arguments passed after the executable. The prompt is sent on stdin; plain text or JSON-line output is accepted.",
-    rawPlaceholder: "--json --yes",
+    base: "cursor-agent -p --output-format stream-json",
+    rawLabel: "Raw flags",
+    rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
+    rawPlaceholder: "--force --sandbox disabled",
+    caps: {
+      resume: true,
+      mcp: "config-file",
+      toolEvents: true,
+      usage: true,
+      worktrees: true,
+      models: "suggestions",
+      reach: "spaces",
+      streaming: true,
+    },
+    probe: {
+      bin: "cursor-agent",
+      versionArgs: ["--version"],
+      // `cursor-agent status` is documented in its own --help as "View
+      // authentication status", and exits non-interactively.
+      //
+      // Verified on a signed-out machine: it prints "Not logged in" and exits
+      // **0**. So the exit code says nothing here, and the doctor's text check
+      // is what catches it. No authOkMatch: the signed-in wording has not been
+      // seen, and guessing it would turn a working agent into a false alarm.
+      authArgs: ["status"],
+      installHint: "cursor.com/cli",
+    },
+  },
+  {
+    kind: "external",
+    label: "External app",
+    blurb:
+      "A teammate Spaces does not launch — Muse, Cursor, Zed or a terminal you drive yourself. It joins through the shared repo and .hq, and Spaces tracks its branch, its diff and its hand-offs.",
+    wire: "external",
+    base: "(not launched by Spaces)",
+    rawLabel: "Attachment settings",
+    rawHelp: "How Spaces recognises this agent's work and where it leaves briefs for it.",
+    rawPlaceholder: "git_author=muse workdir=/Users/you/code/project",
+    caps: {
+      resume: false,
+      mcp: "repo",
+      toolEvents: false,
+      usage: false,
+      worktrees: true,
+      models: "free",
+      reach: "none",
+      streaming: false,
+    },
   },
 ];
 
-const MANIFEST: Record<HarnessKind, readonly HarnessOption[]> = {
+const MANIFEST: Record<string, readonly HarnessOption[]> = {
   claude: CLAUDE_OPTIONS,
   codex: CODEX_OPTIONS,
-  ritz: RITZ_OPTIONS,
-  custom: CUSTOM_OPTIONS,
+  cursor: CURSOR_OPTIONS,
+  external: EXTERNAL_OPTIONS,
 };
 
 /**
- * Kinds are taken as plain strings so callers can pass an `Agent["kind"]`
- * straight through — the stored union is widened to include "ritz"
- * separately, and unknown kinds degrade to Claude rather than crashing.
+ * Unknown kinds degrade to "external" — a teammate Spaces does not launch.
+ *
+ * An agent row can arrive from a newer build or a paired device with a harness
+ * this one has never heard of, and it still has to open rather than crash. The
+ * old fallback ran the agent's `model` column as an executable, which is a bad
+ * thing to do with a value this build does not understand. Treating it as
+ * external keeps the agent visible — it holds a branch, takes hand-offs, shows
+ * up in the overlap check — and launches nothing.
  */
 function norm(kind: string): HarnessKind {
-  return kind === "codex" || kind === "ritz" || kind === "claude" || kind === "custom"
-    ? kind
-    : "claude";
+  return MANIFEST[kind] ? kind : "external";
+}
+
+/** Every harness that can be spawned or attached, in picker order. */
+export function harnessKinds(): readonly string[] {
+  return HARNESSES.map((h) => h.kind);
+}
+
+/** What this harness can do. Ask this instead of branching on `kind`. */
+export function capsFor(kind: string): HarnessCaps {
+  return harnessFor(kind).caps;
+}
+
+/** True for agents Spaces never spawns — they run in their own app. */
+export function isExternal(kind: string): boolean {
+  return harnessFor(kind).wire === "external";
+}
+
+/**
+ * The executable a harness runs, which is not its id — the Cursor harness is
+ * `cursor` and its binary is `cursor-agent`.
+ *
+ * Every PATH question in the app goes through this. Asking `tools["cursor"]`
+ * instead returns undefined forever, which reads as "still checking" and never
+ * resolves; that was true of every harness added after the original two.
+ *
+ * Returns "" for harnesses Spaces does not launch. The `model` argument is
+ * accepted and ignored: no supported harness takes its executable from the
+ * agent row any more, and callers still pass it.
+ */
+export function harnessBin(kind: string, _model = ""): string {
+  const meta = harnessFor(kind);
+  if (meta.wire !== "cli") return "";
+  return meta.probe?.bin ?? "";
 }
 
 export function harnessFor(kind: string): HarnessMeta {
@@ -735,9 +834,37 @@ function asText(v: OptionValue | undefined): string {
 /* ── Serialize / parse ────────────────────────────────────────── */
 
 /**
+ * `cli_args` as argv, with Spaces' own settings taken out.
+ *
+ * `cli_args` carries two different things: tokens meant for the harness's
+ * command line, and `key=value` settings for options whose `kind` is `"json"`
+ * — which are Spaces' own and mean nothing to a CLI. The adapters tokenized
+ * the whole string straight into argv, so a setting of the second sort was
+ * handed to the program as an argument.
+ *
+ * That is not cosmetic. `reach=false` landed in the `[PROMPT]` position of
+ * `codex exec`, which pushed the trailing `-` into a second positional and
+ * failed the run outright with "unexpected argument '-' found" — every Codex
+ * turn, for as long as the switch existed. Claude was given it too.
+ */
+export function cliTokens(kind: string, cliArgs: string): string[] {
+  const ours = new Set(
+    optionsFor(kind)
+      .filter((opt) => opt.kind === "json")
+      .map((opt) => opt.key)
+  );
+  if (!ours.size) return tokenize(cliArgs);
+  return tokenize(cliArgs).filter((token) => {
+    const eq = token.indexOf("=");
+    // `=` at 0 is not a key, and a token without one is an ordinary argument.
+    return eq <= 0 || !ours.has(token.slice(0, eq));
+  });
+}
+
+/**
  * Values → the string stored in `agents.cli_args`.
  *
- * Flag harnesses emit `--flag value`; Ritz emits `field=value` tokens for
+ * Flag options emit `--flag value`; settings emit `field=value` tokens for
  * its JSON body. Options with `storage: "model"` are skipped — they live in
  * the agent's own model column. Unrecognised text is appended verbatim.
  */
@@ -885,7 +1012,7 @@ export function parseArgs(kind: string, cliArgs: string): OptionValues {
  *
  * The model is the exception — it is dropped when it came from the old
  * harness's own list ("opus" means nothing to Codex) or when the harnesses
- * talk over different wires (a Ritz model key means nothing to a CLI, and
+ * talk over different wires (an app name means nothing to a CLI, and
  * vice versa). A hand-typed id survives a CLI-to-CLI switch.
  */
 export function carryOver(fromKind: string, toKind: string, values: OptionValues): OptionValues {
@@ -907,9 +1034,8 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
     if (!text) continue;
     if (opt.choices && !opt.choices.includes(text)) continue;
     if (opt.key === "model") {
-      if (norm(fromKind) === "custom" || norm(toKind) === "custom") continue;
       const prev = optionFor(fromKind, "model");
-      const fromList = Boolean(prev?.suggestions?.includes(text)) || prev?.dynamic !== undefined;
+      const fromList = Boolean(prev?.suggestions?.includes(text));
       const crossWire = harnessFor(fromKind).wire !== harnessFor(toKind).wire;
       if (fromList || crossWire) continue;
     }
@@ -920,21 +1046,32 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
 
 /* ── Preview, risks, chips ────────────────────────────────────── */
 
-/** The exact command Spaces will run — or, for Ritz, the request it will send. */
+/** The exact command Spaces will run, or what it does instead when it cannot. */
 export function commandPreview(kind: string, values: OptionValues): string {
   const meta = harnessFor(kind);
-  if (meta.wire === "http") {
-    return `POST ${ritzBase(values)}/chat\n${JSON.stringify(ritzBody(values), null, 2)}`;
+  if (meta.wire === "external") {
+    // There is no command. Showing what Spaces *does* do instead is the honest
+    // preview: it writes a brief and then reads git.
+    const app = asText(values.model).trim() || "the app";
+    const dir = asText(values.workdir).trim();
+    const handoff = asText(values.handoff).trim() || ".hq/inbox";
+    return [
+      `# Spaces does not launch ${app}.`,
+      `write  ${handoff}/<agent>.md   # the same brief a spawned agent gets`,
+      `watch  ${dir || "<project checkout>"}   # commits and uncommitted changes`,
+    ].join("\n");
   }
   const k = norm(kind);
   const modelOpt = optionFor(k, "model");
   const model = asText(values.model).trim();
-  const parts = [k === "custom" ? quoteArg(model || "<executable>") : meta.base];
+  const parts = [meta.base];
   if (model && modelOpt?.flag) parts.push(modelOpt.flag, quoteArg(model));
   const args = serializeArgs(k, values);
   if (args) parts.push(args);
-  // codex reads the prompt from stdin via a trailing "-"
+  // codex reads the prompt from stdin via a trailing "-"; cursor-agent has no
+  // stdin reader and takes it as the last argument instead.
   if (k === "codex") parts.push("-");
+  else if (k === "cursor") parts.push("<prompt>");
   return parts.join(" ");
 }
 
@@ -985,16 +1122,14 @@ export function agentChips(kind: string, model: string, cliArgs: string): CapChi
 
 /** Stable label stored with each run so later agent edits do not rewrite history. */
 export function configuredEffort(kind: string, cliArgs: string): string {
-  const values = parseArgs(kind, cliArgs);
-  if (norm(kind) === "ritz") return values.deep === true ? "deep" : "standard";
-  return asText(values.effort).trim();
+  return asText(parseArgs(kind, cliArgs).effort).trim();
 }
 
 /**
  * Flags for `codex exec resume <id> --json`, which rejects exec-only flags:
  * --sandbox becomes `-c sandbox_mode="…"`, and the other exec-only options
  * (--add-dir, --profile) are dropped rather than crashing the resume.
- * Claude and Ritz resume with their configuration unchanged.
+ * Claude and Cursor resume with their configuration unchanged.
  */
 export function resumeArgs(kind: string, cliArgs: string): string {
   const k = norm(kind);

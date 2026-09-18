@@ -2,7 +2,7 @@
  * What an agent can do in Spaces.
  *
  * Spaces's premise is that agents are members, not tools: they run inside their
- * own harness — `claude`, `codex`, Ritz — but they are graphed and orchestrated
+ * own harness — `claude`, `codex`, `cursor-agent` — but they are graphed and orchestrated
  * as first-class members of the workspace. Membership means acting, not just
  * being described, and until this module existed an agent could read `.hq/`
  * and talk in a channel but could not create a task, draw a link or take
@@ -14,7 +14,7 @@
  *   MCP        a stdio server the harness discovers through .mcp.json
  *   file drop  a JSONL line appended to .hq/actions.jsonl
  *
- * Two transports, one registry, deliberately: Ritz has its own tool system and
+ * Two transports, one registry, deliberately: an external agent has no MCP and
  * no MCP, and a second definition of "what an agent may do" would drift from
  * the first within a week. The transports differ only in how a call arrives.
  *
@@ -24,6 +24,11 @@
  * existing version-history path.
  */
 import { useStore } from "./store";
+// `typeInto`, not `type`: a named import called `type` reads as TypeScript's
+// type-only modifier, which is a coin toss nobody should have to call.
+import { click, controls, goTo, readPage, typeInto } from "./browsertools";
+import { readApp, screenAllowed, typeIntoApp } from "./screen";
+import { parseArgs } from "./capabilities";
 import { getDb } from "./db";
 import { describeEntity, searchEntities } from "./entities";
 import { LINK_KINDS } from "./links";
@@ -443,6 +448,22 @@ async function resolvedMediaList(
 }
 
 const REF_HELP = 'either "type:id" as printed in .hq/, or an exact title';
+
+/**
+ * Whether this agent has been let out of its working directory.
+ *
+ * Off unless somebody turned it on for that agent, and checked here rather
+ * than in the UI, because the UI is not what an agent talks to. A tool that
+ * exists but refuses is also better than a tool that is absent: the refusal
+ * says what to ask the person for.
+ */
+function reachRefusal(ctx: OpContext): string {
+  const agent = useStore.getState().agents.find((a) => a.id === ctx.agentId);
+  if (!agent) return "Spaces cannot tell which agent is calling, so it will not act outside the project.";
+  const values = parseArgs(agent.kind, agent.cli_args ?? "");
+  if (values.reach === true) return "";
+  return `${agent.name} is not allowed to use the browser or the screen. Turn on "Can use the browser and the screen" in this agent's settings.`;
+}
 
 /* ── the registry ─────────────────────────────────────────────── */
 
@@ -2541,6 +2562,194 @@ export const OPERATIONS: Operation[] = [
       };
     },
   },
+
+  /* ── the browser, as a shared instrument ────────────────────── */
+  //
+  // These drive the workspace's own browser — the one on screen — rather than
+  // a headless one the agent brings itself. That is the point: the person
+  // watches it happen, the page is signed in as they are, and they can take
+  // over by clicking in it. A headless browser is invisible, signed into
+  // nothing, and produces claims nobody can check.
+  //
+  // Everything is addressed the way a person would say it: link text, button
+  // labels, field names. An agent that has to invent CSS selectors for a page
+  // it cannot see will invent wrong ones, and the error will not explain why.
+
+  {
+    name: "spaces_browse",
+    describe:
+      "Open an address in this project's browser — the one visible in the workspace — and read the page back. Use this for anything on the web: documentation, a deployed app, a pull request. The person can see the page and can take the browser over at any time.",
+    effect: "auto",
+    params: [
+      { name: "url", type: "string", required: true, describe: "An address, or a search phrase." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser to open." };
+      try {
+        const page = await goTo(ctx.projectId, str(args, "url"));
+        return {
+          ok: true,
+          message: `${page.title || "(untitled)"} — ${page.url}\n\n${page.text}${
+            page.truncated ? "\n\n… page continues; call spaces_browser_read for more." : ""
+          }`,
+        };
+      } catch (e) {
+        return { ok: false, message: `Could not open that: ${String(e)}` };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_read",
+    describe:
+      "Read what this project's browser is showing right now, without navigating. Use after clicking or typing to see what changed.",
+    effect: "auto",
+    readOnly: true,
+    params: [],
+    async run(_args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        const page = await readPage(ctx.projectId);
+        return {
+          ok: true,
+          message: `${page.title || "(untitled)"} — ${page.url}\n\n${page.text}`,
+        };
+      } catch (e) {
+        return { ok: false, message: `Could not read the page: ${String(e)}` };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_controls",
+    describe:
+      "List what can be clicked or filled in on the current page, by the text a person would read. Call this when spaces_browser_click cannot find something.",
+    effect: "auto",
+    readOnly: true,
+    params: [],
+    async run(_args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        const list = await controls(ctx.projectId);
+        if (!list.length) return { ok: true, message: "Nothing on this page is clickable or fillable." };
+        return { ok: true, message: list.map((c) => `- [${c.kind}] ${c.label}`).join("\n") };
+      } catch (e) {
+        return { ok: false, message: `Could not inspect the page: ${String(e)}` };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_click",
+    describe:
+      "Click a link or button in this project's browser, named by its visible text. An exact match wins over a partial one.",
+    effect: "auto",
+    params: [
+      { name: "text", type: "string", required: true, describe: "The words on the link or button." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        return { ok: true, message: await click(ctx.projectId, str(args, "text")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_type",
+    describe:
+      "Type into a field in this project's browser, named by its label or placeholder. Spaces refuses to type into a password field — sign-in is for the person, not the agent.",
+    effect: "auto",
+    params: [
+      { name: "field", type: "string", required: true, describe: "The field's label, placeholder or name." },
+      { name: "text", type: "string", required: true, describe: "What to put in it." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        return { ok: true, message: await typeInto(ctx.projectId, str(args, "field"), str(args, "text")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
+
+  /* ── the rest of the Mac ─────────────────────────────────────── */
+  //
+  // The same two abilities Spaces already uses to hand work to an app with no
+  // API: look at a window, type into one. Both need the agent's reach switched
+  // on, and typing needs the macOS Accessibility grant Spaces itself was
+  // given — so the failure, when there is one, names the thing to go and fix.
+
+  {
+    name: "spaces_screen_read",
+    describe:
+      "Read what another application on this Mac is showing, as text. Use it to check the state of an app you cannot query any other way — a simulator, a desktop client, a tool with no API.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      { name: "app", type: "string", required: true, describe: "The application's name, e.g. \"Simulator\" or \"Muse\"." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      try {
+        return { ok: true, message: await readApp(str(args, "app")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
+  {
+    name: "spaces_screen_type",
+    describe:
+      "Type into another application on this Mac: Spaces brings it forward, clicks its message box and pastes. Needs macOS Accessibility permission for Spaces. Spaces will not type a password.",
+    effect: "auto",
+    params: [
+      { name: "app", type: "string", required: true, describe: "The application's name." },
+      { name: "text", type: "string", required: true, describe: "What to type." },
+      { name: "send", type: "boolean", describe: "Press return afterwards. Defaults to false." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!(await screenAllowed())) {
+        return {
+          ok: false,
+          message:
+            "macOS has not granted Spaces Accessibility permission, so anything typed would be dropped. Ask the person to turn Spaces on in System Settings → Privacy & Security → Accessibility.",
+        };
+      }
+      try {
+        const result = await typeIntoApp(str(args, "app"), str(args, "text"), args.send === true);
+        if (result.verified) return { ok: true, message: "Typed, and read back from the box." };
+        if (result.delivered) {
+          return {
+            ok: true,
+            message: `Typed, but ${str(args, "app")} does not publish its message box so Spaces could not confirm it landed. ${result.problem}`.trim(),
+          };
+        }
+        return { ok: false, message: result.problem || "Nothing happened, and macOS gave no reason." };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
 ];
 
 export const OP_BY_NAME: Record<string, Operation> = Object.fromEntries(

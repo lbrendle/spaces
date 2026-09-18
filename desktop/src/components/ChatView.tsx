@@ -25,6 +25,7 @@ import { autoLinkMessage } from "../links";
 import { SPACES_COMMANDS, availableCommands, parseSlash, runCommand } from "../commands";
 import type { SlashCommand } from "../commands";
 import { timeAgo } from "../github";
+import { harnessBin, harnessFor } from "../capabilities";
 import { toast } from "../toast";
 import { Avatar, Modal, Spinner, mdToHtml } from "./ui";
 import {
@@ -317,29 +318,50 @@ function deviceTools(raw: string): Record<string, boolean> {
 function availabilityOf(agent: Agent): Availability {
   const s = useStore.getState();
   const handle = `@${slug(agent.name)}`;
-  // Ritz answers on a port rather than from PATH, and asking costs a request
-  // per keystroke. Agents & Teams is where that check belongs.
-  if (agent.kind === "ritz") return AVAILABLE;
+  const meta = harnessFor(agent.kind);
+
+  // Spaces never launches this one, so no amount of PATH or host checking is
+  // relevant — but the composer has to say so, because the difference between
+  // "will reply in a minute" and "will get a brief and reply when someone opens
+  // its app" is the whole point of addressing it.
+  if (meta.wire === "external") {
+    // Two genuinely different things happen depending on one setting, and the
+    // composer is where somebody decides whether to press send — so it has to
+    // say which one they are about to get.
+    const autosend = /(?:^|\s)autosend=true(?:\s|$)/.test(agent.cli_args || "");
+    return {
+      blocked: true,
+      label: autosend ? "auto-send" : "hand-off",
+      note: autosend
+        ? `${handle} runs in ${agent.model || "its own app"}, which Spaces doesn't launch. Addressing it types the ask into that app and sends it — the app comes forward for a second to do it.`
+        : `${handle} runs in ${agent.model || "its own app"}, which Spaces doesn't launch. Addressing it leaves a brief in the repository rather than starting a turn.`,
+    };
+  }
+  // An HTTP engine answers on a port rather than from PATH, and asking costs a
+  // request per keystroke. Agents & Teams is where that check belongs.
+  if (meta.wire !== "cli") return AVAILABLE;
+
+  const bin = harnessBin(agent.kind, agent.model);
   const host = s.devices.find((d) => d.id === (agent as HostedAgent).host_device_id);
   const here = currentDeviceId();
 
   if (!host || host.id === here) {
     // `undefined` means PATH detection hasn't answered yet, which is not the
     // same as a missing CLI — an unknown never becomes a warning.
-    return s.tools[agent.kind] === false
+    return s.tools[bin] === false
       ? {
           blocked: true,
           label: "not on this PATH",
-          note: `${agent.kind} isn't on this machine's PATH, so ${handle} can't answer from here. Anyone who has it still can.`,
+          note: `${bin} isn't on this machine's PATH, so ${handle} can't answer from here. Anyone who has it still can.`,
         }
       : AVAILABLE;
   }
 
-  if (deviceTools(host.tools)[agent.kind] === false) {
+  if (deviceTools(host.tools)[bin] === false) {
     return {
       blocked: true,
       label: "not on its host",
-      note: `${host.name} doesn't have ${agent.kind} on its PATH, so ${handle} can't run there.`,
+      note: `${host.name} doesn't have ${bin} on its PATH, so ${handle} can't run there.`,
     };
   }
   // Without a local device row every stamp looks stale, including your own
@@ -397,6 +419,11 @@ function saveDraft(key: string, text: string) {
   }, 400);
 }
 
+/** Messages rendered at once, and revealed per click of "show earlier". */
+const CHAT_PAGE = 150;
+/** Characters past which a message is folded until somebody asks for it. */
+const LONG_MESSAGE = 1600;
+
 export function ChatView({ channelId }: { channelId: string }) {
   const store = useStore();
   const channel = store.channels.find((c) => c.id === channelId);
@@ -424,9 +451,33 @@ export function ChatView({ channelId }: { channelId: string }) {
   const [filesByRun, setFilesByRun] = useState<Record<string, string>>({});
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
   const roots = useMemo(() => msgs.filter((m) => !m.parent_id), [msgs]);
+
+  /*
+   * How much of the channel is on screen.
+   *
+   * Every message used to be rendered, every one of them parsing markdown.
+   * That was survivable while a channel was a conversation and stopped being
+   * survivable the moment one could hold imported history: a channel with
+   * 1,275 messages in it made the whole app stutter, including typing in
+   * other views, because a single React tree that large re-renders on
+   * everything.
+   *
+   * A window over the end, with a way back through it. Not virtualisation:
+   * this keeps ordinary scrolling, selection and find-in-page working, and a
+   * hundred and fifty messages is already more than anyone scrolls through
+   * without reaching for search.
+   */
+  const [shown, setShown] = useState(CHAT_PAGE);
+  useEffect(() => setShown(CHAT_PAGE), [channelId]);
+  const visibleRoots = useMemo(
+    () => (roots.length > shown ? roots.slice(-shown) : roots),
+    [roots, shown]
+  );
+  const hidden = roots.length - visibleRoots.length;
   const repliesByRoot = useMemo(() => {
     const map: Record<string, Message[]> = {};
     for (const m of msgs) {
@@ -538,6 +589,34 @@ export function ChatView({ channelId }: { channelId: string }) {
   useEffect(() => {
     if (atBottomRef.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [channelId, roots.length, lastRoot?.content?.length]);
+
+  /*
+   * Keep following while the message that just arrived is still growing.
+   *
+   * The effect above fires when a reply appears, which is before it has been
+   * laid out: markdown renders, a long answer expands, an image loads, and the
+   * bottom moves further down than where the scroll was heading. The reply
+   * then sits below the fold and the channel looks like nothing happened —
+   * which is exactly how it looked, because until replies stopped being filed
+   * as threads the list never grew and this never showed.
+   *
+   * A ResizeObserver on the scroller re-pins it as the content settles, and
+   * only while the reader is already at the bottom, so scrolling up to read
+   * history is still never interrupted.
+   */
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!atBottomRef.current) return;
+      // Jump rather than animate: this runs repeatedly as content settles, and
+      // a smooth scroll restarted every frame never arrives.
+      el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    for (const child of Array.from(el.children)) observer.observe(child);
+    return () => observer.disconnect();
+  }, [channelId, roots.length]);
 
   if (!channel) return <div className="main-pane center-note">Channel not found.</div>;
   /* eslint-disable-next-line @typescript-eslint/no-use-before-define */
@@ -667,6 +746,7 @@ export function ChatView({ channelId }: { channelId: string }) {
         <div className="chat-main">
           <div
             className="messages"
+            ref={scrollerRef}
             onScroll={(e) => {
               const el = e.currentTarget;
               atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -695,8 +775,16 @@ export function ChatView({ channelId }: { channelId: string }) {
                 )}
               </div>
             )}
-            {roots.map((m, i) => {
-              const prev = roots[i - 1];
+            {hidden > 0 && (
+              <button
+                className="btn tiny chat-earlier"
+                onClick={() => setShown((n) => n + CHAT_PAGE)}
+              >
+                Show {Math.min(CHAT_PAGE, hidden)} earlier of {hidden}
+              </button>
+            )}
+            {visibleRoots.map((m, i) => {
+              const prev = visibleRoots[i - 1];
               const newDay = !prev || !sameDay(prev.created_at, m.created_at);
               return (
                 <Fragment key={m.id}>
@@ -808,6 +896,16 @@ function MessageRow({
     prev.author_id === m.author_id &&
     m.created_at - prev.created_at < 5 * 60_000;
   const inspectable = m.author_type === "agent" && !!m.run_id && !!onInspect;
+  /*
+   * Long messages are folded until asked for.
+   *
+   * An agent's turn can run to thousands of words, and a channel of them is
+   * a wall nobody scrolls. Measured on the source rather than the rendered
+   * height: it needs no layout pass, it is stable across re-renders, and it
+   * never flickers between states while the markdown is being laid out.
+   */
+  const long = m.content.length > LONG_MESSAGE;
+  const [expanded, setExpanded] = useState(false);
 
   // A run held in the store is authoritative — it is patched as the turn ends.
   // `null` means "not loaded here", which is when the SQLite read stands in.
@@ -1028,7 +1126,16 @@ function MessageRow({
         {m.status === "running" && !m.content && (
           <div className="running-note"><Spinner /> {m.meta || "thinking…"}</div>
         )}
-        {m.content && <MessageBody body={body} />}
+        {m.content && (
+          <div className={long && !expanded ? "msg-clamp" : undefined}>
+            <MessageBody body={body} />
+          </div>
+        )}
+        {long && (
+          <button className="msg-more" onClick={() => setExpanded((open) => !open)}>
+            {expanded ? "Show less" : `Show all ${Math.round(m.content.length / 100) / 10}k characters`}
+          </button>
+        )}
         {m.status === "running" && m.content && (
           <div className="running-note"><Spinner /> {m.meta || "working…"}</div>
         )}
@@ -1371,10 +1478,10 @@ function Composer({
   const hintTimer = useRef<number | undefined>(undefined);
   const listId = useId();
   const agents = channelAgents(store, channelId);
-  const attachmentCapable =
-    agents.length === 1 &&
-    agents[0].kind === "ritz" &&
-    /(?:^|\s)protocol=spaces-compatible-http(?:\s|$)/.test(agents[0].cli_args || "");
+  // Attachments crossed the wire as base64 in an HTTP engine's request body.
+  // Every supported harness reads the repository directly now, so media is
+  // shared through Spaces and referenced by path rather than inlined here.
+  const attachmentCapable = false;
   const composerChannelName = store.channels.find((c) => c.id === channelId)?.name ?? "";
 
   // Adjusting state during render is React's own answer to "the props moved":

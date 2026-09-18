@@ -4495,8 +4495,8 @@ function DialogFields({
           <select name="backend" defaultValue="codex">
             <option value="claude">Claude Code</option>
             <option value="codex">Codex</option>
-            <option value="ritz">Local HTTP</option>
-            <option value="custom">Custom CLI</option>
+            <option value="cursor">Cursor Agent</option>
+            <option value="external">External app</option>
           </select>
         </Field>
         <Field label="Model" hint="Blank uses the harness default.">

@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { colorFor } from "../types";
 import { highlight } from "../syntax";
 
@@ -43,6 +44,19 @@ export function mdToHtml(src: string): string {
   // Left boundary keeps emails (a@b.c), npm scopes and /@user URLs intact.
   text = text.replace(/(?<![\w@.\/-])@([a-z0-9-]+)/gi, `<span class="mention">@$1</span>`);
   text = text.replace(/\[([^\]]+)\]\((https?:[^\s)]+)\)/g, `<a href="$2" target="_blank" rel="noreferrer">$1</a>`);
+  /*
+   * A link to something that is not a URL is still a link to a reader.
+   *
+   * Only http(s) is turned into an anchor, on purpose — a relative path is not
+   * something this app can open. But leaving the rest as raw `[label](path)`
+   * put markdown syntax on screen, which is worse than either: agents write
+   * repository paths that way constantly. The label is what was meant; the
+   * path stays available on hover.
+   */
+  text = text.replace(
+    /(^|[^!])\[([^\]\n]+)\]\(([^\s)]+)\)/g,
+    (_m, before, label, target) => `${before}<span class="md-path" title="${target}">${label}</span>`
+  );
   text = text.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, `$1<a href="$2" target="_blank" rel="noreferrer">$2</a>`);
 
   const lines = text.split("\n");
@@ -91,7 +105,18 @@ export function Modal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
-  return (
+  /*
+   * Portalled to the body, like every other overlay in the app.
+   *
+   * Modals are opened from wherever the control lives, and most of them are
+   * opened from the rail — which is `overflow: hidden` and sits in a stacking
+   * context of its own. A dialog rendered inline there is at the mercy of its
+   * parent: the New project modal came up with the dashboard's sticky section
+   * heading painted across its title bar. Nothing about a modal should depend
+   * on which button opened it, and `Toasts`, `SidePanel`, `AccountMenu` and
+   * `EntityChip` already escape the same way.
+   */
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={"modal" + (wide ? " modal-wide" : "")}>
         <div className="modal-head">
@@ -100,7 +125,8 @@ export function Modal({
         </div>
         <div className="modal-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -110,7 +136,7 @@ export function Avatar({ name, id, kind }: { name: string; id: string; kind?: st
   // be able to take down the entire project workspace.
   const letter = (name?.[0] ?? "?").toUpperCase();
   const badge =
-    kind === "claude" ? "✳" : kind === "codex" ? "◈" : kind === "ritz" ? "◉" : kind === "custom" ? "⌘" : null;
+    kind === "claude" ? "✳" : kind === "codex" ? "◈" : kind === "cursor" ? "➤" : kind === "ritz" ? "◉" : kind === "external" ? "▣" : null;
   return (
     <div className="avatar" style={{ background: colorFor(id) }}>
       {letter}

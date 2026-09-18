@@ -61,18 +61,32 @@ durable router/queue ── one lane per (channel, agent)
     └─ current project/team/channel instructions
              │
              ▼
- Claude · Codex · Local HTTP · Custom CLI
+ Claude · Codex · Cursor · External app (Muse, Zed, …)
              │
       MCP or local CLI fallback
              ▼
       one operation registry
 ```
 
-Spaces keeps its native Claude Code and Codex CLI adapters so members can use
-the account already authenticated on their Mac. The harness contract above is
-runtime-neutral: it gives every adapter the same routing identity and tool
-surface without requiring a provider API key or moving the session into the
-portal.
+The harness set is a registry: each entry declares its transport, how it is
+launched, how its stream is parsed, whether it can resume, and how the Spaces
+MCP surface reaches it, and nothing else in the app branches on which harness
+an agent runs. The set is curated rather than open — every entry is verified
+against the harness itself, and there is no generic "run this executable"
+escape hatch, so a kind this build does not recognise becomes an agent Spaces
+will not launch rather than an arbitrary command. Spaces keeps native adapters
+for the CLIs members already have authenticated on their Mac, so no provider
+API key is involved and no session moves into the portal.
+
+Two transports, not one:
+
+- **cli** — Spaces spawns the process. The prompt goes on stdin, or as the last
+  argument for harnesses with no stdin reader.
+- **external** — an agent Spaces *cannot* launch, because it is a GUI app:
+  Muse, the Cursor app, Zed, or a terminal somebody drives by hand. These are
+  full teammates anyway, because the shared git repository was always the real
+  interface. Spaces reads their work out of git, hands them briefs through a
+  file, and closes the loop by diffing against the tree they were handed.
 
 The orchestrator persists inbound events in SQLite when a target is busy,
 coalesces queued events in order, and maintains one resumable runtime session

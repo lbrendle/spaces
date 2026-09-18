@@ -21,7 +21,22 @@ export interface Channel {
   created_at: number;
 }
 
-export type AgentKind = "claude" | "codex" | "ritz" | "custom";
+/**
+ * The harness an agent runs on.
+ *
+ * Spaces supports a curated set, each one verified against the harness itself,
+ * and the set lives in the registry (capabilities.ts) rather than here. The
+ * type stays open — `(string & {})` — only so a row written by a newer build or
+ * a paired device still loads; an id this build does not know is treated as an
+ * agent Spaces cannot launch, never as a command to run.
+ */
+export type BuiltinAgentKind =
+  | "claude"
+  | "codex"
+  | "cursor"
+  | "external";
+
+export type AgentKind = BuiltinAgentKind | (string & {});
 
 export interface Agent {
   id: string;
@@ -434,6 +449,7 @@ export type View =
   | { type: "memory" }
   | { type: "agents" }
   | { type: "workspaces" }
+  | { type: "import" }
   | { type: "settings" }
   | { type: "git" }
   | { type: "graph" }

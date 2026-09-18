@@ -1030,3 +1030,41 @@
     transition: none;
   }
 }
+
+/* The way back through a long channel. Centred and quiet: it is a control for
+   the rare case, not a feature of every conversation. */
+.chat-earlier {
+  align-self: center;
+  margin: var(--space-3) 0;
+}
+
+/* A long message, folded. The fade says there is more without needing a
+   measured height, and the control sits under it rather than over the text. */
+.msg-clamp {
+  max-height: 16em;
+  overflow: hidden;
+  position: relative;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+
+.msg-more {
+  margin-top: var(--space-1);
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.msg-more:hover {
+  color: var(--text-dim);
+  text-decoration: underline;
+}
+
+/* A markdown link to something that is not a URL: the label, not the syntax. */
+.md-path {
+  color: var(--text-dim);
+  border-bottom: 1px dotted var(--border);
+}

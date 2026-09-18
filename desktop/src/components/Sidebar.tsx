@@ -15,6 +15,7 @@ import {
   IconGraph,
   IconKnowledge,
   IconPerson,
+  IconDownload,
   IconWorkspace,
 } from "./icons";
 import { Modal, Field, Spinner } from "./ui";
@@ -29,7 +30,7 @@ import { GitHubRepoPicker } from "./GitHubRepoPicker";
 type NavType =
   | "dashboard" | "tasks" | "documents" | "mail" | "calendar" | "content"
   | "memory" | "agents" | "workspaces" | "settings" | "git" | "graph"
-  | "knowledge" | "people";
+  | "knowledge" | "people" | "import";
 
 /**
  * The rail's information architecture.
@@ -69,6 +70,7 @@ const NAV_GROUPS: { id: string; label: string; items: [string, ReactNode, NavTyp
     items: [
       ["Workspaces", <IconWorkspace />, "workspaces"],
       ["Git activity", <IconGitHub />, "git"],
+      ["Import history", <IconDownload />, "import"],
     ],
   },
   {
@@ -584,6 +586,23 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
 
   const dir = localPath.trim();
 
+  /*
+   * A folder already answers most of this form.
+   *
+   * Picking one used to fill in nothing: its name still had to be typed, and
+   * its `origin` remote was shown as a chip and then thrown away — so a
+   * project made from an existing checkout came out unnamed and unlinked,
+   * while the app knew both. Only empty fields are filled, so nothing anyone
+   * typed is overwritten.
+   */
+  useEffect(() => {
+    if (probe.kind !== "repo") return;
+    const folder = (probe.root || dir).replace(/\/+$/, "").split("/").filter(Boolean).pop();
+    if (folder) setName((current) => current.trim() || folder);
+    const origin = probe.origin ? repoFromUrl(probe.origin) : "";
+    if (origin) setRepo((current) => current.trim() || origin);
+  }, [dir, probe]);
+
   // Inspect the folder as it's typed. Both git options reset with the path:
   // they're answers about *that* folder, and pushing to GitHub must always be
   // a fresh, deliberate choice.
@@ -748,10 +767,10 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
       <Field label="Description">
         <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this project?" />
       </Field>
-      <Field label="GitHub repo (optional)">
-        <GitHubRepoPicker value={repo} onChange={setRepo} />
-      </Field>
-      <Field label="Local checkout (agents work here)">
+      {/* The folder comes first: it is what agents work in, and picking one
+          fills in the name and the repo below. Starting from a GitHub repo is
+          the other way round, and the rarer one. */}
+      <Field label="Folder (agents work here)">
         <div className="row">
           <input value={localPath} onChange={(e) => setLocalPath(e.target.value)} placeholder={config().samplePath} />
           <button
@@ -762,6 +781,9 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
             }}
           >Browse…</button>
         </div>
+      </Field>
+      <Field label="GitHub repo (optional — filled in from the folder's remote)">
+        <GitHubRepoPicker value={repo} onChange={setRepo} />
       </Field>
 
       {probe.kind === "checking" && (

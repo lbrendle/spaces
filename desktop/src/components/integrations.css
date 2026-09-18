@@ -1,0 +1,144 @@
+/* ── Add an agent ────────────────────────────────────────────── */
+/*
+ * A card per supported agent. Colour says one thing only — whether this Mac
+ * can run it — through the dot; the card itself stays neutral so six of them
+ * in a row do not read as an alert. Every tint is a token.
+ */
+
+.ig {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ig-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.ig-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+}
+.ig-sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  max-width: var(--measure);
+}
+
+.ig-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: var(--space-3);
+}
+
+.ig-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.ig-card:hover { border-color: var(--border); }
+/* A card you cannot act on recedes rather than shouting. */
+.ig-card.ig-missing { opacity: 0.72; }
+
+.ig-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ig-mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.ig-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ig-name {
+  font-size: var(--fs);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ig-kind {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ig-dot {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid var(--text-faint);
+}
+.ig-dot-ready { background: var(--green); border-color: var(--green); }
+.ig-dot-signed-out { background: var(--yellow); border-color: var(--yellow); }
+.ig-dot-missing { background: var(--red); border-color: var(--red); }
+.ig-dot-error { background: var(--red); border-color: var(--red); }
+/* unknown and checking stay hollow — a real answer, drawn as one */
+
+.ig-blurb {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.ig-state {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-faint);
+  /* Two lines of room, so a card's height does not jump when a probe lands. */
+  min-height: calc(var(--fs-xs) * 1.5 * 2);
+}
+
+.ig-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+.ig-have {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+.ig-hint {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  background: var(--surface-2);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}

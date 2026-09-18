@@ -28,8 +28,7 @@ import { getDb, uid } from "../db";
 import { KIND_BY_TYPE } from "../entities";
 import { LINK_KIND_BY_ID, workloadOf } from "../links";
 import { getQueueSnapshot, subscribeQueue } from "../orchestrator";
-import { RITZ_BASE } from "../capabilities";
-import { config } from "../config";
+import { HARNESSES, harnessBin, harnessFor } from "../capabilities";
 import { errorText, toast } from "../toast";
 import { slug } from "../types";
 import type { Agent, AgentKind, EntityRef, EntityType, MemoryKind, TaskStatus } from "../types";
@@ -324,13 +323,17 @@ interface Availability {
  * is a bad way to learn it.
  */
 function runtimeAvailability(kind: AgentKind, tools: Record<string, boolean>): Availability {
-  if (kind === "ritz") {
+  const meta = harnessFor(kind);
+  if (meta.wire === "external") {
     return {
       tone: "unknown",
-      label: "over HTTP",
-      hint: `${config().localAiName} is a service, not a binary — ${config().brand} talks to it at ${RITZ_BASE}. Settings shows whether it is answering.`,
+      label: "hand-off",
+      hint: `Spaces doesn't launch this one — it works in its own app against the same repository. Addressing it leaves a brief rather than starting a turn, so no machine's PATH matters.`,
     };
   }
+  // PATH answers are keyed by executable: the Cursor harness is `cursor` and
+  // its binary is `cursor-agent`.
+  const bin = harnessBin(kind);
   if (Object.keys(tools).length === 0) {
     return {
       tone: "unknown",
@@ -338,25 +341,19 @@ function runtimeAvailability(kind: AgentKind, tools: Record<string, boolean>): A
       hint: "Spaces is still looking for the CLIs on this machine.",
     };
   }
-  if (tools[kind]) {
+  if (tools[bin]) {
     return {
       tone: "ready",
       label: "runs here",
-      hint: `${kind} is on this machine's PATH, so you can run this agent from your device.`,
+      hint: `${bin} is on this machine's PATH, so you can run this agent from your device.`,
     };
   }
   return {
     tone: "elsewhere",
     label: "not on this machine",
-    hint: `${kind} is not on this machine's PATH. The agent still works — it runs wherever a teammate hosts it — but sending it work from here will not start anything.`,
+    hint: `${bin || meta.label} is not on this machine's PATH. The agent still works — it runs wherever a teammate hosts it — but sending it work from here will not start anything.`,
   };
 }
-
-const TOOLS: { id: string; label: string; note: string }[] = [
-  { id: "claude", label: "claude", note: "Claude Code — agents of this kind can run from your device." },
-  { id: "codex", label: "codex", note: "Codex — agents of this kind can run from your device." },
-  { id: "gh", label: "gh", note: "The GitHub CLI, used for the pull request and repo sections." },
-];
 
 /**
  * Which runtimes are on this machine.
@@ -365,12 +362,32 @@ const TOOLS: { id: string; label: string; note: string }[] = [
  * screen 34px of permanent chrome to answer a question nobody had yet. It lives
  * here because the only thing on the page it explains is the availability
  * column immediately below it.
+ *
+ * Every harness Spaces knows is now nine chips, of which a typical machine has
+ * two — so the absent ones are left out. A row that is mostly "no" answers a
+ * question with noise; the availability column below says what is missing for
+ * the agents that actually exist here.
  */
 function Runtimes({ tools }: { tools: Record<string, boolean> }) {
+  const found: { id: string; label: string; note: string }[] = HARNESSES.filter(
+    (h) => h.wire === "cli" && harnessBin(h.kind)
+  ).map((h) => ({
+    id: harnessBin(h.kind),
+    label: harnessBin(h.kind),
+    note: `${h.label} — agents of this kind can run from your device.`,
+  }));
+  found.push({
+    id: "gh",
+    label: "gh",
+    note: "The GitHub CLI, used for the pull request and repo sections.",
+  });
+
+  const shown = found.filter((t) => tools[t.id] || t.id === "gh" || t.id === "claude" || t.id === "codex");
+
   return (
     <p className="db-runtimes">
       On this machine
-      {TOOLS.map((t) => {
+      {shown.map((t) => {
         const on = tools[t.id];
         return (
           <span

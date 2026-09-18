@@ -47,7 +47,6 @@ import { errorText, toast } from "../toast";
 import { colorFor } from "../types";
 import type { AgentKind, EntityRef, Member } from "../types";
 import { harnessFor } from "../capabilities";
-import { config } from "../config";
 import { Modal } from "./ui";
 import { IconImage } from "./icons";
 import "./face.css";
@@ -100,16 +99,19 @@ function metricsFor(size: FaceSize): Metrics {
  * ("Claude Code", "Ritz (local)"), which is right in a settings form and wrong
  * on a button that has to say "Use the Codex mark".
  */
-export const HARNESS_MARK_LABEL: Record<AgentKind, string> = {
+export const HARNESS_MARK_LABEL: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
-  ritz: config().localAiName,
-  custom: "Custom CLI",
+  cursor: "Cursor",
+  external: "External app",
 };
 
-/** Unknown kinds run on Claude, which is also what capabilities.ts assumes. */
+/**
+ * A kind with a mark of its own. Anything else takes the external mark, which
+ * is what an unrecognised harness becomes everywhere else in the app.
+ */
 export function harnessKind(kind: string): AgentKind {
-  return kind === "codex" || kind === "ritz" || kind === "custom" ? kind : "claude";
+  return kind in HARNESS_MARK_LABEL ? kind : "external";
 }
 
 /**
@@ -169,12 +171,17 @@ export function HarnessMark({
           <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
         </>
       )}
-      {k === "custom" && (
-        // A terminal prompt: generic by design, because the executable is the
-        // user's rather than Spaces's.
+      {k === "cursor" && (
+        // A solid pointer. The only asymmetric mark in the set, which is what
+        // makes it legible next to the symmetric ones at 16px.
+        <path d="M6.6 3.8L18.6 12.6L12.4 13.4L9.6 19.6Z" fill="currentColor" stroke="none" />
+      )}
+      {k === "external" && (
+        // A window with something live inside it — an agent in its own app,
+        // which is exactly what this kind means.
         <>
-          <path d="M5 7.5L9.5 12L5 16.5" strokeWidth={2.5} />
-          <path d="M11.5 17H19" strokeWidth={2.5} />
+          <rect x="3.4" y="4.8" width="17.2" height="14.4" rx="3.2" strokeWidth={2.4} />
+          <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
         </>
       )}
     </svg>

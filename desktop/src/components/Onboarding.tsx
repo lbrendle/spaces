@@ -57,7 +57,7 @@ import { useStore } from "../store";
 import { config, normalizeBaseUrl, setConfig } from "../config";
 import { colorFor, slug } from "../types";
 import type { Agent, Device, Member } from "../types";
-import { harnessFor, defaultsFor, serializeArgs } from "../capabilities";
+import { harnessBin, harnessFor, defaultsFor, serializeArgs } from "../capabilities";
 import type { HarnessKind } from "../capabilities";
 import { agentIdentity } from "../entities";
 import { timeAgo } from "../github";
@@ -202,6 +202,26 @@ function writeState(next: SavedState): void {
  */
 export function restartOnboarding(): void {
   writeState({ ...BLANK });
+}
+
+/**
+ * Every app with its state, in one place, so the checklist and the teammate
+ * form cannot disagree about what this machine has.
+ *
+ * Every supported harness is a binary on somebody's PATH or an app Spaces
+ * never launches, so `check_tools` is the whole answer — there is no second
+ * detection mechanism to reconcile with any more.
+ */
+function presenceOf(kind: HarnessKind, tools: Record<string, boolean>): Presence {
+  const bin = harnessBin(kind);
+  if (!bin) return "here";
+  return tools[bin] ? "here" : "absent";
+}
+
+/** The state of a row, in the fewest words that are still true. */
+function presenceWord(state: Presence): string {
+  if (state === "checking") return "checking…";
+  return state === "here" ? "already here" : "not here yet";
 }
 
 /* ── who needs this ───────────────────────────────────────────── */
@@ -471,13 +491,6 @@ const APPS: readonly AppSpec[] = [
     signin: "It signs in with your own ChatGPT account the first time it runs.",
     absent: "Install it with the line below, then run it once to sign in.",
   },
-  {
-    kind: "ritz",
-    good: "Runs on this machine and nowhere else — nothing leaves it, and it needs no account.",
-    signin: "There is no account and no sign-in: it is already yours.",
-    absent:
-      "Start the engine, then check again. If it listens somewhere else, put that address in Settings and this will find it.",
-  },
 ];
 
 /* ── is each of them actually here ────────────────────────────── */
@@ -490,71 +503,6 @@ const APPS: readonly AppSpec[] = [
  * spinner is honest where a premature "not here" is not.
  */
 type Presence = "here" | "checking" | "absent";
-
-/**
- * Whether the local engine is answering.
- *
- * Ritz is reached over HTTP, so PATH detection is structurally blind to it:
- * `check_tools` looks for `claude`, `codex` and `gh` and will never report a
- * fourth, and calling Ritz missing on that evidence would be a plain untruth.
- * The only question that can be answered is whether it replies *now*, so ask
- * it — GET /models is the cheapest thing it answers.
- *
- * The address is read from config() per probe rather than captured once,
- * because it is a runtime setting somebody can change in Settings while this
- * screen is open.
- */
-function useRitzProbe(): { state: Presence; url: string; recheck: () => void } {
-  const [state, setState] = useState<Presence>("checking");
-  const [nonce, setNonce] = useState(0);
-  const url = config().localAiUrl;
-
-  useEffect(() => {
-    let live = true;
-    const ac = new AbortController();
-    // A dead port refuses immediately; this timeout is for the other case —
-    // something else holding it open and never answering.
-    const timer = window.setTimeout(() => ac.abort(), 2500);
-    setState("checking");
-    fetch(`${url}/models`, { signal: ac.signal }).then(
-      (res) => live && setState(res.ok ? "here" : "absent"),
-      () => live && setState("absent")
-    );
-    return () => {
-      live = false;
-      clearTimeout(timer);
-      ac.abort();
-    };
-  }, [url, nonce]);
-
-  const recheck = useCallback(() => setNonce((n) => n + 1), []);
-  return { state, url, recheck };
-}
-
-/** The host:port of the engine, for a sentence. The scheme is noise here. */
-function ritzHost(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-}
-
-/**
- * Every app with its state, in one place, so the checklist and the teammate
- * form cannot disagree about what this machine has.
- */
-function presenceOf(
-  kind: HarnessKind,
-  tools: Record<string, boolean>,
-  ritz: Presence
-): Presence {
-  // Ritz is never answered from `tools`: check_tools cannot see it.
-  return kind === "ritz" ? ritz : tools[kind] ? "here" : "absent";
-}
-
-/** The state of a row, in the fewest words that are still true. */
-function presenceWord(kind: HarnessKind, state: Presence): string {
-  if (state === "checking") return "checking…";
-  if (state === "here") return kind === "ritz" ? "answering" : "already here";
-  return kind === "ritz" ? "not answering" : "not here yet";
-}
 
 /* ── small shared pieces ──────────────────────────────────────── */
 
@@ -994,8 +942,7 @@ function YouStep({
   // All three, so this passing note agrees with the checklist a step later. The
   // engine has to be asked rather than looked up; until it answers it is simply
   // left out, which is the one reading that is never wrong.
-  const ritz = useRitzProbe();
-  const found = APPS.filter((a) => presenceOf(a.kind, tools, ritz.state) === "here").map((a) =>
+  const found = APPS.filter((a) => presenceOf(a.kind, tools) === "here").map((a) =>
     harnessFor(a.kind).label
   );
   const list =
@@ -1159,10 +1106,9 @@ function YouStep({
  */
 function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situation: Situation }) {
   const tools = useStore((s) => s.tools);
-  const ritz = useRitzProbe();
   const [checking, setChecking] = useState(false);
 
-  const rows = APPS.map((spec) => ({ spec, state: presenceOf(spec.kind, tools, ritz.state) }));
+  const rows = APPS.map((spec) => ({ spec, state: presenceOf(spec.kind, tools) }));
   const here = rows.filter((r) => r.state === "here");
   const brand = config().brand;
   const elsewhere = situation.existing.length;
@@ -1172,10 +1118,8 @@ function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situat
    * question and re-running half of it would leave the panel internally
    * inconsistent for as long as somebody looked at it.
    */
-  const recheckRitz = ritz.recheck;
   const recheck = useCallback(async () => {
     setChecking(true);
-    recheckRitz();
     try {
       const found = await invoke<Record<string, boolean>>("check_tools");
       useStore.setState({ tools: found });
@@ -1184,11 +1128,11 @@ function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situat
     } finally {
       setChecking(false);
     }
-  }, [recheckRitz]);
+  }, []);
 
   const title =
     here.length === APPS.length
-      ? "All three are already here."
+      ? "Every one is already here."
       : here.length === 1
         ? `${harnessFor(here[0].spec.kind).label} is already here.`
         : here.length > 1
@@ -1251,7 +1195,7 @@ function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situat
                 {/* Its own live region, so the one row that resolves late says
                     so out loud instead of only looking different. */}
                 <span className="ob-pill" aria-live="polite">
-                  {presenceWord(spec.kind, state)}
+                  {presenceWord(state)}
                 </span>
               </p>
               <p className="ob-runtime-good">{spec.good}</p>
@@ -1283,20 +1227,6 @@ function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situat
                 </Aside>
               )}
 
-              {/* Ritz is the one row whose absence needs explaining, because
-                  "not answering" is a fact about a service rather than about a
-                  missing file, and saying where we asked is the difference
-                  between a diagnosis and an accusation. */}
-              {spec.kind === "ritz" && state === "absent" && (
-                <p className="ob-hint">
-                  Asked at {ritzHost(ritz.url)} just now and got no answer. It is a service rather
-                  than a program on this machine, so nothing can tell us whether it is installed —
-                  only whether it is running.
-                </p>
-              )}
-              {spec.kind === "ritz" && state === "here" && (
-                <p className="ob-hint">Answering at {ritzHost(ritz.url)}.</p>
-              )}
             </li>
           );
         })}
@@ -1304,11 +1234,10 @@ function MachineStep({ onNext, onBack, kicker, situation }: StepProps & { situat
 
       <Aside title="What this means, precisely">
         <p className="ob-hint">
-          <code>claude</code> and <code>codex</code> are command-line programs, found by looking on
-          the PATH of the machine hosting the agent. {config().localAiName} is not: it is an HTTP service, so it never
-          appears on a PATH and is detected by asking it directly — which is why it can read as
-          absent on a machine that has it, if it simply is not running. Its address is a setting;
-          change it in Settings and this checks the new one.
+          <code>claude</code>, <code>codex</code> and <code>cursor-agent</code> are command-line
+          programs, found by looking on the PATH of the machine hosting the agent. An agent can
+          also be an app Spaces never launches — that one needs nothing on anybody&apos;s PATH,
+          because it works in the repository rather than in a process Spaces starts.
         </p>
       </Aside>
     </StepFrame>
@@ -1415,20 +1344,18 @@ function RuntimePick({
   value,
   onChange,
   tools,
-  ritz,
 }: {
   choices: readonly AppSpec[];
   value: HarnessKind;
   onChange: (k: HarnessKind) => void;
   tools: Record<string, boolean>;
-  ritz: Presence;
 }) {
   const group = useId();
   return (
     <fieldset className="ob-picks ob-picks-wide">
       <legend className="ob-label">Which app it works inside</legend>
       {choices.map((spec) => {
-        const state = presenceOf(spec.kind, tools, ritz);
+        const state = presenceOf(spec.kind, tools);
         return (
           <label key={spec.kind} className="ob-pick">
             <input
@@ -1439,7 +1366,7 @@ function RuntimePick({
             />
             <span>
               {harnessFor(spec.kind).label}
-              <span className="ob-tag">{presenceWord(spec.kind, state)}</span>
+              <span className="ob-tag">{presenceWord(state)}</span>
               <span className="ob-hint">{spec.good}</span>
             </span>
           </label>
@@ -1476,7 +1403,6 @@ function TeamStep({
   const me = situation.me;
   const hereId = situation.here?.id ?? "";
   const existing = situation.existing;
-  const ritz = useRitzProbe();
 
   /** What this run has so far, in the order it arrived. */
   const mine = agentIds
@@ -1532,7 +1458,7 @@ function TeamStep({
    * the answer would freeze whichever guess was true in the first frame.
    */
   const [kindPick, setKindPick] = useState<HarnessKind | "">("");
-  const live = APPS.filter((a) => presenceOf(a.kind, store.tools, ritz.state) === "here");
+  const live = APPS.filter((a) => presenceOf(a.kind, store.tools) === "here");
   const used = new Set(mine.map((a) => a.kind));
   // A second teammate defaults to an app the first one is not already using —
   // "one of each" is the common shape, and it is one click away from any other.
@@ -2013,7 +1939,6 @@ function TeamStep({
               value={kind}
               onChange={setKindPick}
               tools={store.tools}
-              ritz={ritz.state}
             />
           ) : live.length > 1 ? (
             <RuntimePick
@@ -2021,7 +1946,6 @@ function TeamStep({
               value={kind}
               onChange={setKindPick}
               tools={store.tools}
-              ritz={ritz.state}
             />
           ) : null}
 
@@ -2100,12 +2024,6 @@ function TeamStep({
                 <li>
                   {hostDevice.name} has not got {app}. Recording this is still fine; it will not
                   answer until that app is there.
-                </li>
-              )}
-              {kind === "ritz" && ritz.state === "absent" && (
-                <li>
-                  The engine is not answering at {ritzHost(ritz.url)} right now. Making this is
-                  still fine — it starts working the moment the engine does.
                 </li>
               )}
             </ul>

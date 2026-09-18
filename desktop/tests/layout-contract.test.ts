@@ -54,3 +54,49 @@ test("coding dock geometry stays aligned across terminal and run output", async 
   assert.match(terminalCss, /\.tm-root-embedded \.tm-screen\s*\{[^}]*--tm-fs: 12\.5px;[^}]*font-size: var\(--tm-fs\);/);
   assert.match(processCss, /\.proc-output\s*\{[^}]*padding: 12px;[^}]*font: 11px\/1\.6 var\(--mono\);/);
 });
+
+/*
+ * A modal taller than its cap has to scroll its body, not grow.
+ *
+ * `.modal` is a flex column with `max-height: 86vh`, but a flex item defaults
+ * to `min-height: auto` and refuses to shrink below its content — so the body
+ * ignored its own `overflow-y: auto`, the modal outgrew the backdrop centring
+ * it, and half the overflow went off the top of the screen. The New project
+ * dialog did this the moment the repository list arrived: the title and the
+ * close button left the screen and there was no way to scroll them back.
+ */
+test("a modal scrolls its body and never loses its own header", async () => {
+  const appCss = await readFile(new URL("../src/App.css", import.meta.url), "utf8");
+
+  const modal = appCss.match(/\n\.modal\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(modal, /max-height: 86vh/);
+  assert.match(modal, /flex-direction: column/);
+
+  const body = appCss.match(/\.modal-body\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(body, /overflow-y: auto/);
+  assert.match(body, /min-height: 0/, "without this the max-height does nothing");
+  assert.match(body, /flex: 1 1 auto/);
+
+  // The way out of the dialog must not be the first thing that scrolls away.
+  const head = appCss.match(/\.modal-head\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(head, /flex: 0 0 auto/);
+});
+
+/*
+ * A dialog must not depend on which button opened it.
+ *
+ * `Modal` rendered inline wherever it was used, and most callers are in the
+ * rail — `overflow: hidden`, with a stacking context of its own. The New
+ * project dialog came up with the dashboard's sticky section heading painted
+ * straight through its title bar. Every other overlay in the app already
+ * escapes to the body; modals are the one that did not.
+ */
+test("modals escape whatever opened them", async () => {
+  const ui = await readFile(new URL("../src/components/ui.tsx", import.meta.url), "utf8");
+
+  const modal = ui.slice(ui.indexOf("export function Modal("));
+  const body = modal.slice(0, modal.indexOf("\nexport function Avatar("));
+  assert.match(body, /createPortal\(/);
+  assert.match(body, /document\.body/);
+  assert.match(body, /className="modal-backdrop"/);
+});

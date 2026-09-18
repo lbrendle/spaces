@@ -16,7 +16,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "../store";
-import { config } from "../config";
 import { slug } from "../types";
 import type {
   Agent,
@@ -37,32 +36,32 @@ import { Avatar, Field, Modal, Spinner } from "./ui";
 import { SaveState, useCloseGuard } from "./SaveState";
 import { EntityAvatarStack, EntityChip } from "./EntityChip";
 import { HarnessMark } from "./Face";
+import { Integrations } from "./Integrations";
+import { AutoSend } from "./AutoSend";
 import { RadioChips } from "./LinkPicker";
 import { IconPlus, IconX, IconInfo, IconGear, IconBolt, IconSearch, IconCheck } from "./icons";
 import {
   HARNESSES,
   agentChips,
+  capsFor,
   carryOver,
+  harnessBin,
   commandPreview,
   defaultsFor,
-  fetchRitzModels,
-  checkRitzRuntime,
   groupedOptions,
   harnessFor,
   parseArgs,
   riskNotes,
   serializeArgs,
-  RITZ_BASE,
-  ritzBase,
-  ritzHealthRoute,
-  ritzAuthHeaders,
 } from "../capabilities";
-import type { HarnessKind, HarnessOption, OptionValue, OptionValues, RitzModel } from "../capabilities";
+import type { HarnessKind, HarnessOption, OptionValue, OptionValues } from "../capabilities";
+import { checkHarness, forgetHealth, harnessHelp } from "../doctor";
+import type { HarnessHealth } from "../doctor";
 import "./agents.css";
 
 /* ── can it run from here? ───────────────────────────────────── */
 
-/** "unknown" is a real answer: PATH detection can fail, and Ritz takes a moment. */
+/** "unknown" is a real answer: PATH detection can fail and takes a moment. */
 type Availability = "ready" | "unavailable" | "unknown";
 
 interface Runtimes {
@@ -71,90 +70,49 @@ interface Runtimes {
   checking: boolean;
 }
 
-/** How long to wait on 127.0.0.1:8765 before calling it down. */
-const RITZ_TIMEOUT = 2500;
-
 /**
- * Two different questions, because the runtimes are two different things:
- * claude and codex are binaries the Rust side looks for on PATH, Ritz either
- * answers on its port right now or does not. Ritz is only asked when somebody
- * actually has a Ritz agent — an idle workspace shouldn't poll a local port.
+ * Whether a harness can run from this machine.
+ *
+ * Every supported harness is either a binary on somebody's PATH or an app
+ * Spaces never launches, so this is one question now: does the executable
+ * resolve? check_tools pre-answers it for the harnesses Spaces ships, and
+ * check_program covers anything it did not pre-answer.
  */
-type HttpRuntime = { base: string; healthRoute: string; authentication: string };
-
-function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] = []): Runtimes {
+function useRuntimes(): Runtimes {
   const tools = useStore((s) => s.tools);
-  const [ritz, setRitz] = useState<Record<string, Availability>>({});
+  const [found, setFound] = useState<Record<string, boolean>>({});
   const [checking, setChecking] = useState(false);
-  const [custom, setCustom] = useState<Record<string, boolean>>({});
   const [nonce, setNonce] = useState(0);
-  const customKey = [...new Set(customPrograms.map((p) => p.trim()).filter(Boolean))].sort().join("\n");
-  const ritzKey = [...new Map(
-    httpRuntimes
-      .filter((runtime) => runtime.base.trim())
-      .map((runtime) => [
-        runtime.base.trim(),
-        `${runtime.base.trim()}\t${runtime.healthRoute.trim()}\t${runtime.authentication.trim()}`,
-      ])
-  ).values()].sort().join("\n");
+
+  const bins = HARNESSES.map((h) => harnessBin(h.kind)).filter(Boolean);
+  const key = [...new Set(bins)].sort().join("\n");
 
   useEffect(() => {
-    const runtimes = ritzKey
-      ? ritzKey.split("\n").map((line) => {
-          const [base, healthRoute = "/health", authentication = "trusted-local-origin"] = line.split("\t", 3);
-          return { base, healthRoute, authentication };
-        })
-      : [];
-    if (!runtimes.length) {
-      setRitz({});
-      return;
-    }
-    let live = true;
-    const ac = new AbortController();
-    // A dead port refuses instantly; the timeout is for the other case —
-    // something else holding 8765 and never answering.
-    const timer = window.setTimeout(() => ac.abort(), RITZ_TIMEOUT);
-    setRitz(Object.fromEntries(runtimes.map(({ base }) => [base, "unknown"])));
-    void Promise.all(runtimes.map(async ({ base, healthRoute, authentication }) => {
-      try {
-        const headers = await ritzAuthHeaders({ authentication });
-        await checkRitzRuntime(ac.signal, base, healthRoute, headers);
-        return [base, "ready"] as const;
-      } catch {
-        return [base, "unavailable"] as const;
-      }
-    })).then((pairs) => {
-      if (live) setRitz(Object.fromEntries(pairs));
-    });
-    return () => {
-      live = false;
-      clearTimeout(timer);
-      ac.abort();
-    };
-  }, [ritzKey, nonce]);
-
-  useEffect(() => {
-    const programs = customKey ? customKey.split("\n") : [];
+    const programs = key ? key.split("\n") : [];
     if (!programs.length) {
-      setCustom({});
+      setFound({});
       return;
     }
     let live = true;
     void Promise.all(
       programs.map(async (program) => [program, await invoke<boolean>("check_program", { program })] as const)
-    ).then((pairs) => {
-      if (live) setCustom(Object.fromEntries(pairs));
-    }).catch(() => {
-      if (live) setCustom(Object.fromEntries(programs.map((program) => [program, false])));
-    });
-    return () => { live = false; };
-  }, [customKey, nonce]);
+    )
+      .then((pairs) => {
+        if (live) setFound(Object.fromEntries(pairs));
+      })
+      .catch(() => {
+        if (live) setFound(Object.fromEntries(programs.map((program) => [program, false])));
+      });
+    return () => {
+      live = false;
+    };
+  }, [key, nonce]);
 
   const recheck = useCallback(() => {
     setChecking(true);
     setNonce((n) => n + 1);
     invoke<Record<string, boolean>>("check_tools")
-      .then((found) => useStore.setState({ tools: found }))
+      .then((map) => useStore.setState({ tools: map }))
       .catch((e: unknown) => toast.error("Could not read this machine's PATH", e))
       .finally(() => setChecking(false));
   }, []);
@@ -163,38 +121,180 @@ function useRuntimes(httpRuntimes: HttpRuntime[] = [], customPrograms: string[] 
   // may only change when an answer actually changes.
   return useMemo(
     () => ({
-      of: (kind: string, program = ""): Availability => {
-        if (kind === "ritz") {
-          const key = (program || RITZ_BASE).trim();
-          return ritz[key] ?? "unknown";
-        }
-        if (kind === "custom") {
-          const key = program.trim();
-          if (!key) return "unavailable";
-          return custom[key] === undefined ? "unknown" : custom[key] ? "ready" : "unavailable";
-        }
-        const found = tools[kind];
-        return found === undefined ? "unknown" : found ? "ready" : "unavailable";
+      of: (kind: string): Availability => {
+        // Spaces never launches an external agent, so nothing here can make it
+        // unavailable. Whether its app is installed is a softer, separate
+        // question the editor asks.
+        if (harnessFor(kind).wire === "external") return "ready";
+        const bin = harnessBin(kind);
+        if (!bin) return "unavailable";
+        if (found[bin] !== undefined) return found[bin] ? "ready" : "unavailable";
+        const known = tools[bin];
+        return known === undefined ? "unknown" : known ? "ready" : "unavailable";
       },
       recheck,
       checking,
     }),
-    [tools, ritz, custom, recheck, checking]
+    [tools, found, recheck, checking]
+  );
+}
+
+/**
+ * What this harness can do, as facts rather than prose.
+ *
+ * Every row here is something that changes how the agent behaves in Spaces and
+ * that a person cannot infer from the product name: whether a second message is
+ * a reply or a fresh brief, whether the Spaces tools are reachable, whether the
+ * run inspector will have anything to show. Stated plainly so choosing a
+ * harness is a decision rather than a guess.
+ */
+function HarnessCaps({ kind }: { kind: string }) {
+  const caps = capsFor(kind);
+  const rows: Array<[string, string]> = [
+    [
+      "Conversation",
+      caps.resume
+        ? "Later turns continue the same session."
+        : "Every turn is a fresh brief — it has no memory of the last one beyond what Spaces puts in the prompt.",
+    ],
+    [
+      "Spaces tools",
+      caps.mcp === "repo"
+        ? "No MCP — it runs in its own app and never sees this checkout's config. It reads the brief and .hq/; Spaces reads its commits."
+        : caps.mcp === "none"
+          ? "No MCP. It reaches Spaces through .hq/actions.jsonl instead."
+          : caps.mcp === "args"
+            ? "MCP, configured at launch."
+            : "MCP, from the config Spaces writes in its working directory.",
+    ],
+    [
+      "Reach",
+      caps.reach === "none"
+        ? "Runs in its own app, so Spaces has no tools to lend it — it works through the repository."
+        : "Can be given the workspace browser and the screen, per agent, in Reach below. Off unless you turn it on.",
+    ],
+    [
+      "Live output",
+      caps.toolEvents
+        ? "Tool calls and edits stream into the run inspector."
+        : caps.streaming
+          ? "Output streams, but without structured tool events."
+          : "Nothing streams — Spaces learns what happened from git.",
+    ],
+  ];
+  return (
+    <dl className="ag-caps">
+      {rows.map(([label, value]) => (
+        <div className="ag-caps-row" key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/* ── the doctor ──────────────────────────────────────────────── */
+
+/**
+ * What this harness's state actually is on this Mac, in one line plus a fix.
+ *
+ * The availability line above answers "is the binary there". That is the first
+ * of four ways a harness fails before it runs: it can also be there and signed
+ * out, be a GUI app that was never installed, or hang on its own --version.
+ * Telling someone an agent is ready and having it fail on the first turn is the
+ * failure this panel exists to prevent, so an unknown sign-in state is shown as
+ * unknown rather than rounded up.
+ */
+function HarnessDoctor({ kind, agent }: { kind: string; agent: Agent | null }) {
+  const [health, setHealth] = useState<HarnessHealth | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [help, setHelp] = useState("");
+  // Monotonic token: switching harness quickly must not show the old answer.
+  const req = useRef(0);
+
+  const check = useCallback(
+    async (fresh: boolean) => {
+      const token = ++req.current;
+      setBusy(true);
+      setHelp("");
+      if (fresh) forgetHealth();
+      try {
+        const next = await checkHarness(kind, agent ?? undefined);
+        if (token === req.current) setHealth(next);
+      } finally {
+        if (token === req.current) setBusy(false);
+      }
+    },
+    [kind, agent]
+  );
+
+  useEffect(() => {
+    setHealth(null);
+    void check(false);
+  }, [check]);
+
+  const bin = harnessBin(kind);
+
+  return (
+    <div className="ag-doctor">
+      <div className="ag-doctor-row">
+        <span className={`ag-doctor-dot ag-doctor-${health?.state ?? "checking"}`} aria-hidden="true" />
+        <span className="ag-doctor-detail">
+          {busy && !health ? "Checking…" : health?.detail || "Not checked yet."}
+        </span>
+        <button
+          type="button"
+          className="btn tiny ghost"
+          onClick={() => void check(true)}
+          disabled={busy}
+        >
+          {busy ? <Spinner /> : "⟳"}
+        </button>
+      </div>
+
+      {/* The raw-flags field below accepts anything, so the harness's own list
+          of flags is worth having to hand — and it is the installed version's
+          list, not whatever was true when Spaces shipped. */}
+      {bin && (
+        <button
+          type="button"
+          className="btn tiny ghost ag-doctor-help-btn"
+          disabled={busy}
+          onClick={async () => {
+            if (help) {
+              setHelp("");
+              return;
+            }
+            setBusy(true);
+            try {
+              setHelp(await harnessHelp(bin));
+            } catch (e) {
+              setHelp(String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {help ? "Hide" : `What flags does this ${bin} accept?`}
+        </button>
+      )}
+
+      {help && <pre className="ag-doctor-help">{help}</pre>}
+    </div>
   );
 }
 
 /** Why an agent can't run from this machine — never phrased as a fault. */
-function unavailableNote(kind: string, name: string, runtime = ""): string {
+function unavailableNote(kind: string, name: string): string {
   const handle = `@${slug(name)}`;
-  if (kind === "ritz") {
-    const endpoint = runtime || RITZ_BASE;
-    return `${config().localAiName} isn't answering on ${endpoint.replace("http://", "")}, so ${handle} can't run from this machine. Anyone whose engine is up can still use it.`;
+  const meta = harnessFor(kind);
+  if (meta.wire === "external") {
+    return `Spaces doesn't launch ${meta.label.toLowerCase()} agents — ${handle} works in its own app and meets Spaces in the repository.`;
   }
-  if (kind === "custom") {
-    return `That custom executable isn't available on this machine, so ${handle} can't run here. Configure its command or host it on a teammate's device.`;
-  }
-  const bin = kind === "codex" ? "codex" : "claude";
-  return `${bin} isn't on this machine's PATH, so ${handle} can't run from here. Teammates who have it can.`;
+  const bin = harnessBin(kind) || kind;
+  const where = meta.probe?.installHint ? ` Install it from ${meta.probe.installHint}.` : "";
+  return `${bin} isn't on this machine's PATH, so ${handle} can't run from here. Teammates who have it can.${where}`;
 }
 
 /* ── the hardest part of a new agent is the blank persona box ── */
@@ -364,17 +464,7 @@ export function AgentsView() {
   const [importSelected, setImportSelected] = useState<Set<string>>(new Set());
   const seq = useRef(0);
 
-  const runtimes = useRuntimes(
-    agents.filter((a) => a.kind === "ritz").map((a) => {
-      const values = parseArgs("ritz", a.cli_args);
-      return {
-        base: ritzBase(values),
-        healthRoute: ritzHealthRoute(values),
-        authentication: String(values.authentication || "trusted-local-origin"),
-      };
-    }),
-    agents.filter((a) => a.kind === "custom").map((a) => a.model)
-  );
+  const runtimes = useRuntimes();
 
   // The window is the wrong thing to measure: the sidebar and the inspector
   // both eat into this pane without the window changing size.
@@ -443,10 +533,7 @@ export function AgentsView() {
       return {
         agent,
         handle: slug(agent.name),
-        availability: runtimes.of(
-          agent.kind,
-          agent.kind === "ritz" ? ritzBase(parseArgs("ritz", agent.cli_args)) : agent.model
-        ),
+        availability: runtimes.of(agent.kind),
         running,
         lastActive: lastActiveOf(agent.id, sessions, runs),
         workload,
@@ -527,10 +614,7 @@ export function AgentsView() {
         members,
         workload: workloadOf({ type: "team", id: team.id }).sort(byRole),
         channels: channels.filter((c) => channelIds.has(c.id)),
-        ready: members.filter((m) => runtimes.of(
-          m.kind,
-          m.kind === "ritz" ? ritzBase(parseArgs("ritz", m.cli_args)) : m.model
-        ) === "ready").length,
+        ready: members.filter((m) => runtimes.of(m.kind) === "ready").length,
         memberLoad: members.reduce((n, m) => n + (loadById.get(m.id) ?? 0), 0),
         lastActive: members.reduce((t, m) => Math.max(t, lastActiveOf(m.id, sessions, runs)), 0),
         haystack: [team.name, slug(team.name), team.description, team.charter,
@@ -888,6 +972,14 @@ function RosterBlank({
           ? "Everything an agent is — what it owns, what it is told before every run, what it may do to your machine — is on the right once you choose one."
           : "An agent is a name, a persona and a runtime. Start from a shape and edit everything afterwards; the persona is the single biggest lever on whether it is useful."}
       </p>
+      {/* The supported agents first, because "which of these can I run" is the
+          question people arrive with — the role presets below only matter once
+          they have decided what it runs on. */}
+      <Integrations />
+      <h3 className="ag-blank-subtitle">Or start from a shape</h3>
+      <p className="ag-blank-text">
+        Each of these is a persona and a set of responsibilities on whichever runtime you pick.
+      </p>
       <div className="ag-preset-row">
         {PRESETS.map((p) => (
           <button key={p.id} type="button" className="ag-preset" onClick={() => onPreset(p)}>
@@ -961,10 +1053,10 @@ function AboutAgents() {
             <div>
               <dt>Each one runs on the machine that has its runtime.</dt>
               <dd>
-                <code>claude</code>, <code>codex</code>, and Custom CLI agents run from somebody's PATH; {config().localAiName} is an
-                engine answering on {RITZ_BASE.replace("http://", "")}. An agent can work while at
-                least one host with that runtime is online — which is why a card can say it is
-                unavailable <em>from here</em> and still be perfectly usable by a teammate.
+                <code>claude</code>, <code>codex</code> and <code>cursor-agent</code> run from
+                somebody&apos;s PATH. An agent can work while at least one host with that runtime
+                is online — which is why a card can say it is unavailable <em>from here</em> and
+                still be perfectly usable by a teammate.
               </dd>
             </div>
             <div>
@@ -1234,11 +1326,7 @@ function AvailabilityNote({ row }: { row: AgentRow }) {
             row.lastActive ? ` Last active ${timeAgo(row.lastActive)}.` : " Never run yet."
           }`
         : state === "unavailable"
-          ? unavailableNote(
-              agent.kind,
-              agent.name,
-              agent.kind === "ritz" ? ritzBase(parseArgs("ritz", agent.cli_args)) : agent.model
-            )
+          ? unavailableNote(agent.kind, agent.name)
           : "Still checking what this machine can run.";
 
   return <p className={"ag-note ag-note-" + state}>{note}</p>;
@@ -2086,17 +2174,27 @@ function AgentEditor({
   const preview = commandPreview(kind, values);
   const risks = riskNotes(kind, values);
   const serialized = serializeArgs(kind, values);
-  const customProgram = String(values.model ?? "");
-  const currentRitzBase = ritzBase(values);
-  const runtimes = useRuntimes(
-    kind === "ritz" ? [{
-      base: currentRitzBase,
-      healthRoute: ritzHealthRoute(values),
-      authentication: String(values.authentication || "trusted-local-origin"),
-    }] : [],
-    kind === "custom" ? [customProgram] : []
+  const runtimes = useRuntimes();
+  const availability = runtimes.of(kind);
+  /**
+   * The doctor has to check what is on screen, not what was last saved —
+   * otherwise typing a bundle id or an endpoint and watching the verdict not
+   * move is indistinguishable from the check being broken. Memoized on the two
+   * fields it reads, so it re-probes when they settle and not on every stroke.
+   */
+  const probeAgent = useMemo<Agent>(
+    () =>
+      ({
+        ...(agent ?? {}),
+        id: agent?.id ?? "draft",
+        name: name.trim() || "draft",
+        kind,
+        model: String(values.model ?? "").trim(),
+        cli_args: serialized,
+      }) as Agent,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- name is cosmetic here
+    [agent, kind, values.model, serialized]
   );
-  const availability = runtimes.of(kind, kind === "ritz" ? currentRitzBase : customProgram);
 
   const handle = slug(name);
   // Mentions resolve by handle, so two agents sharing one is a real ambiguity.
@@ -2408,21 +2506,36 @@ function AgentEditor({
       <section className="ag-ed-sec">
         <h3 className="ag-h3">Runtime</h3>
         <Field label="Backend">
+          {/* Grouped by how Spaces reaches it, because that is the difference
+              that changes what the agent can do — not who makes it. */}
           <select value={kind} onChange={(e) => changeKind(e.target.value as HarnessKind)}>
-            {HARNESSES.map((h) => (
-              <option key={h.kind} value={h.kind}>
-                {h.label}
-              </option>
-            ))}
+            <optgroup label="Command-line agents">
+              {HARNESSES.filter((h) => h.wire === "cli").map((h) => (
+                <option key={h.kind} value={h.kind}>
+                  {h.label}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Runs elsewhere">
+              {HARNESSES.filter((h) => h.wire !== "cli").map((h) => (
+                <option key={h.kind} value={h.kind}>
+                  {h.label}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </Field>
         <div className="harness-blurb">{meta.blurb}</div>
         <p className={"ag-avail ag-avail-" + availability}>
-          {availability === "ready"
-            ? `${meta.label} is available on this machine, so you can run this agent yourself.`
-            : availability === "unavailable"
-              ? `${meta.label} isn't on this machine — the agent is still perfectly real, and anyone whose machine has it can run it. No API key is involved either way.`
-              : "Checking whether this machine has that runtime…"}
+          {meta.wire === "external"
+            ? // "Available on this machine" is meaningless for a harness Spaces
+              // never launches — there is no run to be able or unable to start.
+              "Spaces will never start this agent. It works in its own app, and joins here through the repository — so it is equally usable from every machine on the workspace."
+            : availability === "ready"
+              ? `${meta.label} is available on this machine, so you can run this agent yourself.`
+              : availability === "unavailable"
+                ? `${meta.label} isn't on this machine — the agent is still perfectly real, and anyone whose machine has it can run it. No API key is involved either way.`
+                : "Checking whether this machine has that runtime…"}
         </p>
         {kind === "ritz" && (
           <button
@@ -2434,6 +2547,11 @@ function AgentEditor({
             {runtimes.checking ? "Testing…" : "Test connection"}
           </button>
         )}
+        <HarnessDoctor kind={kind} agent={probeAgent} />
+        <HarnessCaps kind={kind} />
+        {/* Only this kind can be driven, and only it has a permission and a
+            click point that fail silently when they are wrong. */}
+        {meta.wire === "external" && values.autosend === true && <AutoSend agent={probeAgent} />}
       </section>
 
       {groups.map((g) => (
@@ -2446,10 +2564,7 @@ function AgentEditor({
             <OptionControl
               key={opt.key}
               opt={opt}
-              kind={kind}
               value={values[opt.key]}
-              ritzEndpoint={currentRitzBase}
-              ritzAuthentication={String(values.authentication || "trusted-local-origin")}
               onChange={(v) => update(opt.key, v)}
             />
           ))}
@@ -2796,17 +2911,11 @@ async function restoreAgent(row: Agent, snap: RosterSnapshot): Promise<void> {
 /** One manifest option, rendered as the control it declares. */
 function OptionControl({
   opt,
-  kind,
   value,
-  ritzEndpoint,
-  ritzAuthentication,
   onChange,
 }: {
   opt: HarnessOption;
-  kind: HarnessKind;
   value: OptionValue | undefined;
-  ritzEndpoint?: string;
-  ritzAuthentication?: string;
   onChange: (v: OptionValue) => void;
 }) {
   const text = typeof value === "string" ? value : "";
@@ -2894,18 +3003,6 @@ function OptionControl({
     );
   }
 
-  if (opt.dynamic === "ritz-models") {
-    return (
-      <RitzModelPicker
-        opt={opt}
-        value={text}
-        onChange={onChange}
-        active={kind === "ritz"}
-        endpoint={ritzEndpoint || RITZ_BASE}
-        authentication={ritzAuthentication || "trusted-local-origin"}
-      />
-    );
-  }
 
   return (
     <div className="opt">
@@ -2947,122 +3044,6 @@ function OptHead({ opt }: { opt: HarnessOption }) {
 }
 
 /** Model picker for Ritz: the live model list, with free text as the fallback. */
-function RitzModelPicker({
-  opt,
-  value,
-  onChange,
-  active,
-  endpoint,
-  authentication,
-}: {
-  opt: HarnessOption;
-  value: string;
-  onChange: (v: OptionValue) => void;
-  active: boolean;
-  endpoint: string;
-  authentication: string;
-}) {
-  const [models, setModels] = useState<RitzModel[] | null>(null);
-  const [engineDefault, setEngineDefault] = useState("");
-  const [error, setError] = useState("");
-  const [custom, setCustom] = useState(false);
-
-  useEffect(() => {
-    if (!active) return;
-    let live = true;
-    const ac = new AbortController();
-    setError("");
-    ritzAuthHeaders({ authentication })
-      .then((headers) => fetchRitzModels(ac.signal, endpoint, headers))
-      .then((list) => {
-        if (!live) return;
-        setModels(list.models);
-        setEngineDefault(list.default);
-      })
-      .catch((e: unknown) => {
-        if (!live) return;
-        setModels([]);
-        setError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      live = false;
-      ac.abort();
-    };
-  }, [active, endpoint, authentication]);
-
-  const known = models ?? [];
-  const inList = known.some((m) => m.key === value);
-  const asText = custom || (!!value && known.length > 0 && !inList) || (!!error && known.length === 0);
-
-  return (
-    <div className="opt">
-      <OptHead opt={opt} />
-      {asText ? (
-        <input
-          value={value}
-          spellCheck={false}
-          placeholder={opt.placeholder}
-          aria-label={opt.label}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      ) : (
-        <select
-          value={value}
-          aria-label={opt.label}
-          onChange={(e) => {
-            if (e.target.value === "__custom") {
-              setCustom(true);
-              return;
-            }
-            onChange(e.target.value);
-          }}
-        >
-          <option value="">
-            {engineDefault ? `Let ${config().localAiName} choose (${engineDefault})` : `Let ${config().localAiName} choose`}
-          </option>
-          {/* keeps a saved model visible while the live list is still loading */}
-          {!!value && !inList && <option value={value}>{value}</option>}
-          {known.map((m) => (
-            <option key={m.key} value={m.key}>
-              {m.name} — {m.key}
-              {m.tier ? ` · ${m.tier}` : ""}
-            </option>
-          ))}
-          <option value="__custom">Type a model key…</option>
-        </select>
-      )}
-      {models === null && !error && (
-        <div className="model-status">
-          <Spinner /> Asking {config().localAiName} which models it has…
-        </div>
-      )}
-      {!!error && (
-        <div className="model-status warn">
-          {config().localAiName} isn&rsquo;t answering on {RITZ_BASE.replace(/^https?:\/\//, "")} — type a model key, or start the engine and
-          reopen this dialog.
-        </div>
-      )}
-      {models !== null && !error && (
-        <div className="model-status">
-          {known.length} model{known.length === 1 ? "" : "s"} loaded.
-          {asText && known.length > 0 && (
-            <button
-              className="model-link"
-              type="button"
-              onClick={() => {
-                setCustom(false);
-                if (!known.some((m) => m.key === value)) onChange("");
-              }}
-            >
-              Pick from the list
-            </button>
-          )}
-        </div>
-      )}
-      <div className="opt-hint">{opt.help}</div>
-    </div>
-  );
-}
 
 async function restoreTeam(row: Team, memberIds: string[], snap: RosterSnapshot): Promise<void> {
   try {
