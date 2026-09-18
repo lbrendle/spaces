@@ -35,4 +35,5 @@ libc = "0.2.189"
 # Accessibility trust is a real API; the alternative was inferring it from a
 # timeout, which cannot tell "denied" from "slow".
 core-foundation = "0.10"
+core-graphics = "0.25"
 portable-pty = "0.9.0"

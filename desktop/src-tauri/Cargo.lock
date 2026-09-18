@@ -4255,6 +4255,7 @@ name = "spaces"
 version = "0.1.21"
 dependencies = [
  "core-foundation",
+ "core-graphics",
  "libc",
  "portable-pty",
  "reqwest",

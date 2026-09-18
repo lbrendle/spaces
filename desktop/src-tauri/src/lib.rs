@@ -538,57 +538,167 @@ fn request_accessibility() -> bool {
 
 /* ── Driving an app Spaces cannot launch ───────────────────────── */
 
-/// Run one AppleScript with a hard wall-clock cap.
-///
-/// Every call here needs macOS Accessibility permission, and the failure mode
-/// when it is missing is not an error — `System Events` simply never returns.
-/// A timeout is therefore the *normal* way to discover the permission is not
-/// granted, which is why it is a result rather than a panic.
-fn osascript(script: &str, limit: Duration) -> Result<String, String> {
-    let mut cmd = Command::new("/usr/bin/osascript");
-    cmd.arg("-")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("could not run osascript: {e}"))?;
-    {
-        use std::io::Write;
-        let mut sink = child.stdin.take().ok_or("no stdin pipe")?;
-        sink.write_all(script.as_bytes())
-            .map_err(|e| format!("could not write the script: {e}"))?;
-    }
+// Everything below runs *in this process* on purpose.
+//
+// The obvious implementation shells out to `osascript`, and it does not work:
+// macOS attributes the Accessibility check to the child, so the script is
+// refused with "osascript is not allowed assistive access (-25211)" no matter
+// how thoroughly Spaces itself has been granted the permission. Whoever grants
+// it would have no way to tell why. Calling the same APIs directly means the
+// process being checked is the one the user allowed.
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXUIElementCreateApplication(pid: i32) -> core_foundation::base::CFTypeRef;
+    fn AXUIElementCopyAttributeValue(
+        element: core_foundation::base::CFTypeRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: *mut core_foundation::base::CFTypeRef,
+    ) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: core_foundation::base::CFTypeRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: core_foundation::base::CFTypeRef,
+    ) -> i32;
+    fn AXValueGetValue(
+        value: core_foundation::base::CFTypeRef,
+        the_type: u32,
+        out: *mut std::ffi::c_void,
+    ) -> bool;
+}
 
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let out = child
-                    .wait_with_output()
-                    .map_err(|e| format!("osascript did not finish: {e}"))?;
-                let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                return if status.success() {
-                    Ok(stdout)
-                } else {
-                    Err(if stderr.is_empty() { stdout } else { stderr })
-                };
-            }
-            Ok(None) => {
-                if started.elapsed() >= limit {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("timed out".to_string());
-                }
-                std::thread::sleep(Duration::from_millis(40));
-            }
-            Err(e) => return Err(format!("osascript failed: {e}")),
+const AX_VALUE_CGPOINT: u32 = 1;
+const AX_VALUE_CGSIZE: u32 = 2;
+
+/// The frontmost app's process id, so focus can be handed back afterwards.
+///
+/// `lsappinfo`, not AppleScript: asking System Events who is in front is
+/// itself an accessibility operation attributed to the child process, which is
+/// the trap this whole module exists to avoid. Launch Services will answer the
+/// same question without any permission at all.
+fn frontmost_pid() -> Option<i32> {
+    let front = Command::new("/usr/bin/lsappinfo").arg("front").output().ok()?;
+    let asn = String::from_utf8_lossy(&front.stdout).trim().to_string();
+    if asn.is_empty() {
+        return None;
+    }
+    let info = Command::new("/usr/bin/lsappinfo")
+        .args(["info", "-only", "pid", &asn])
+        .output()
+        .ok()?;
+    // Answers as `"pid"=1234`; the number is the only digits in it.
+    String::from_utf8_lossy(&info.stdout)
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .ok()
+}
+
+/// Ask an AX element for one attribute.
+unsafe fn ax_copy(
+    element: core_foundation::base::CFTypeRef,
+    name: &str,
+) -> Option<core_foundation::base::CFTypeRef> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    let key = CFString::new(name);
+    let mut value: core_foundation::base::CFTypeRef = std::ptr::null();
+    if AXUIElementCopyAttributeValue(element, key.as_concrete_TypeRef(), &mut value) != 0 {
+        return None;
+    }
+    if value.is_null() { None } else { Some(value) }
+}
+
+/// The first window's rectangle, in screen points.
+unsafe fn first_window_frame(app: core_foundation::base::CFTypeRef) -> Option<(f64, f64, f64, f64)> {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+
+    let windows = ax_copy(app, "AXWindows")?;
+    let list: CFArray<CFType> = CFArray::wrap_under_create_rule(windows as _);
+    let window = list.get(0)?.as_CFTypeRef();
+
+    let pos = ax_copy(window, "AXPosition")?;
+    let size = ax_copy(window, "AXSize")?;
+
+    #[repr(C)]
+    #[derive(Default, Clone, Copy)]
+    struct Pair { a: f64, b: f64 }
+    let mut point = Pair::default();
+    let mut extent = Pair::default();
+    let ok_point = AXValueGetValue(pos, AX_VALUE_CGPOINT, &mut point as *mut _ as *mut _);
+    let ok_size = AXValueGetValue(size, AX_VALUE_CGSIZE, &mut extent as *mut _ as *mut _);
+    if !ok_point || !ok_size {
+        return None;
+    }
+    Some((point.a, point.b, extent.a, extent.b))
+}
+
+/// Bring an application forward without launching anything.
+unsafe fn raise(app: core_foundation::base::CFTypeRef) {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::string::CFString;
+    let key = CFString::new("AXFrontmost");
+    let _ = AXUIElementSetAttributeValue(
+        app,
+        key.as_concrete_TypeRef(),
+        CFBoolean::true_value().as_CFTypeRef(),
+    );
+}
+
+fn click(x: f64, y: f64) {
+    use core_graphics::event::{CGEvent, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else { return };
+    let at = CGPoint::new(x, y);
+    for kind in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
+        if let Ok(event) = CGEvent::new_mouse_event(source.clone(), kind, at, CGMouseButton::Left) {
+            event.post(core_graphics::event::CGEventTapLocation::HID);
         }
+        std::thread::sleep(Duration::from_millis(40));
     }
 }
 
-/// AppleScript string literal: only the backslash and the quote need escaping.
-fn as_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+/// Press one key, optionally with command held.
+fn key(code: u16, command: bool) {
+    use core_graphics::event::{CGEvent, CGEventFlags};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else { return };
+    for down in [true, false] {
+        if let Ok(event) = CGEvent::new_keyboard_event(source.clone(), code, down) {
+            if command {
+                event.set_flags(CGEventFlags::CGEventFlagCommand);
+            }
+            event.post(core_graphics::event::CGEventTapLocation::HID);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+const KEY_V: u16 = 9;
+const KEY_RETURN: u16 = 36;
+
+/// Put text on the clipboard, returning whatever was there before.
+fn set_clipboard(text: &str) -> String {
+    let previous = Command::new("/usr/bin/pbpaste")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    if let Ok(mut child) = Command::new("/usr/bin/pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut sink) = child.stdin.take() {
+            use std::io::Write;
+            let _ = sink.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+    }
+    previous
 }
 
 #[derive(serde::Serialize)]
@@ -614,9 +724,8 @@ struct AppSendResult {
 /// rather than a new build.
 ///
 /// Text arrives by clipboard rather than keystroke: a brief is longer than
-/// anyone wants typed one `CGEvent` at a time, and paste is atomic where
-/// typing can interleave with whatever the app does between characters. The
-/// previous clipboard contents are put back afterwards.
+/// anyone wants typed one event at a time, and paste cannot interleave with
+/// whatever the app does between characters. The previous contents go back.
 #[tauri::command]
 async fn send_to_app(
     bundle_id: String,
@@ -639,94 +748,72 @@ async fn send_to_app(
             return Err("nothing to send".to_string());
         }
 
-        // Whoever the user was working in comes back afterwards. Stealing focus
-        // is unavoidable — the app only accepts input when it is frontmost —
-        // but keeping it is not.
-        let previous = osascript(
-            "tell application \"System Events\" to return name of first process whose frontmost is true",
-            Duration::from_millis(2_000),
-        )
-        .unwrap_or_default();
-
-        let script = format!(
-            r#"
-set theText to {text}
-set savedClipboard to ""
-try
-    set savedClipboard to the clipboard as text
-end try
-set the clipboard to theText
-
-tell application "System Events"
-    if not (exists process {name}) then
-        set the clipboard to savedClipboard
-        return "NOT-RUNNING"
-    end if
-    tell process {name}
-        set frontmost to true
-        delay 0.35
-        if (count of windows) is 0 then
-            set the clipboard to savedClipboard
-            return "NO-WINDOW"
-        end if
-        set w to first window
-        set p to position of w
-        set s to size of w
-        set cx to (item 1 of p) + {dx}
-        set cy to (item 2 of p) + (item 2 of s) - {dy}
-        click at {{cx, cy}}
-        delay 0.25
-        keystroke "v" using command down
-        delay 0.35
-        {submit_line}
-    end tell
-end tell
-delay 0.2
-set the clipboard to savedClipboard
-return "OK"
-"#,
-            text = as_literal(&text),
-            name = as_literal(&name),
-            dx = composer_dx,
-            dy = composer_dy,
-            submit_line = if submit { "key code 36" } else { "" },
-        );
-
-        // Generous: the script deliberately waits on the app between steps, and
-        // a cold app can take a moment to come forward.
-        let outcome = osascript(&script, Duration::from_secs(20));
-
-        // Put the user back where they were, whatever happened above.
-        if !previous.is_empty() {
-            let _ = osascript(
-                &format!(
-                    "tell application \"System Events\" to set frontmost of process {} to true",
-                    as_literal(&previous)
-                ),
-                Duration::from_millis(2_500),
-            );
-        }
-
-        let problem = match outcome {
-            Ok(value) if value == "OK" => String::new(),
-            Ok(value) if value == "NOT-RUNNING" => {
-                format!("{name} is not running, so there was nowhere to put the message.")
-            }
-            Ok(value) if value == "NO-WINDOW" => {
-                format!("{name} is running but has no open window.")
-            }
-            Ok(other) => format!("{name} answered unexpectedly: {other}"),
-            Err(e) if e == "timed out" => format!(
-                "Driving {name} timed out. Spaces needs Accessibility permission — System Settings \
-                 → Privacy & Security → Accessibility — and without it macOS blocks this silently."
-            ),
-            Err(e) => e,
+        let fail = |problem: String| {
+            Ok(AppSendResult { delivered: false, problem, previous_app: String::new() })
         };
 
+        if !unsafe { AXIsProcessTrusted() } {
+            return fail(format!(
+                "macOS has not granted Spaces Accessibility permission, so it cannot type into \
+                 {name}. Turn Spaces on in System Settings → Privacy & Security → Accessibility."
+            ));
+        }
+
+        // pgrep, not AX: finding the process is not an accessibility operation,
+        // and the executable inside an .app bundle is named after the bundle.
+        let pid: i32 = match Command::new("/usr/bin/pgrep").arg("-x").arg(&name).output() {
+            Ok(out) => match String::from_utf8_lossy(&out.stdout).lines().next() {
+                Some(line) => match line.trim().parse() {
+                    Ok(value) => value,
+                    Err(_) => return fail(format!("{name} is not running.")),
+                },
+                None => return fail(format!("{name} is not running, so there was nowhere to put the message.")),
+            },
+            Err(e) => return fail(format!("could not look for {name}: {e}")),
+        };
+
+        let was_front = frontmost_pid();
+
+        unsafe {
+            let app = AXUIElementCreateApplication(pid);
+            if app.is_null() {
+                return fail(format!("macOS would not describe {name}'s windows."));
+            }
+            raise(app);
+            std::thread::sleep(Duration::from_millis(350));
+
+            let Some((wx, wy, _ww, wh)) = first_window_frame(app) else {
+                return fail(format!("{name} is running but has no window Spaces can address."));
+            };
+
+            let previous_clipboard = set_clipboard(&text);
+            click(wx + composer_dx, wy + wh - composer_dy);
+            std::thread::sleep(Duration::from_millis(220));
+            key(KEY_V, true);
+            std::thread::sleep(Duration::from_millis(320));
+            if submit {
+                key(KEY_RETURN, false);
+                std::thread::sleep(Duration::from_millis(180));
+            }
+            set_clipboard(&previous_clipboard);
+
+            // Put the user back where they were. Stealing focus is unavoidable
+            // — the app only accepts input when it is frontmost — but keeping
+            // it is not.
+            if let Some(back) = was_front {
+                if back != pid {
+                    let previous = AXUIElementCreateApplication(back);
+                    if !previous.is_null() {
+                        raise(previous);
+                    }
+                }
+            }
+        }
+
         Ok(AppSendResult {
-            delivered: problem.is_empty(),
-            problem,
-            previous_app: previous,
+            delivered: true,
+            problem: String::new(),
+            previous_app: String::new(),
         })
     })
     .await
