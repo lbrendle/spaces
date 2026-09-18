@@ -571,8 +571,10 @@ body:has([data-dragging]) * {
 /* The icon-only buttons that sit at the end of a rail row get the glyph
    column's box, so the trailing controls stop inventing a height each (19, 21
    and 22px) and their hover fills line up down one right edge. Listed row by
-   row rather than as `.sidebar .icon-btn`: the rail is also the parent of the
-   modals it opens, and those have icon buttons of their own. */
+   row rather than as `.sidebar .icon-btn`, so this only ever claims the rows
+   it names — the rail used to be the DOM parent of the modals it opens, and
+   those have icon buttons of their own. Modals portal to the body now, but
+   naming the rows is still the narrower rule. */
 .sidebar-brand .icon-btn,
 .nav-heading .icon-btn,
 .project-name .icon-btn {
@@ -1628,12 +1630,22 @@ a.repo-chip:hover { text-decoration: none; border-color: var(--accent-border); c
   animation: hq-pop var(--dur) var(--ease);
 }
 .modal-wide { width: 640px; }
+/* The title and the close button are how you get out; they never scroll away. */
 .modal-head {
   display: flex; justify-content: space-between; align-items: center;
   padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
 }
 .modal-title { font-weight: 700; font-size: var(--fs-md); letter-spacing: var(--ls-title); }
-.modal-body { padding: var(--space-5); overflow-y: auto; }
+/*
+ * `min-height: 0` is what makes the `max-height` on `.modal` mean anything.
+ * A flex item defaults to `min-height: auto` — it refuses to shrink below its
+ * content — so a body taller than the cap did not scroll, it grew, and the
+ * modal overflowed the backdrop that centres it. Half the overflow goes off
+ * the top of the screen, taking the header and its close button with it: the
+ * New project dialog did this as soon as the repository list loaded.
+ */
+.modal-body { padding: var(--space-5); overflow-y: auto; min-height: 0; flex: 1 1 auto; }
 .modal-actions {
   display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5);
 }

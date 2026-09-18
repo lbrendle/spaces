@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { colorFor } from "../types";
 import { highlight } from "../syntax";
 
@@ -104,7 +105,18 @@ export function Modal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
-  return (
+  /*
+   * Portalled to the body, like every other overlay in the app.
+   *
+   * Modals are opened from wherever the control lives, and most of them are
+   * opened from the rail — which is `overflow: hidden` and sits in a stacking
+   * context of its own. A dialog rendered inline there is at the mercy of its
+   * parent: the New project modal came up with the dashboard's sticky section
+   * heading painted across its title bar. Nothing about a modal should depend
+   * on which button opened it, and `Toasts`, `SidePanel`, `AccountMenu` and
+   * `EntityChip` already escape the same way.
+   */
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={"modal" + (wide ? " modal-wide" : "")}>
         <div className="modal-head">
@@ -113,7 +125,8 @@ export function Modal({
         </div>
         <div className="modal-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
