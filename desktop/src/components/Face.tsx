@@ -100,16 +100,21 @@ function metricsFor(size: FaceSize): Metrics {
  * ("Claude Code", "Ritz (local)"), which is right in a settings form and wrong
  * on a button that has to say "Use the Codex mark".
  */
-export const HARNESS_MARK_LABEL: Record<AgentKind, string> = {
+export const HARNESS_MARK_LABEL: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
+  cursor: "Cursor",
+  gemini: "Gemini",
+  aider: "Aider",
+  opencode: "OpenCode",
   ritz: config().localAiName,
+  external: "External app",
   custom: "Custom CLI",
 };
 
-/** Unknown kinds run on Claude, which is also what capabilities.ts assumes. */
+/** A kind with a mark of its own; anything else falls back to the CLI mark. */
 export function harnessKind(kind: string): AgentKind {
-  return kind === "codex" || kind === "ritz" || kind === "custom" ? kind : "claude";
+  return kind in HARNESS_MARK_LABEL ? kind : "custom";
 }
 
 /**
@@ -167,6 +172,42 @@ export function HarnessMark({
         <>
           <circle cx="12" cy="12" r="8.4" strokeWidth={2.6} />
           <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
+        </>
+      )}
+      {k === "cursor" && (
+        // A solid pointer. The only asymmetric mark in the set, which is what
+        // makes it legible next to the symmetric ones at 16px.
+        <path d="M6.6 3.8L18.6 12.6L12.4 13.4L9.6 19.6Z" fill="currentColor" stroke="none" />
+      )}
+      {k === "gemini" && (
+        // A four-point sparkle. Concave where the Codex diamond is convex.
+        <path
+          d="M12 3.2C12 8 16 12 20.8 12C16 12 12 16 12 20.8C12 16 8 12 3.2 12C8 12 12 8 12 3.2Z"
+          fill="currentColor"
+          stroke="none"
+        />
+      )}
+      {k === "aider" && (
+        // A delta over a rule — change, applied. Angular and open-bottomed, so
+        // it never reads as the Codex diamond.
+        <>
+          <path d="M12 4.4L19.4 16.2H4.6Z" strokeWidth={2.5} />
+          <path d="M5.4 20H18.6" strokeWidth={2.5} />
+        </>
+      )}
+      {k === "opencode" && (
+        // An open bracket pair: a box with two sides missing.
+        <>
+          <path d="M9 4.6H5.2V19.4H9" strokeWidth={2.6} />
+          <path d="M15 4.6H18.8V19.4H15" strokeWidth={2.6} />
+        </>
+      )}
+      {k === "external" && (
+        // A window with something live inside it — an agent in its own app,
+        // which is exactly what this kind means.
+        <>
+          <rect x="3.4" y="4.8" width="17.2" height="14.4" rx="3.2" strokeWidth={2.4} />
+          <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
         </>
       )}
       {k === "custom" && (

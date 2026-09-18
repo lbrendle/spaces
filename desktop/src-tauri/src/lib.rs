@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -518,6 +518,204 @@ async fn check_program(program: String) -> bool {
     })
     .await
     .unwrap_or(false)
+}
+
+/// One harness probe: run a short, non-interactive command (`--version`,
+/// `status`) and report what came back.
+#[derive(serde::Serialize)]
+struct ProbeResult {
+    found: bool,
+    path: String,
+    exit_code: i32,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+}
+
+/// Ask a harness about itself.
+///
+/// Deliberately narrow: no stdin, a hard wall-clock cap, and output truncated,
+/// because this runs against third-party binaries whose `--version` may decide
+/// to prompt, update itself, or print a megabyte of banner. A probe that hangs
+/// would freeze the agent editor, so a timeout is a normal result rather than
+/// an error.
+#[tauri::command]
+async fn probe_program(
+    program: String,
+    args: Vec<String>,
+    timeout_ms: Option<u64>,
+) -> Result<ProbeResult, String> {
+    const MAX_OUTPUT: usize = 8 * 1024;
+    let limit = Duration::from_millis(timeout_ms.unwrap_or(6_000).clamp(500, 30_000));
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let program = program.trim().to_string();
+        if program.is_empty() {
+            return Err("no program given".to_string());
+        }
+        let resolved = if Path::new(&program).is_absolute() || Path::new(&program).components().count() > 1
+        {
+            program.clone()
+        } else {
+            resolve_bin(&program)
+        };
+        if !Path::new(&resolved).is_absolute() || !Path::new(&resolved).is_file() {
+            return Ok(ProbeResult {
+                found: false,
+                path: String::new(),
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: String::new(),
+                timed_out: false,
+            });
+        }
+
+        let mut cmd = Command::new(&resolved);
+        cmd.args(&args)
+            .env("PATH", login_path())
+            // Some CLIs render a progress UI when they think they own a
+            // terminal; tell them plainly that they do not.
+            .env("NO_COLOR", "1")
+            .env("CI", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| format!("failed to launch: {e}"))?;
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) => {
+                    if started.elapsed() >= limit {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break None;
+                    }
+                    std::thread::sleep(Duration::from_millis(40));
+                }
+                Err(e) => return Err(format!("probe failed: {e}")),
+            }
+        };
+
+        let out = child
+            .wait_with_output()
+            .map_err(|e| format!("probe did not finish: {e}"))?;
+        let clip = |bytes: &[u8]| {
+            let text = String::from_utf8_lossy(bytes).to_string();
+            if text.len() > MAX_OUTPUT {
+                format!("{}…", &text[..MAX_OUTPUT])
+            } else {
+                text
+            }
+        };
+        Ok(ProbeResult {
+            found: true,
+            path: resolved,
+            exit_code: status.and_then(|s| s.code()).unwrap_or(-1),
+            stdout: clip(&out.stdout),
+            stderr: clip(&out.stderr),
+            timed_out: status.is_none(),
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+#[derive(serde::Serialize)]
+struct AppPresence {
+    installed: bool,
+    path: String,
+    running: bool,
+    version: String,
+}
+
+/// Whether a macOS app is installed and running.
+///
+/// This is how Spaces sees an agent it does not launch — Muse, Cursor, Zed. The
+/// bundle id is authoritative and `mdfind` answers it wherever the app lives;
+/// the `/Applications` fallback covers a Spotlight index that is off or stale.
+#[tauri::command]
+async fn check_app(bundle_id: String, app_name: String) -> Result<AppPresence, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bundle_id = bundle_id.trim().to_string();
+        let app_name = app_name.trim().to_string();
+        let mut path = String::new();
+
+        if !bundle_id.is_empty() {
+            let mut cmd = Command::new("/usr/bin/mdfind");
+            cmd.arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"));
+            if let Ok(out) = blocking_output(cmd) {
+                if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                    if !first.trim().is_empty() {
+                        path = first.trim().to_string();
+                    }
+                }
+            }
+        }
+        if path.is_empty() && !app_name.is_empty() {
+            for base in ["/Applications", "/System/Applications"] {
+                let candidate = format!("{base}/{app_name}.app");
+                if Path::new(&candidate).is_dir() {
+                    path = candidate;
+                    break;
+                }
+            }
+            if path.is_empty() {
+                if let Ok(home) = std::env::var("HOME") {
+                    let candidate = format!("{home}/Applications/{app_name}.app");
+                    if Path::new(&candidate).is_dir() {
+                        path = candidate;
+                    }
+                }
+            }
+        }
+
+        let version = if path.is_empty() {
+            String::new()
+        } else {
+            let mut cmd = Command::new("/usr/bin/defaults");
+            cmd.arg("read")
+                .arg(format!("{path}/Contents/Info.plist"))
+                .arg("CFBundleShortVersionString");
+            blocking_output(cmd)
+                .ok()
+                .filter(|out| out.status.success())
+                .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+                .unwrap_or_default()
+        };
+
+        // pgrep matches the executable name, which for an app bundle is the
+        // binary inside Contents/MacOS — usually, but not always, the app name.
+        let running = {
+            let needle = if !path.is_empty() {
+                Path::new(&path)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| app_name.clone())
+            } else {
+                app_name.clone()
+            };
+            if needle.is_empty() {
+                false
+            } else {
+                let mut cmd = Command::new("/usr/bin/pgrep");
+                cmd.arg("-x").arg(&needle);
+                blocking_output(cmd)
+                    .map(|out| out.status.success())
+                    .unwrap_or(false)
+            }
+        };
+
+        Ok(AppPresence {
+            installed: !path.is_empty(),
+            path,
+            running,
+            version,
+        })
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
 }
 
 /// Read only the bearer credential created by Universal Personal Agent.
@@ -2027,6 +2225,8 @@ pub fn run() {
             discover_agent_profiles,
             apple_calendar_snapshot,
             apple_calendar_create,
+            probe_program,
+            check_app,
             start_agent_run,
             cancel_agent_run,
             write_text_file,

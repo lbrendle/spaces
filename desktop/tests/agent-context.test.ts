@@ -130,7 +130,10 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
     readFile(new URL("../src/components/ChatView.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(types, /AgentKind = [^;]*"custom"/);
+  // The kind is a registry, not a closed union: a fork can add a harness
+  // without editing this type, and an unknown one must still load.
+  assert.match(types, /BuiltinAgentKind =[\s\S]*"custom"/);
+  assert.match(types, /AgentKind = BuiltinAgentKind \| \(string & \{\}\)/);
   assert.match(config, /localAiName/);
   assert.match(config, /VITE_SPACES_LOCAL_AI_URL/);
   assert.match(capabilities, /label: "Custom CLI"/);
@@ -172,7 +175,12 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
   assert.match(rust, /async fn discover_agent_profiles/);
   assert.match(rust, /\.claude\/agents/);
   assert.match(rust, /\.codex\/agents/);
-  assert.match(portal, /"claude", "codex", "ritz", "custom"/);
+  // The portal's allowlist silently rewrites an unlisted backend, so it has to
+  // carry every kind the desktop registry ships.
+  assert.match(portal, /export const AGENT_BACKENDS/);
+  for (const kind of ["claude", "codex", "cursor", "gemini", "aider", "opencode", "ritz", "external", "custom"]) {
+    assert.match(portal, new RegExp(`"${kind}",`), `portal AGENT_BACKENDS is missing ${kind}`);
+  }
 });
 
 test("Knowledge references use shared sync identities and exclude private collections", async () => {

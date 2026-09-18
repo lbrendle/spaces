@@ -45,8 +45,22 @@ export const MCP_ACTIONS_REL = `${SPACES_DIR}/actions.jsonl`;
 export const RUNTIME_CONTRACT_REL = `${SPACES_DIR}/RUNTIME.md`;
 /** The harness's own config file, at the root of the directory it starts in. */
 export const MCP_CONFIG_REL = ".mcp.json";
+/**
+ * Where each harness looks for project MCP servers.
+ *
+ * Claude, Codex and most CLI harnesses read `.mcp.json`; Cursor reads
+ * `.cursor/mcp.json`. The file format is the same `mcpServers` object in both,
+ * so Spaces writes every location rather than picking one per run: an agent
+ * whose harness reads the other file is an agent with no Spaces tools at all,
+ * and that failure looks exactly like a healthy agent until it is asked to do
+ * something.
+ */
+export const MCP_CONFIG_LOCATIONS = [MCP_CONFIG_REL, ".cursor/mcp.json"] as const;
 const LOCAL_GIT_EXCLUDE_REL = ".git/info/exclude";
-const LOCAL_HARNESS_EXCLUDES = [MCP_CONFIG_REL, ".claude/settings.local.json"];
+const LOCAL_HARNESS_EXCLUDES = [
+  ...MCP_CONFIG_LOCATIONS,
+  ".claude/settings.local.json",
+];
 /** Our key inside `mcpServers`. Anything else in there is someone else's. */
 export const MCP_SERVER_KEY = "hq";
 const MCP_RUNTIME_ENV_VARS = [
@@ -408,15 +422,19 @@ export function mcpCodexArgs(project: Project): string[] {
   ];
 }
 
-export async function ensureMcpRegistration(project: Project, root?: string): Promise<McpRegistration> {
+export async function ensureMcpRegistration(
+  project: Project,
+  root?: string,
+  configRel: string = MCP_CONFIG_REL
+): Promise<McpRegistration> {
   const dir = base(root ?? mainRoot(project));
-  const path = dir ? `${dir}/${MCP_CONFIG_REL}` : "";
+  const path = dir ? `${dir}/${configRel}` : "";
   if (!dir) return { path, action: "failed", kept: [], error: "this project has no local checkout" };
   if (!mainRoot(project)) {
     return { path, action: "failed", kept: [], error: "this project has no local checkout to run the server from" };
   }
 
-  const cur = await statFile(dir, MCP_CONFIG_REL);
+  const cur = await statFile(dir, configRel);
   if (cur.kind === "unknown") return { path, action: "failed", kept: [], error: cur.error };
 
   let config: Json = {};
@@ -429,11 +447,11 @@ export async function ensureMcpRegistration(project: Project, root?: string): Pr
         path,
         action: "failed",
         kept: [],
-        error: `${MCP_CONFIG_REL} is not valid JSON (${String(e)}). Spaces will not overwrite it — fix or delete it, then try again.`,
+        error: `${configRel} is not valid JSON (${String(e)}). Spaces will not overwrite it — fix or delete it, then try again.`,
       };
     }
     if (!isObject(parsed)) {
-      return { path, action: "failed", kept: [], error: `${MCP_CONFIG_REL} is not a JSON object. Spaces will not overwrite it.` };
+      return { path, action: "failed", kept: [], error: `${configRel} is not a JSON object. Spaces will not overwrite it.` };
     }
     config = parsed;
   }
@@ -450,7 +468,7 @@ export async function ensureMcpRegistration(project: Project, root?: string): Pr
   try {
     await invoke("write_text_file", {
       root: dir,
-      relativePath: MCP_CONFIG_REL,
+      relativePath: configRel,
       contents: `${JSON.stringify(next, null, 2)}\n`,
     });
   } catch (e) {
@@ -534,7 +552,13 @@ export async function setupMcp(project: Project, root?: string): Promise<McpSetu
   const server = await ensureMcpServer(project);
   const toolList = await writeMcpManifest(project);
   const runtime = await ensureRuntimeContract(project);
-  const registration = await ensureMcpRegistration(project, root);
+  // Every known config location, so a project can host agents on different
+  // harnesses at once. The first location is the one reported; a failure
+  // anywhere is surfaced, because a half-registered project is a trap.
+  const registrations = await Promise.all(
+    MCP_CONFIG_LOCATIONS.map((rel) => ensureMcpRegistration(project, root, rel))
+  );
+  const registration = registrations.find((r) => r.error) ?? registrations[0];
   // Registration without permission is a server the harness can see and cannot
   // call, which is indistinguishable from a broken one from the agent's side.
   const permissions = await ensureHarnessAccess(project, root);

@@ -80,6 +80,7 @@ interface SpacesState {
   patchRun(id: string, patch: Partial<Run>, persist?: boolean): Promise<void>;
   loadRun(id: string): Promise<Run | null>;
   loadProjectRuns(projectId: string): Promise<void>;
+  openHandOffsFor(agentId: string): Promise<Run[]>;
   markRunActive(id: string, active: boolean): void;
 
   getSession(channelId: string, agentId: string): string;
@@ -659,6 +660,26 @@ export const useStore = create<SpacesState>((set, get) => ({
     if (!rows.length) return null;
     set((s) => ({ runs: { ...s.runs, [id]: rows[0] } }));
     return rows[0];
+  },
+
+  /**
+   * Hand-offs to one external agent that have not been reported on yet.
+   *
+   * A hand-off is a finished run whose meta still says it is waiting; the meta
+   * is flipped once its result has been posted, which is what stops the same
+   * commits being announced on every refresh. Unlike the other run readers this
+   * one goes straight to SQLite — it is polled from a background refresh and
+   * has no business warming the in-memory run cache.
+   */
+  async openHandOffsFor(agentId) {
+    const db = await getDb();
+    return db.select<Run[]>(
+      `SELECT * FROM runs
+        WHERE agent_id = $1 AND meta = 'awaiting external agent'
+        ORDER BY started_at DESC
+        LIMIT 20`,
+      [agentId]
+    );
   },
 
   async loadProjectRuns(projectId) {

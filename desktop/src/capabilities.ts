@@ -27,8 +27,13 @@
  */
 import { config } from "./config";
 import { invoke } from "@tauri-apps/api/core";
+import type { BuiltinAgentKind } from "./types";
 
-export type HarnessKind = "claude" | "codex" | "ritz" | "custom";
+/**
+ * Open by design — see AgentKind in types.ts. The registry below is the source
+ * of truth for which ids exist; this alias only supplies autocomplete.
+ */
+export type HarnessKind = BuiltinAgentKind | (string & {});
 
 /** Widget used to edit an option. */
 export type ControlKind = "text" | "enum" | "boolean" | "number" | "repeatable";
@@ -78,18 +83,79 @@ export interface HarnessOption {
   max?: string;
 }
 
+/**
+ * What a harness can actually do, so the rest of the app can ask instead of
+ * branching on `kind`. Every field is answerable for any harness, including
+ * ones Spaces never spawns.
+ */
+export interface HarnessCaps {
+  /** Can continue a prior session, so a turn is a reply rather than a re-brief. */
+  resume: boolean;
+  /** How the Spaces MCP server reaches it. */
+  mcp: "config-file" | "args" | "none";
+  /** Emits structured tool-call events (so the inspector can show live steps). */
+  toolEvents: boolean;
+  /** Reports tokens/cost at the end of a turn. */
+  usage: boolean;
+  /** Can be pointed at its own git worktree. */
+  worktrees: boolean;
+  /** Where the model list comes from in the editor. */
+  models: "suggestions" | "dynamic" | "free";
+  /** Spaces streams its output live rather than learning about it afterwards. */
+  streaming: boolean;
+}
+
+/**
+ * How Spaces checks whether this harness exists on the current Mac. CLI
+ * harnesses are looked up on PATH; external ones are macOS app bundles.
+ */
+export interface HarnessProbe {
+  /** Executable to resolve on PATH. "" when the user supplies it. */
+  bin?: string;
+  /** Args that print a version cheaply and exit non-interactively. */
+  versionArgs?: readonly string[];
+  /**
+   * Args that report whether the user is signed in, for the harnesses that
+   * have such a command. Omitted where Spaces has not verified one — an
+   * unknown sign-in state is reported as unknown, never guessed.
+   */
+  authArgs?: readonly string[];
+  /** Substring in the auth command's output that means "signed in". */
+  authOkMatch?: string;
+  /** Bundle identifier of a GUI app, for `wire: "external"` harnesses. */
+  bundleId?: string;
+  /** Conventional install location, shown when the probe fails. */
+  appPath?: string;
+  /** Where to get it, shown when it is missing. */
+  installHint?: string;
+}
+
 export interface HarnessMeta {
   kind: HarnessKind;
   label: string;
   blurb: string;
-  /** "cli" harnesses are spawned as processes; "http" ones are called over the network. */
-  wire: "cli" | "http";
+  /**
+   * "cli" harnesses are spawned as processes, "http" ones are called over the
+   * network, and "external" ones Spaces never starts at all — they run in their
+   * own app against the same checkout and collaborate through git and .hq.
+   */
+  wire: "cli" | "http" | "external";
   /** Fixed prefix Spaces always passes — shown in the preview, never editable. */
   base: string;
   /** Copy for the Advanced → raw disclosure. */
   rawLabel: string;
   rawHelp: string;
   rawPlaceholder: string;
+  caps: HarnessCaps;
+  probe?: HarnessProbe;
+  /** Who makes it — shown on the picker so a long list stays scannable. */
+  vendor?: string;
+  /**
+   * True when the flags below were checked against this harness's own --help.
+   * A declared-but-unverified harness still runs; the editor just says so
+   * rather than implying Spaces knows its CLI by heart.
+   */
+  verified?: boolean;
 }
 
 /* ── Ritz (local engine) ──────────────────────────────────────── */
@@ -564,65 +630,460 @@ const CUSTOM_OPTIONS: readonly HarnessOption[] = [
   },
 ];
 
+/* ── Cursor Agent ─────────────────────────────────────────────── */
+
+const CURSOR_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "model",
+    label: "Model",
+    help: "Model id as Cursor names it. Blank uses your Cursor default. `cursor-agent models` lists them.",
+    control: "text",
+    kind: "flag",
+    flag: "--model",
+    storage: "model",
+    suggestions: ["gpt-5", "sonnet-4-thinking", "opus-4-thinking"],
+    placeholder: "sonnet-4-thinking",
+    group: "Model",
+    chip: true,
+  },
+  {
+    key: "mode",
+    label: "Mode",
+    help: "plan and ask are read-only. Leave blank for the normal read/write agent.",
+    control: "enum",
+    kind: "flag",
+    flag: "--mode",
+    choices: ["", "plan", "ask"],
+    group: "Model",
+    chip: true,
+  },
+  {
+    key: "force",
+    label: "Run everything",
+    help: "Allows every command unless explicitly denied. Spaces runs headless, so a tool that stops to ask just stalls the turn.",
+    control: "boolean",
+    kind: "flag",
+    flag: "--force",
+    default: true,
+    group: "Permissions",
+    chip: true,
+    risky: {
+      true: "Every shell command and file write runs unattended, anywhere this agent can reach. Pair it with an isolated worktree.",
+    },
+  },
+  {
+    key: "sandbox",
+    label: "Sandbox",
+    help: "Overrides the sandbox setting in your Cursor config for this agent.",
+    control: "enum",
+    kind: "flag",
+    flag: "--sandbox",
+    choices: ["", "enabled", "disabled"],
+    group: "Permissions",
+  },
+  {
+    key: "trust",
+    label: "Trust workspace",
+    help: "Skips the workspace-trust prompt, which headless runs cannot answer.",
+    control: "boolean",
+    kind: "flag",
+    flag: "--trust",
+    default: true,
+    group: "Permissions",
+  },
+  {
+    key: "approve_mcps",
+    label: "Approve MCP servers",
+    help: "Auto-approves MCP servers so the Spaces tool surface is reachable without a prompt.",
+    control: "boolean",
+    kind: "flag",
+    flag: "--approve-mcps",
+    default: true,
+    group: "Permissions",
+  },
+];
+
+/* ── Gemini CLI ───────────────────────────────────────────────── */
+
+const GEMINI_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "model",
+    label: "Model",
+    help: "Model id. Blank uses the Gemini CLI default.",
+    control: "text",
+    kind: "flag",
+    flag: "--model",
+    alias: "-m",
+    storage: "model",
+    suggestions: ["gemini-2.5-pro", "gemini-2.5-flash"],
+    placeholder: "gemini-2.5-pro",
+    group: "Model",
+    chip: true,
+  },
+  {
+    key: "yolo",
+    label: "Auto-approve tools",
+    help: "Accepts every tool call without asking. Required for headless runs.",
+    control: "boolean",
+    kind: "flag",
+    flag: "--yolo",
+    default: true,
+    group: "Permissions",
+    chip: true,
+    risky: {
+      true: "Every tool call runs unattended. Pair it with an isolated worktree.",
+    },
+  },
+];
+
+/* ── Aider ────────────────────────────────────────────────────── */
+
+const AIDER_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "model",
+    label: "Model",
+    help: "Any model string Aider accepts, including provider prefixes.",
+    control: "text",
+    kind: "flag",
+    flag: "--model",
+    storage: "model",
+    suggestions: ["sonnet", "gpt-5", "o3"],
+    placeholder: "sonnet",
+    group: "Model",
+    chip: true,
+  },
+  {
+    key: "yes",
+    label: "Auto-confirm",
+    help: "Answers Aider's confirmation prompts, which a headless run cannot.",
+    control: "boolean",
+    kind: "flag",
+    flag: "--yes-always",
+    default: true,
+    group: "Permissions",
+    chip: true,
+  },
+  {
+    key: "auto_commits",
+    label: "Aider commits",
+    help: "Off hands committing to Spaces, so every turn is bracketed by one Spaces checkpoint instead of two histories.",
+    control: "boolean",
+    kind: "flag",
+    flag: "--no-auto-commits",
+    default: true,
+    group: "Git",
+  },
+];
+
+/* ── OpenCode ─────────────────────────────────────────────────── */
+
+const OPENCODE_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "model",
+    label: "Model",
+    help: "provider/model as OpenCode names it.",
+    control: "text",
+    kind: "flag",
+    flag: "--model",
+    alias: "-m",
+    storage: "model",
+    suggestions: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
+    placeholder: "anthropic/claude-sonnet-4-5",
+    group: "Model",
+    chip: true,
+  },
+];
+
+/* ── External (an agent Spaces does not launch) ───────────────── */
+
+const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
+  {
+    key: "model",
+    label: "App",
+    help: "The app this teammate runs in — used for the roster, and to check it is installed.",
+    control: "text",
+    kind: "flag",
+    storage: "model",
+    suggestions: ["Muse", "Cursor", "Zed", "Claude", "Windsurf"],
+    placeholder: "Muse",
+    group: "App",
+    chip: true,
+  },
+  {
+    key: "bundle_id",
+    label: "Bundle id",
+    help: "macOS bundle identifier, so Spaces can tell whether the app is installed and running. Blank skips that check.",
+    control: "text",
+    kind: "flag",
+    placeholder: "com.meta.endo",
+    suggestions: ["com.meta.endo", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed", "com.anthropic.claudefordesktop"],
+    group: "App",
+  },
+  {
+    key: "workdir",
+    label: "Working directory",
+    help: "Where this agent edits code. Blank means the project checkout. Set it to a worktree path if it works on its own branch.",
+    control: "text",
+    kind: "flag",
+    placeholder: "/Users/you/code/project",
+    group: "Git",
+  },
+  {
+    key: "git_author",
+    label: "Git author match",
+    help: "Substring matched against commit author name or email, so Spaces can attribute commits to this agent. Blank falls back to the working directory.",
+    control: "text",
+    kind: "flag",
+    placeholder: "muse",
+    group: "Git",
+    chip: true,
+  },
+  {
+    key: "handoff",
+    label: "Hand-off file",
+    help: "Where Spaces writes a brief when this agent is addressed. Relative to the project root.",
+    control: "text",
+    kind: "flag",
+    default: ".hq/inbox",
+    placeholder: ".hq/inbox",
+    group: "Hand-off",
+  },
+];
+
 export const HARNESSES: readonly HarnessMeta[] = [
   {
     kind: "claude",
     label: "Claude Code",
     blurb: "Runs the claude CLI in the project checkout, on your Claude subscription.",
+    vendor: "Anthropic",
     wire: "cli",
+    verified: true,
     base: "claude -p --output-format stream-json --verbose",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
     rawPlaceholder: "--permission-mode acceptEdits",
+    caps: {
+      resume: true,
+      mcp: "config-file",
+      toolEvents: true,
+      usage: true,
+      worktrees: true,
+      models: "suggestions",
+      streaming: true,
+    },
+    probe: { bin: "claude", versionArgs: ["--version"], installHint: "claude.com/claude-code" },
   },
   {
     kind: "codex",
     label: "Codex",
     blurb: "Runs codex exec in the project checkout, on your ChatGPT subscription.",
+    vendor: "OpenAI",
     wire: "cli",
+    verified: true,
     base: "codex exec --json",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
     rawPlaceholder: "--sandbox workspace-write --skip-git-repo-check",
+    caps: {
+      resume: true,
+      mcp: "args",
+      toolEvents: true,
+      usage: true,
+      worktrees: true,
+      models: "suggestions",
+      streaming: true,
+    },
+    probe: { bin: "codex", versionArgs: ["--version"], installHint: "npm i -g @openai/codex" },
+  },
+  {
+    kind: "cursor",
+    label: "Cursor Agent",
+    blurb: "Runs cursor-agent headless in the project checkout, on your Cursor account.",
+    vendor: "Cursor",
+    wire: "cli",
+    verified: true,
+    base: "cursor-agent -p --output-format stream-json",
+    rawLabel: "Raw flags",
+    rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
+    rawPlaceholder: "--force --sandbox disabled",
+    caps: {
+      resume: true,
+      mcp: "config-file",
+      toolEvents: true,
+      usage: true,
+      worktrees: true,
+      models: "suggestions",
+      streaming: true,
+    },
+    probe: {
+      bin: "cursor-agent",
+      versionArgs: ["--version"],
+      // `cursor-agent status` is documented in its own --help as "View
+      // authentication status", and exits non-interactively.
+      authArgs: ["status"],
+      installHint: "cursor.com/cli",
+    },
+  },
+  {
+    kind: "gemini",
+    label: "Gemini CLI",
+    blurb: "Runs the gemini CLI non-interactively in the project checkout.",
+    vendor: "Google",
+    wire: "cli",
+    base: "gemini --prompt",
+    rawLabel: "Raw flags",
+    rawHelp: "Everything above, serialized. Check them against `gemini --help` — Spaces has not verified this harness on your Mac.",
+    rawPlaceholder: "--yolo",
+    caps: {
+      resume: false,
+      mcp: "config-file",
+      toolEvents: false,
+      usage: false,
+      worktrees: true,
+      models: "suggestions",
+      streaming: true,
+    },
+    probe: { bin: "gemini", versionArgs: ["--version"], installHint: "npm i -g @google/gemini-cli" },
+  },
+  {
+    kind: "aider",
+    label: "Aider",
+    blurb: "Runs aider in message mode against the project checkout.",
+    vendor: "Aider",
+    wire: "cli",
+    base: "aider --message",
+    rawLabel: "Raw flags",
+    rawHelp: "Everything above, serialized. Check them against `aider --help` — Spaces has not verified this harness on your Mac.",
+    rawPlaceholder: "--no-stream --no-pretty",
+    caps: {
+      resume: false,
+      mcp: "none",
+      toolEvents: false,
+      usage: false,
+      worktrees: true,
+      models: "suggestions",
+      streaming: true,
+    },
+    probe: { bin: "aider", versionArgs: ["--version"], installHint: "pip install aider-install" },
+  },
+  {
+    kind: "opencode",
+    label: "OpenCode",
+    blurb: "Runs opencode as a one-shot in the project checkout.",
+    vendor: "SST",
+    wire: "cli",
+    base: "opencode run",
+    rawLabel: "Raw flags",
+    rawHelp: "Everything above, serialized. Check them against `opencode run --help` — Spaces has not verified this harness on your Mac.",
+    rawPlaceholder: "--agent build",
+    caps: {
+      resume: false,
+      mcp: "config-file",
+      toolEvents: false,
+      usage: false,
+      worktrees: true,
+      models: "suggestions",
+      streaming: true,
+    },
+    probe: { bin: "opencode", versionArgs: ["--version"], installHint: "opencode.ai" },
   },
   {
     kind: "ritz",
     label: `${config().localAiName} (HTTP)`,
     blurb: `A configurable local or self-hosted engine at ${RITZ_BASE} — no vendor lock-in.`,
     wire: "http",
+    verified: true,
     base: `POST ${RITZ_CHAT_URL}`,
     rawLabel: "Raw body fields",
     rawHelp: "The JSON body fields, as key=value pairs. Edit them and the controls follow; unknown fields are kept and sent as-is.",
     rawPlaceholder: "use_tools=true deep=false",
+    caps: {
+      resume: true,
+      mcp: "none",
+      toolEvents: true,
+      usage: false,
+      worktrees: true,
+      models: "dynamic",
+      streaming: true,
+    },
+  },
+  {
+    kind: "external",
+    label: "External app",
+    blurb:
+      "A teammate Spaces does not launch — Muse, Cursor, Zed or a terminal you drive yourself. It joins through the shared repo and .hq, and Spaces tracks its branch, its diff and its hand-offs.",
+    wire: "external",
+    verified: true,
+    base: "(not launched by Spaces)",
+    rawLabel: "Attachment settings",
+    rawHelp: "How Spaces recognises this agent's work and where it leaves briefs for it.",
+    rawPlaceholder: "git_author=muse workdir=/Users/you/code/project",
+    caps: {
+      resume: false,
+      mcp: "config-file",
+      toolEvents: false,
+      usage: false,
+      worktrees: true,
+      models: "free",
+      streaming: false,
+    },
   },
   {
     kind: "custom",
     label: "Custom CLI",
     blurb: "Runs any local stdin/stdout agent or harness in the project checkout.",
     wire: "cli",
+    verified: true,
     base: "<executable>",
     rawLabel: "Arguments",
     rawHelp: "Arguments passed after the executable. The prompt is sent on stdin; plain text or JSON-line output is accepted.",
     rawPlaceholder: "--json --yes",
+    caps: {
+      resume: false,
+      mcp: "config-file",
+      toolEvents: true,
+      usage: false,
+      worktrees: true,
+      models: "free",
+      streaming: true,
+    },
   },
 ];
 
-const MANIFEST: Record<HarnessKind, readonly HarnessOption[]> = {
+const MANIFEST: Record<string, readonly HarnessOption[]> = {
   claude: CLAUDE_OPTIONS,
   codex: CODEX_OPTIONS,
+  cursor: CURSOR_OPTIONS,
+  gemini: GEMINI_OPTIONS,
+  aider: AIDER_OPTIONS,
+  opencode: OPENCODE_OPTIONS,
   ritz: RITZ_OPTIONS,
+  external: EXTERNAL_OPTIONS,
   custom: CUSTOM_OPTIONS,
 };
 
 /**
- * Kinds are taken as plain strings so callers can pass an `Agent["kind"]`
- * straight through — the stored union is widened to include "ritz"
- * separately, and unknown kinds degrade to Claude rather than crashing.
+ * Unknown kinds degrade to the Custom CLI shape rather than crashing: an agent
+ * row synced from a newer build, or from a fork with harnesses this one has
+ * never heard of, still opens and still runs.
  */
 function norm(kind: string): HarnessKind {
-  return kind === "codex" || kind === "ritz" || kind === "claude" || kind === "custom"
-    ? kind
-    : "claude";
+  return MANIFEST[kind] ? kind : "custom";
+}
+
+/** Every harness that can be spawned or attached, in picker order. */
+export function harnessKinds(): readonly string[] {
+  return HARNESSES.map((h) => h.kind);
+}
+
+/** What this harness can do. Ask this instead of branching on `kind`. */
+export function capsFor(kind: string): HarnessCaps {
+  return harnessFor(kind).caps;
+}
+
+/** True for agents Spaces never spawns — they run in their own app. */
+export function isExternal(kind: string): boolean {
+  return harnessFor(kind).wire === "external";
 }
 
 export function harnessFor(kind: string): HarnessMeta {
