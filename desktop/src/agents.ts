@@ -2147,8 +2147,9 @@ export async function reportHandOffs(projectId: string): Promise<number> {
       }).catch(() => null);
       if (!outcome || outcome.untouched) continue;
 
+      const replyId = uid();
       await store.insertMessage({
-        id: uid(),
+        id: replyId,
         channel_id: row.channel_id,
         author_type: "agent",
         author_id: agent.id,
@@ -2180,6 +2181,32 @@ export async function reportHandOffs(projectId: string): Promise<number> {
       // Mark it settled so the same work is never reported twice.
       await store.patchRun(row.id, { meta: "external work landed" });
       if (outcome.reply) await consumeReply(project, agent);
+
+      /*
+       * An answer that arrives late is still an answer.
+       *
+       * When a CLI agent replies, the reply is dispatched again so teammates
+       * it names can pick it up — that is what makes a channel a conversation
+       * rather than a set of parallel monologues. An external teammate's reply
+       * was inserted and left there, so nothing could ever follow from it:
+       * Muse could be asked something, answer it well, name the teammate who
+       * should act on it, and no one would ever run.
+       *
+       * The ordinary chaining rules apply, which is what keeps this safe: an
+       * agent-authored trigger reaches only teammates it mentions explicitly,
+       * never @all, and never anyone already in the chain.
+       */
+      void triggerAgents(row.channel_id, {
+        content: outcome.reply || describeOutcome(agent, outcome),
+        authorType: "agent",
+        authorId: agent.id,
+        authorName: agent.name,
+        parentId: "",
+        msgId: replyId,
+        chain: [agent.id],
+      }).catch(() => {
+        // Chaining is fire-and-forget; the reply is already in the channel.
+      });
       reported += 1;
     }
   }

@@ -164,3 +164,33 @@ test("the message typed into the app says where a reply goes", async () => {
   assert.match(caller, /replyFile: project\?\.local_path/);
   assert.match(caller, /\$\{replyPath\(agent\)\}/);
 });
+
+/*
+ * A channel is a conversation, not a set of parallel monologues.
+ *
+ * When a CLI agent replies, `maybeChain` dispatches that reply again so any
+ * teammate it names picks it up. An external teammate's reply was inserted and
+ * left there — so Muse could be asked something, answer it well, name the
+ * teammate who should act on it, and nobody would ever run.
+ */
+test("a late reply can still start the teammate it names", async () => {
+  const src = await agents();
+  const fn = src.slice(src.indexOf("export async function reportHandOffs"));
+  const body = fn.slice(0, fn.indexOf("\n  return reported;"));
+
+  assert.match(body, /triggerAgents\(row\.channel_id, \{/);
+  // Dispatched as the agent, carrying its own words.
+  assert.match(body, /authorType: "agent"/);
+  assert.match(body, /content: outcome\.reply \|\| describeOutcome\(agent, outcome\)/);
+  // Pointing at the message that was just posted, so the thread is coherent.
+  assert.match(body, /const replyId = uid\(\)/);
+  assert.match(body, /msgId: replyId/);
+  // Seeded with itself, so the ordinary loop guards apply from the first hop.
+  assert.match(body, /chain: \[agent\.id\]/);
+
+  // And only after the run is settled, or a failure mid-chain could replay it.
+  assert.ok(
+    body.indexOf('meta: "external work landed"') < body.indexOf("triggerAgents("),
+    "the hand-off must be settled before anything is chained from it"
+  );
+});
