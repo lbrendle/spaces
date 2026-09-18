@@ -54,7 +54,48 @@ export function branchName(agent: Agent): string {
 }
 
 /**
- * Ensure a persistent worktree ("workspace") for this agent on branch hq/<agent>.
+ * The same branch, but scoped to one project.
+ *
+ * `worktreePath` is keyed by project *and* agent; `branchName` was keyed by
+ * agent alone. Two projects backed by one repository therefore wanted two
+ * worktrees on a single branch, and git gives a branch to exactly one worktree
+ * — so the second project silently lost its isolation and ran every agent in
+ * the shared checkout. It does not take two live projects, either: a project
+ * that has been deleted leaves its worktree behind still holding the branch,
+ * and nothing points at that directory any more to explain why.
+ */
+export function scopedBranchName(project: Project, agent: Agent): string {
+  return `${branchName(agent)}-${project.id.slice(0, 6)}`;
+}
+
+/** Whether some worktree of this repository already has that branch checked out. */
+async function branchIsCheckedOut(root: string, branch: string): Promise<boolean> {
+  const listed = await git(root, "worktree", "list", "--porcelain").catch(() => "");
+  return listed
+    .split("\n")
+    .some((line) => line.trim() === `branch refs/heads/${branch}`);
+}
+
+/**
+ * The branch a workspace is actually on.
+ *
+ * Asked of the worktree rather than computed, because the computed name is
+ * only ever a proposal: a workspace made before branches were project-scoped
+ * is on the old name and must keep working, and one made when the plain name
+ * was taken is on the scoped one. Merging, pushing and status all need the
+ * branch that is really there, not the one this would have chosen today.
+ */
+export async function workspaceBranch(project: Project, agent: Agent): Promise<string> {
+  const path = worktreePath(project, agent);
+  if (await isGitRepo(path).catch(() => false)) {
+    const head = (await git(path, "rev-parse", "--abbrev-ref", "HEAD").catch(() => "")).trim();
+    if (head && head !== "HEAD") return head;
+  }
+  return branchName(agent);
+}
+
+/**
+ * Ensure a persistent worktree ("workspace") for this agent.
  * Returns the worktree path, or null if the project can't support one.
  */
 export async function ensureWorkspace(project: Project, agent: Agent): Promise<string | null> {
@@ -63,8 +104,24 @@ export async function ensureWorkspace(project: Project, agent: Agent): Promise<s
   // still usable; the Workspaces view offers an explicit first-commit action.
   if (!(await hasCommits(project.local_path))) return null;
   const path = worktreePath(project, agent);
-  const branch = branchName(agent);
   if (await isGitRepo(path).catch(() => false)) return path;
+
+  /*
+   * Clear metadata for worktrees whose directories are gone.
+   *
+   * Git keeps holding a branch for a worktree that has been deleted from disk,
+   * so a workspace removed by hand — or living somewhere temporary that has
+   * since been cleaned up — blocks its own branch for ever. Pruning only drops
+   * records whose directory no longer exists, so it can never discard work.
+   */
+  await git(project.local_path, "worktree", "prune").catch(() => "");
+
+  // The plain name where it is free, so existing workspaces and the branches
+  // people already know keep their names, and the scoped one where it is not.
+  const plain = branchName(agent);
+  const branch = (await branchIsCheckedOut(project.local_path, plain))
+    ? scopedBranchName(project, agent)
+    : plain;
 
   const branches = await git(project.local_path, "branch", "--list", branch);
   if (branches.trim()) {
@@ -86,7 +143,7 @@ export interface WorkspaceStatus {
 export async function workspaceStatus(project: Project, agent: Agent): Promise<WorkspaceStatus | null> {
   const path = worktreePath(project, agent);
   if (!(await isGitRepo(path).catch(() => false))) return null;
-  const branch = branchName(agent);
+  const branch = await workspaceBranch(project, agent);
   const status = (await git(path, "status", "--porcelain")).split("\n").filter(Boolean);
   let ahead = 0;
   try {
@@ -186,14 +243,15 @@ export async function mergeWorkspace(project: Project, agent: Agent): Promise<st
       "The main checkout has uncommitted changes — commit or discard them first so a conflicted merge can't eat them."
     );
   }
-  return git(project.local_path, "merge", "--no-ff", branchName(agent), "-m",
-    `Merge ${branchName(agent)} (Spaces workspace)`);
+  const branch = await workspaceBranch(project, agent);
+  return git(project.local_path, "merge", "--no-ff", branch, "-m",
+    `Merge ${branch} (Spaces workspace)`);
 }
 
 /** Push the agent branch and open a PR; returns the PR URL. */
 export async function createPR(project: Project, agent: Agent, title: string): Promise<string> {
   const path = worktreePath(project, agent);
-  await git(path, "push", "-u", "origin", branchName(agent));
+  await git(path, "push", "-u", "origin", await workspaceBranch(project, agent));
   const out = await ghIn(path, "pr", "create", "--title", title, "--body",
     `Opened from ${agent.name}'s Spaces workspace.\n\n🤖 Generated with Spaces`);
   const m = out.match(/https:\/\/github\.com\/\S+/);
@@ -202,9 +260,11 @@ export async function createPR(project: Project, agent: Agent, title: string): P
 
 export async function removeWorkspace(project: Project, agent: Agent): Promise<void> {
   const path = worktreePath(project, agent);
+  // Read before removing: afterwards there is no worktree left to ask.
+  const branch = await workspaceBranch(project, agent);
   await git(project.local_path, "worktree", "remove", "--force", path);
   try {
-    await git(project.local_path, "branch", "-D", branchName(agent));
+    await git(project.local_path, "branch", "-D", branch);
   } catch {
     // branch may be merged/checked out elsewhere; leaving it is fine
   }
