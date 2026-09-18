@@ -132,10 +132,17 @@ function IntegrationCard({
   onAdd: () => void;
 }) {
   const state = health?.state ?? "checking";
-  // "unknown" is not a failure — an external app with nothing installed to find
-  // is still perfectly addable, and so is a CLI whose sign-in Spaces cannot
-  // check. Only a missing binary or app actually stops someone.
-  const blocked = state === "missing";
+  /*
+   * Nothing here blocks adding, on purpose.
+   *
+   * Agents belong to the workspace, not to a machine: one whose runtime is not
+   * on this Mac is still perfectly real, and any paired machine that has it can
+   * run it. Spaces says exactly that everywhere else — "recording it here is
+   * fine; it will not run until that CLI is installed there" — so a disabled
+   * button here would be this view contradicting the rest of the app. The state
+   * line and the install hint inform the decision; they do not make it.
+   */
+  const missing = state === "missing";
 
   return (
     <div className={`ig-card ig-${state}`}>
@@ -157,7 +164,7 @@ function IntegrationCard({
       </p>
 
       <div className="ig-actions">
-        <button className="btn tiny primary" onClick={onAdd} disabled={busy || blocked}>
+        <button className="btn tiny primary" onClick={onAdd} disabled={busy}>
           {busy ? <Spinner /> : null} Add{existing.length ? " another" : ""}
         </button>
         {existing.length > 0 && (
@@ -165,7 +172,7 @@ function IntegrationCard({
             {existing.length} on the roster
           </span>
         )}
-        {blocked && integration.installHint && (
+        {missing && integration.installHint && (
           <code className="ig-hint">{integration.installHint}</code>
         )}
       </div>
