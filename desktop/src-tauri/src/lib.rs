@@ -3219,14 +3219,24 @@ fn pty_kill(state: State<'_, LivePtys>, session_id: String) -> Result<(), String
  * Project browser
  *
  * The browser surface itself is a Tauri child webview created from the trusted
- * Spaces frontend. These commands deliberately address only hq-browser-* labels,
- * so an arbitrary frontend call cannot navigate or evaluate the main app
- * webview.
+ * Spaces frontend. These commands deliberately address only labels with the
+ * project-browser prefix, so an arbitrary frontend call cannot navigate or
+ * evaluate the main app webview.
  * ------------------------------------------------------------------ */
 
+/// The prefix every project browser's label carries.
+///
+/// It has to be the one the frontend actually generates. It was not: the
+/// rename from HQ to Spaces changed `BrowserPane` to `spaces-browser-…` and
+/// left this guard on `hq-browser-`, so every call — open included — was
+/// refused as "not an Spaces project browser" and the built-in browser could
+/// not be opened at all. Named once here now, rather than spelled out at each
+/// call site, so the two cannot drift apart again.
+const PROJECT_BROWSER_PREFIX: &str = "spaces-browser-";
+
 fn project_browser(app: &AppHandle, label: &str) -> Result<tauri::Webview, String> {
-    if !label.starts_with("hq-browser-") {
-        return Err("not an Spaces project browser".into());
+    if !label.starts_with(PROJECT_BROWSER_PREFIX) {
+        return Err("not a Spaces project browser".into());
     }
     app.get_webview(label)
         .ok_or_else(|| format!("project browser {label} is not open"))
@@ -3250,8 +3260,8 @@ async fn browser_open(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    if !label.starts_with("hq-browser-") {
-        return Err("not an Spaces project browser".into());
+    if !label.starts_with(PROJECT_BROWSER_PREFIX) {
+        return Err("not a Spaces project browser".into());
     }
     if let Some(stale) = app.get_webview(&label) {
         stale.close().map_err(|e| e.to_string())?;
@@ -3338,6 +3348,85 @@ fn browser_action(app: AppHandle, label: String, action: String) -> Result<(), S
             .map_err(|e| format!("could not reload the page: {e}")),
         _ => Err(format!("unknown browser action: {action}")),
     }
+}
+
+/// How long to wait for a page to answer before giving up on it.
+///
+/// A script that never returns would otherwise hold the calling thread for as
+/// long as the page felt like it — and the caller here is an agent's tool
+/// call, which has somebody waiting on the other end of it.
+const BROWSER_EVAL_TIMEOUT: Duration = Duration::from_secs(12);
+
+/**
+ * Run a script in the project browser and bring back what it produced.
+ *
+ * Tauri's `eval` cannot do this. It hands a script to the webview and returns
+ * immediately with no channel back, which is enough to press Back and useless
+ * for letting an agent read a page. WKWebView's own
+ * `evaluateJavaScript:completionHandler:` does return a value, so this reaches
+ * through `with_webview` to the real WKWebView and calls it.
+ *
+ * The completion handler fires on the main thread some time later, so the
+ * result comes back over a channel and this blocks on it. That is also why
+ * there is a timeout: without one, a page that never calls the handler holds
+ * the caller forever.
+ *
+ * The script is wrapped so that whatever happens, the value is a JSON string —
+ * WKWebView can only hand back a handful of types, and a page that throws
+ * should produce an explanation rather than a null nobody can interpret.
+ */
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn browser_eval(app: AppHandle, label: String, script: String) -> Result<String, String> {
+    use block2::RcBlock;
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_web_kit::WKWebView;
+
+    let browser = project_browser(&app, &label)?;
+    // Every path returns a JSON string, so the Rust side has one shape to
+    // parse and a thrown error arrives as an error rather than as nothing.
+    let wrapped = format!(
+        "(function(){{try{{return JSON.stringify({{ok:true,value:(function(){{{script}}})()}})}}         catch(e){{return JSON.stringify({{ok:false,error:String(e&&e.message||e)}})}}}})()"
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    browser
+        .with_webview(move |platform| unsafe {
+            let view = &*(platform.inner() as *const WKWebView);
+            let handler = RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
+                if !error.is_null() {
+                    let message = (*error).localizedDescription().to_string();
+                    let _ = tx.send(Err(message));
+                    return;
+                }
+                if value.is_null() {
+                    let _ = tx.send(Ok(String::new()));
+                    return;
+                }
+                // The wrapper guarantees a string; anything else means the
+                // script escaped it, and `description` is still readable.
+                let text = (*(value as *mut NSString)).to_string();
+                let _ = tx.send(Ok(text));
+            });
+            view.evaluateJavaScript_completionHandler(
+                &NSString::from_str(&wrapped),
+                Some(&handler),
+            );
+        })
+        .map_err(|e| format!("could not reach the browser: {e}"))?;
+
+    match rx.recv_timeout(BROWSER_EVAL_TIMEOUT) {
+        Ok(result) => result,
+        Err(_) => Err("the page did not answer in time".to_string()),
+    }
+}
+
+/// Every other platform has no built-in browser to drive yet.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+async fn browser_eval(_app: AppHandle, _label: String, _script: String) -> Result<String, String> {
+    Err("driving the built-in browser is macOS-only for now".to_string())
 }
 
 #[tauri::command]
@@ -3692,6 +3781,7 @@ pub fn run() {
             browser_visibility,
             browser_close,
             browser_navigate,
+            browser_eval,
             browser_action,
             browser_url
         ])

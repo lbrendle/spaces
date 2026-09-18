@@ -6,6 +6,8 @@ import {
   browserClose,
   browserNavigate,
   browserOpen,
+  browserEval,
+  browserLabel,
   browserUrl,
   browserVisibility,
   normalizeBrowserInput,
@@ -35,7 +37,10 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editingAddressRef = useRef(false);
   const chainRef = useRef<Promise<unknown>>(Promise.resolve());
-  const labelRef = useRef(`spaces-browser-${projectId.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
+  // One definition of the label, shared with the tools agents call — they have
+  // to address the same webview this pane is showing, or an agent browses
+  // something nobody can see.
+  const labelRef = useRef(browserLabel(projectId));
   const label = labelRef.current;
 
   const [firstUrl] = useState(() => {
@@ -48,6 +53,15 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   const [address, setAddress] = useState(firstUrl);
   const [fallbackUrl, setFallbackUrl] = useState(firstUrl);
   const [error, setError] = useState("");
+  /*
+   * The page's own title.
+   *
+   * Worth showing for its own sake — an address bar full of query parameters
+   * says much less than "Pull requests · spaces" — and it is also the honest
+   * proof that Spaces can read the page at all. The same call underlies every
+   * browser tool an agent has; if the title is right, so is the bridge.
+   */
+  const [pageTitle, setPageTitle] = useState("");
   const [ready, setReady] = useState(!native);
 
   const enqueue = useCallback((fn: () => Promise<unknown>) => {
@@ -156,6 +170,9 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
   useEffect(() => {
     if (!native || !ready || !active) return;
     const poll = window.setInterval(() => {
+      void browserEval<string>(label, "return document.title")
+        .then((result) => setPageTitle(result.ok ? String(result.value ?? "") : ""))
+        .catch(() => setPageTitle(""));
       void browserUrl(label)
         .then((url) => {
           if (!url) return;
@@ -264,6 +281,11 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
             autoCorrect="off"
           />
         </form>
+        {pageTitle && (
+          <span className="cc-browser-title" title={pageTitle}>
+            {pageTitle}
+          </span>
+        )}
         <span className={"cc-browser-state" + (ready ? " ready" : "")}>
           {ready ? "live" : "opening"}
         </span>

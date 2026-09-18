@@ -24,6 +24,9 @@
  * existing version-history path.
  */
 import { useStore } from "./store";
+// `typeInto`, not `type`: a named import called `type` reads as TypeScript's
+// type-only modifier, which is a coin toss nobody should have to call.
+import { click, controls, goTo, readPage, typeInto } from "./browsertools";
 import { getDb } from "./db";
 import { describeEntity, searchEntities } from "./entities";
 import { LINK_KINDS } from "./links";
@@ -2541,6 +2544,120 @@ export const OPERATIONS: Operation[] = [
       };
     },
   },
+
+  /* ── the browser, as a shared instrument ────────────────────── */
+  //
+  // These drive the workspace's own browser — the one on screen — rather than
+  // a headless one the agent brings itself. That is the point: the person
+  // watches it happen, the page is signed in as they are, and they can take
+  // over by clicking in it. A headless browser is invisible, signed into
+  // nothing, and produces claims nobody can check.
+  //
+  // Everything is addressed the way a person would say it: link text, button
+  // labels, field names. An agent that has to invent CSS selectors for a page
+  // it cannot see will invent wrong ones, and the error will not explain why.
+
+  {
+    name: "spaces_browse",
+    describe:
+      "Open an address in this project's browser — the one visible in the workspace — and read the page back. Use this for anything on the web: documentation, a deployed app, a pull request. The person can see the page and can take the browser over at any time.",
+    effect: "auto",
+    params: [
+      { name: "url", type: "string", required: true, describe: "An address, or a search phrase." },
+    ],
+    async run(args, ctx) {
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser to open." };
+      try {
+        const page = await goTo(ctx.projectId, str(args, "url"));
+        return {
+          ok: true,
+          message: `${page.title || "(untitled)"} — ${page.url}\n\n${page.text}${
+            page.truncated ? "\n\n… page continues; call spaces_browser_read for more." : ""
+          }`,
+        };
+      } catch (e) {
+        return { ok: false, message: `Could not open that: ${String(e)}` };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_read",
+    describe:
+      "Read what this project's browser is showing right now, without navigating. Use after clicking or typing to see what changed.",
+    effect: "auto",
+    readOnly: true,
+    params: [],
+    async run(_args, ctx) {
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        const page = await readPage(ctx.projectId);
+        return {
+          ok: true,
+          message: `${page.title || "(untitled)"} — ${page.url}\n\n${page.text}`,
+        };
+      } catch (e) {
+        return { ok: false, message: `Could not read the page: ${String(e)}` };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_controls",
+    describe:
+      "List what can be clicked or filled in on the current page, by the text a person would read. Call this when spaces_browser_click cannot find something.",
+    effect: "auto",
+    readOnly: true,
+    params: [],
+    async run(_args, ctx) {
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        const list = await controls(ctx.projectId);
+        if (!list.length) return { ok: true, message: "Nothing on this page is clickable or fillable." };
+        return { ok: true, message: list.map((c) => `- [${c.kind}] ${c.label}`).join("\n") };
+      } catch (e) {
+        return { ok: false, message: `Could not inspect the page: ${String(e)}` };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_click",
+    describe:
+      "Click a link or button in this project's browser, named by its visible text. An exact match wins over a partial one.",
+    effect: "auto",
+    params: [
+      { name: "text", type: "string", required: true, describe: "The words on the link or button." },
+    ],
+    async run(args, ctx) {
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        return { ok: true, message: await click(ctx.projectId, str(args, "text")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
+  {
+    name: "spaces_browser_type",
+    describe:
+      "Type into a field in this project's browser, named by its label or placeholder. Spaces refuses to type into a password field — sign-in is for the person, not the agent.",
+    effect: "auto",
+    params: [
+      { name: "field", type: "string", required: true, describe: "The field's label, placeholder or name." },
+      { name: "text", type: "string", required: true, describe: "What to put in it." },
+    ],
+    async run(args, ctx) {
+      if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
+      try {
+        return { ok: true, message: await typeInto(ctx.projectId, str(args, "field"), str(args, "text")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
 ];
 
 export const OP_BY_NAME: Record<string, Operation> = Object.fromEntries(

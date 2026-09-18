@@ -57,3 +57,44 @@ export async function browserUrl(label: string): Promise<string> {
   if (!isTauri()) return "";
   return invoke<string>("browser_url", { label });
 }
+
+/**
+ * What a script in the page came back with.
+ *
+ * Every evaluation is wrapped on the Rust side so the page always answers in
+ * this shape: a thrown error arrives as an explanation rather than as silence,
+ * which matters because the caller is usually an agent that has to decide what
+ * to do next.
+ */
+export interface BrowserEval<T = unknown> {
+  ok: boolean;
+  value?: T;
+  error?: string;
+}
+
+/**
+ * Run a script in a project browser and get its value back.
+ *
+ * Tauri's own `eval` cannot do this — it hands the script over and returns
+ * nothing — so the Rust side reaches through to WKWebView's
+ * `evaluateJavaScript:completionHandler:`. The script body is a function body:
+ * it should `return` what it wants to send back.
+ */
+export async function browserEval<T = unknown>(
+  label: string,
+  script: string
+): Promise<BrowserEval<T>> {
+  if (!isTauri()) return { ok: false, error: "no browser outside the app" };
+  try {
+    const raw = await invoke<string>("browser_eval", { label, script });
+    if (!raw) return { ok: true, value: undefined };
+    return JSON.parse(raw) as BrowserEval<T>;
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+/** The label of the project browser for a project, matching BrowserPane. */
+export function browserLabel(projectId: string): string {
+  return `spaces-browser-${projectId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}

@@ -475,7 +475,10 @@
   min-height: 42px;
   padding: 6px 8px;
   display: grid;
-  grid-template-columns: auto minmax(140px, 1fr) auto;
+  /* nav · address · page title · state. The title has its own column rather
+     than sharing one, because a fourth child in a three-column grid wraps the
+     state badge onto a second row and the bar grows a line. */
+  grid-template-columns: auto minmax(140px, 1fr) auto auto;
   align-items: center;
   gap: 7px;
   border-bottom: 1px solid var(--border-soft);
@@ -535,6 +538,22 @@
 .cc-address input:focus-visible {
   border: 0;
   box-shadow: none;
+}
+
+/* The page's own title, between the address and the live badge. It gives way
+   before the address does — the address is what you type into, the title is
+   what tells you where you landed. */
+.cc-browser-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  /* Gives way before the address does: the address is what you type into, the
+     title is only what tells you where you landed. */
+  max-width: 22ch;
 }
 
 .cc-browser-state {
