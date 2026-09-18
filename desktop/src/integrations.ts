@@ -83,15 +83,11 @@ export const INTEGRATIONS: readonly Integration[] = [
     agentName: "Muse",
     role: "Engineer",
     model: "Muse",
-    // Measured against Muse 1.0: its composer sits 160 points from the left of
-    // the window and 39 up from the bottom. Auto-send is on because a brief
-    // nobody opens is not a teammate — the toggle is in the agent's settings.
-    values: {
-      bundle_id: "com.meta.endo",
-      autosend: true,
-      composer_dx: "160",
-      composer_dy: "39",
-    },
+    // Auto-send is on because a brief nobody opens is not a teammate; the
+    // toggle is in the agent's settings. Nothing else needs configuring —
+    // Muse focuses its composer when it comes forward, which is all the aim
+    // a paste needs.
+    values: { bundle_id: "com.meta.endo", autosend: true },
   },
   {
     id: "zed",
@@ -101,8 +97,9 @@ export const INTEGRATIONS: readonly Integration[] = [
     agentName: "Zed",
     role: "Engineer",
     model: "Zed",
-    // No measured composer geometry for Zed, so auto-send stays off until
-    // somebody sets the offsets; a guessed click lands somewhere arbitrary.
+    // Auto-send stays off: Zed is an editor, and where a paste lands when it
+    // comes forward depends on what was open. Turn it on once you have
+    // watched the test land in the right place.
     values: { bundle_id: "dev.zed.Zed" },
   },
 ];

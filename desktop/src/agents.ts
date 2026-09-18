@@ -1914,7 +1914,7 @@ async function runHandOff(opts: {
   // fallback. Auto-send is what turns it from a note somebody has to notice
   // into work the agent is actually holding.
   const delivery = result.error
-    ? { delivered: false, problem: "", previousApp: "" }
+    ? { delivered: false, verified: false, method: "" as const, problem: "", previousApp: "" }
     : await deliverToApp(
         agent,
         composerMessage({
@@ -1931,9 +1931,16 @@ async function runHandOff(opts: {
   untrackRun(msgId);
   store.markRunActive(msgId, false);
 
+  /*
+   * "Sent" has to mean sent. Spaces posts the click and the paste, then reads
+   * the message box back — and only that read-back earns the confident wording
+   * below. A send it could not confirm falls to the hand-off text, which says
+   * where the brief is, because that is what somebody would need if the typing
+   * went nowhere.
+   */
   const content = result.error
     ? `⚠️ Couldn't leave a brief for ${agent.name}: ${result.error}`
-    : delivery.delivered
+    : delivery.verified
       ? [
           `📤 **Sent to ${agent.name}.** Typed into ${config.app || "the app"} and sent.`,
           "",
@@ -1946,7 +1953,9 @@ async function runHandOff(opts: {
           .filter((l) => l !== "")
           .join("\n")
       : [
-          `📋 **Handed off to ${agent.name}.** Spaces does not launch ${config.app || "this agent"}, so nothing has run yet.`,
+          delivery.delivered
+            ? `📤 **Typed into ${config.app || "the app"} for ${agent.name}** — Spaces could not read the box back, so it cannot promise this landed.`
+            : `📋 **Handed off to ${agent.name}.** Spaces does not launch ${config.app || "this agent"}, so nothing has run yet.`,
           "",
           `- brief: \`${result.relativePath}\``,
           where ? `- working directory: \`${where}\`` : "",
@@ -1954,7 +1963,7 @@ async function runHandOff(opts: {
           delivery.problem ? `\n⚠️ ${delivery.problem}` : "",
           "",
           config.autosend
-            ? `Open ${config.app || "the app"} and point it at that brief in the meantime.`
+            ? `If nothing appeared, open ${config.app || "the app"} and point it at that brief.`
             : `Open ${config.app || "the app"} and point it at that brief. Turn on **Send it automatically** in this agent's settings and Spaces will type it in for you.`,
           `Spaces watches this repository — when ${agent.name} commits, its work shows up in the shared workspace and in every other agent's next turn, with no reporting back by hand.`,
         ]
@@ -1962,7 +1971,13 @@ async function runHandOff(opts: {
           .join("\n");
 
   const status: "done" | "error" = result.error ? "error" : "done";
-  const meta = result.error ? "" : delivery.delivered ? "sent · awaiting external agent" : "awaiting external agent";
+  const meta = result.error
+    ? ""
+    : delivery.verified
+      ? "sent · awaiting external agent"
+      : delivery.delivered
+        ? "typed, unconfirmed · awaiting external agent"
+        : "awaiting external agent";
   store.patchMessageLocal(channelId, msgId, { content, status, meta });
   void store.persistMessage(msgId, { content, status, meta });
   await store.patchRun(msgId, {

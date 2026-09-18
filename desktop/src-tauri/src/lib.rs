@@ -597,59 +597,255 @@ fn frontmost_pid() -> Option<i32> {
         .ok()
 }
 
-/// Ask an AX element for one attribute.
-unsafe fn ax_copy(
-    element: core_foundation::base::CFTypeRef,
-    name: &str,
-) -> Option<core_foundation::base::CFTypeRef> {
-    use core_foundation::base::TCFType;
+/// Ask an AX element for one attribute, as a retained value.
+///
+/// `AXUIElementCopyAttributeValue` follows the Create Rule, so the result owns
+/// a reference. Wrapping it in `CFType` is what makes a tree walk safe: raw
+/// `CFTypeRef`s handed around by hand either leak on every node or dangle once
+/// the array they came from is dropped.
+unsafe fn ax_get(element: &core_foundation::base::CFType, name: &str) -> Option<core_foundation::base::CFType> {
+    use core_foundation::base::{CFType, TCFType};
     use core_foundation::string::CFString;
     let key = CFString::new(name);
     let mut value: core_foundation::base::CFTypeRef = std::ptr::null();
-    if AXUIElementCopyAttributeValue(element, key.as_concrete_TypeRef(), &mut value) != 0 {
+    if AXUIElementCopyAttributeValue(element.as_CFTypeRef(), key.as_concrete_TypeRef(), &mut value) != 0 {
         return None;
     }
-    if value.is_null() { None } else { Some(value) }
+    if value.is_null() { None } else { Some(CFType::wrap_under_create_rule(value)) }
 }
 
-/// The first window's rectangle, in screen points.
-unsafe fn first_window_frame(app: core_foundation::base::CFTypeRef) -> Option<(f64, f64, f64, f64)> {
+/// An AX attribute as a string, for roles and for reading a field back.
+unsafe fn ax_string(element: &core_foundation::base::CFType, name: &str) -> Option<String> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::{CFString, CFStringRef};
+    let value = ax_get(element, name)?;
+    if value.type_of() != CFString::type_id() {
+        return None;
+    }
+    Some(CFString::wrap_under_get_rule(value.as_CFTypeRef() as CFStringRef).to_string())
+}
+
+/// An AX element's children, or an empty list for a leaf.
+unsafe fn ax_children(element: &core_foundation::base::CFType) -> Vec<core_foundation::base::CFType> {
     use core_foundation::array::CFArray;
     use core_foundation::base::{CFType, TCFType};
+    let Some(value) = ax_get(element, "AXChildren") else { return Vec::new() };
+    if value.type_of() != CFArray::<CFType>::type_id() {
+        return Vec::new();
+    }
+    let list = CFArray::<CFType>::wrap_under_get_rule(value.as_CFTypeRef() as _);
+    list.iter().map(|item| item.clone()).collect()
+}
 
-    let windows = ax_copy(app, "AXWindows")?;
-    let list: CFArray<CFType> = CFArray::wrap_under_create_rule(windows as _);
-    let window = list.get(0)?.as_CFTypeRef();
-
-    let pos = ax_copy(window, "AXPosition")?;
-    let size = ax_copy(window, "AXSize")?;
-
+/// An element's rectangle in screen points: x, y, width, height.
+unsafe fn ax_frame(element: &core_foundation::base::CFType) -> Option<(f64, f64, f64, f64)> {
+    use core_foundation::base::TCFType;
     #[repr(C)]
     #[derive(Default, Clone, Copy)]
     struct Pair { a: f64, b: f64 }
+
+    let pos = ax_get(element, "AXPosition")?;
+    let size = ax_get(element, "AXSize")?;
     let mut point = Pair::default();
     let mut extent = Pair::default();
-    let ok_point = AXValueGetValue(pos, AX_VALUE_CGPOINT, &mut point as *mut _ as *mut _);
-    let ok_size = AXValueGetValue(size, AX_VALUE_CGSIZE, &mut extent as *mut _ as *mut _);
+    let ok_point = AXValueGetValue(pos.as_CFTypeRef(), AX_VALUE_CGPOINT, &mut point as *mut _ as *mut _);
+    let ok_size = AXValueGetValue(size.as_CFTypeRef(), AX_VALUE_CGSIZE, &mut extent as *mut _ as *mut _);
     if !ok_point || !ok_size {
         return None;
     }
     Some((point.a, point.b, extent.a, extent.b))
 }
 
+/// The window Spaces should aim at.
+///
+/// Not `AXWindows[0]`: an app that has been running a while has more than one
+/// window, and the order is arbitrary. Muse keeps a stale "Log in" window on
+/// another Space — first in the list, 1200 points wide, and completely wrong.
+/// Focused first, then main, and only then the arbitrary one.
+unsafe fn target_window(app: &core_foundation::base::CFType) -> Option<core_foundation::base::CFType> {
+    for attribute in ["AXFocusedWindow", "AXMainWindow"] {
+        if let Some(window) = ax_get(app, attribute) {
+            if ax_frame(&window).is_some() {
+                return Some(window);
+            }
+        }
+    }
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+    let value = ax_get(app, "AXWindows")?;
+    if value.type_of() != CFArray::<CFType>::type_id() {
+        return None;
+    }
+    let list = CFArray::<CFType>::wrap_under_get_rule(value.as_CFTypeRef() as _);
+    list.get(0).map(|item| item.clone())
+}
+
+/// A text box in a window, and where it is.
+struct Composer {
+    element: core_foundation::base::CFType,
+    frame: (f64, f64, f64, f64),
+}
+
+/// How deep to walk, and how many nodes to look at.
+///
+/// A chat window's accessibility tree contains every message ever rendered —
+/// Muse's runs to several thousand nodes, and does not contain its composer at
+/// all. The depth is generous because an Electron window is a web
+/// page: the composer in one sits twenty-odd levels down inside wrappers that
+/// a native app would not have. Finding it is a bonus, not the mechanism —
+/// what it buys is a box Spaces can focus precisely and then read back, rather
+/// than trusting the app to have focused the right thing. Not finding one
+/// costs nothing but the search.
+const WALK_DEPTH: usize = 32;
+const WALK_NODES: usize = 2500;
+/// And how long to spend, which is the cap that actually bites.
+///
+/// Every step of the walk is a call into another process, and an Electron chat
+/// window can absorb thousands of them before admitting it has nothing — Muse
+/// takes several seconds to say no. Since the search only buys a read-back,
+/// not the send itself, it gets a fixed slice of time and no more.
+const WALK_BUDGET: Duration = Duration::from_millis(300);
+
+/// What has the caret right now, as text.
+///
+/// The one question that matters after a click, and the one the tree walk can
+/// get wrong: this is the element about to receive the keystrokes, whatever it
+/// is and however deep it lives. Apps that bury their composer past any
+/// sensible walk still answer this.
+unsafe fn focused_text(app: &core_foundation::base::CFType) -> Option<String> {
+    let focused = ax_get(app, "AXFocusedUIElement")?;
+    ax_string(&focused, "AXValue")
+}
+
+/// Find the message box in a window, by looking for one.
+///
+/// Optional, and worth doing anyway. Raising a chat app already puts the caret
+/// in its message box, so this is not how the text is aimed — but an element
+/// found here can be focused explicitly and, more to the point, read back
+/// afterwards. That is the whole difference between reporting that a send
+/// worked and knowing it did.
+///
+/// The heuristic is deliberately narrow, because a wrong text field is worse
+/// than none: an editable text area reaching into the bottom two fifths of the
+/// window, wide enough to be a composer rather than a search box. Ties go to the lowest,
+/// then the widest — a chat window's composer is the bottom-most thing you can
+/// type into.
+unsafe fn find_composer(window: &core_foundation::base::CFType) -> Option<Composer> {
+    let (wx, wy, ww, wh) = ax_frame(window)?;
+    if ww <= 0.0 || wh <= 0.0 {
+        return None;
+    }
+    let floor = wy + wh * 0.6;
+
+    let mut best: Option<Composer> = None;
+    let mut stack = vec![(window.clone(), 0usize)];
+    let mut seen = 0usize;
+    let deadline = Instant::now() + WALK_BUDGET;
+
+    while let Some((element, depth)) = stack.pop() {
+        seen += 1;
+        // Checked every 32 nodes: reading the clock is cheap, but not as cheap
+        // as the arithmetic it would otherwise dominate.
+        if seen > WALK_NODES || (seen % 32 == 0 && Instant::now() > deadline) {
+            break;
+        }
+
+        let frame = ax_frame(&element);
+
+        /*
+         * Prune by geometry before doing anything else.
+         *
+         * A container's rectangle encloses its children, so one entirely above
+         * the composer line cannot hold the composer — and in a chat window
+         * that is every message ever rendered. Without this the walk visits
+         * thousands of nodes over a process boundary and takes seconds to
+         * conclude nothing; with it, it visits the bottom strip and finishes
+         * in the noise. The scroll container itself is not pruned, which is
+         * correct: it spans the window, so it might.
+         */
+        if let Some((_, y, _, h)) = frame {
+            if h > 0.0 && y + h < floor {
+                continue;
+            }
+        }
+
+        if let Some((x, y, w, h)) = frame {
+            let role = ax_string(&element, "AXRole").unwrap_or_default();
+            let entry = role == "AXTextArea" || role == "AXTextField";
+            let fits = w >= 120.0
+                && h >= 14.0
+                && h <= wh * 0.5
+                && y + h >= floor
+                && x >= wx - 1.0
+                && x + w <= wx + ww + 1.0;
+            if entry && fits {
+                let better = match &best {
+                    None => true,
+                    Some(current) => {
+                        let (_, cy, cw, ch) = current.frame;
+                        (y + h, w) > (cy + ch, cw)
+                    }
+                };
+                if better {
+                    best = Some(Composer { element: element.clone(), frame: (x, y, w, h) });
+                }
+            }
+        }
+
+        if depth < WALK_DEPTH {
+            for child in ax_children(&element) {
+                stack.push((child, depth + 1));
+            }
+        }
+    }
+
+    best
+}
+
 /// Bring an application forward without launching anything.
-unsafe fn raise(app: core_foundation::base::CFTypeRef) {
+unsafe fn raise(app: &core_foundation::base::CFType) {
+    ax_set_true(app, "AXFrontmost");
+}
+
+/// Activate an app the way clicking its Dock icon does.
+///
+/// `AXFrontmost` raises the window; it does not reliably make the app *active*
+/// — and the difference is the whole feature. An app decides what has the
+/// caret when it becomes active, which for a chat window means its message
+/// box. Muse raised by `AXFrontmost` alone took the paste nowhere; the same
+/// app activated properly put it straight in the composer.
+///
+/// `open` is a subprocess, which everything else in this module avoids. It is
+/// allowed here for the same reason `lsappinfo` is: activation goes through
+/// Launch Services, not the accessibility API, so there is no permission to be
+/// attributed to the wrong process. `-g` is deliberately *not* passed —
+/// bringing the app forward is the point — and the app is known to be running
+/// already, so nothing is launched.
+fn activate(bundle_id: &str, name: &str) {
+    let mut command = Command::new("/usr/bin/open");
+    if bundle_id.trim().is_empty() {
+        command.arg("-a").arg(name);
+    } else {
+        command.arg("-b").arg(bundle_id.trim());
+    }
+    let _ = command.output();
+}
+
+/// Set a boolean AX attribute, for the two things worth asking for directly:
+/// which app is in front, and which element has the caret.
+unsafe fn ax_set_true(element: &core_foundation::base::CFType, name: &str) -> bool {
     use core_foundation::base::TCFType;
     use core_foundation::boolean::CFBoolean;
     use core_foundation::string::CFString;
-    let key = CFString::new("AXFrontmost");
-    let _ = AXUIElementSetAttributeValue(
-        app,
+    let key = CFString::new(name);
+    AXUIElementSetAttributeValue(
+        element.as_CFTypeRef(),
         key.as_concrete_TypeRef(),
         CFBoolean::true_value().as_CFTypeRef(),
-    );
+    ) == 0
 }
 
+/// A single left click at a screen point.
 fn click(x: f64, y: f64) {
     use core_graphics::event::{CGEvent, CGEventType, CGMouseButton};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
@@ -663,6 +859,25 @@ fn click(x: f64, y: f64) {
         }
         std::thread::sleep(Duration::from_millis(40));
     }
+}
+
+/// Where to click in a window that will not say where its message box is.
+///
+/// Measured from the window, every time, so there is nothing to store and
+/// nothing to re-measure when the window moves or resizes. The two constants
+/// describe the shape of a chat window rather than any particular app: the
+/// composer is the bottom strip, and it lives in the *first* column — the
+/// conversation — because that is what the reading order of a chat client is.
+/// A window wide enough to hold a second panel puts that panel to the right,
+/// so aiming near the left edge stays inside the conversation.
+///
+/// Checked against Muse: a 1101-point window whose composer spans 100 to 529
+/// points from the left and sits 30 points off the bottom.
+///
+/// This is a last resort and is treated as one. An app that publishes its
+/// message box gets clicked in the middle of that box instead, which is exact.
+fn composer_guess(wx: f64, wy: f64, ww: f64, wh: f64) -> (f64, f64) {
+    (wx + (ww * 0.25).min(160.0), wy + wh - 40.0)
 }
 
 /// Press one key, optionally with command held.
@@ -686,12 +901,36 @@ const KEY_V: u16 = 9;
 const KEY_RETURN: u16 = 36;
 
 /// Put text on the clipboard, returning whatever was there before.
+///
+/// `LC_CTYPE` is not a detail. `pbcopy` and `pbpaste` encode according to it,
+/// and a GUI app launched by launchd inherits no locale at all — so without
+/// this they fall back to Mac OS Roman and every character above ASCII arrives
+/// mangled. An em dash pasted into Muse came out as `‚Äî`, which is exactly
+/// what UTF-8 looks like when it is read one byte at a time.
 fn set_clipboard(text: &str) -> String {
     let previous = Command::new("/usr/bin/pbpaste")
+        .env("LC_CTYPE", "UTF-8")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
+    write_clipboard(text);
+    previous
+}
+
+/// Put the clipboard back, unless there is nothing to put back.
+///
+/// An empty read does not mean an empty clipboard — it means no *text* on it.
+/// Somebody who had copied an image or a file would otherwise find it replaced
+/// by nothing, because Spaces sent a message.
+fn restore_clipboard(previous: &str) {
+    if !previous.is_empty() {
+        write_clipboard(previous);
+    }
+}
+
+fn write_clipboard(text: &str) {
     if let Ok(mut child) = Command::new("/usr/bin/pbcopy")
+        .env("LC_CTYPE", "UTF-8")
         .stdin(std::process::Stdio::piped())
         .spawn()
     {
@@ -701,49 +940,66 @@ fn set_clipboard(text: &str) -> String {
         }
         let _ = child.wait();
     }
-    previous
 }
 
 #[derive(serde::Serialize)]
 struct AppSendResult {
-    /// Spaces performed the click and the paste. Whether the app *accepted*
-    /// them is not knowable from here — the window is not introspectable, which
-    /// is why this feature exists at all — so this must never be read as "the
-    /// message arrived". The numbers below are what let somebody check.
+    /// Spaces raised the app and pasted. On its own this means the keystrokes
+    /// were posted, not that they arrived — see `verified`.
     delivered: bool,
+    /// The message box was read back and had the text in it. The only field
+    /// that means the message arrived; false for an app that does not publish
+    /// its message box, where nobody but a human can tell.
+    verified: bool,
+    /// How the text was aimed: "composer" when Spaces found the message box in
+    /// the app's own window contents, "shape" when the app publishes nothing
+    /// and Spaces went by where a chat window keeps its composer.
+    method: String,
     /// What went wrong, in a sentence the UI can show as-is.
     problem: String,
     /// The app that was frontmost before, so the UI can say what it interrupted.
     previous_app: String,
     /// The target window, in screen points: x, y, width, height.
     window: [f64; 4],
-    /// Where Spaces clicked, in screen points.
+    /// The message box, when one was found: x, y, width, height. Zeroes when
+    /// the app publishes nothing.
+    composer: [f64; 4],
+    /// Where Spaces clicked, in screen points — so a miss is measurable
+    /// instead of mysterious.
     clicked: [f64; 2],
 }
 
 /// Type a message into another application's composer and optionally send it.
 ///
 /// This exists because some agents have no other door. Muse has no CLI, no
-/// AppleScript dictionary, no local port, and its `hatch://` scheme routes
-/// nothing but a login it no longer honours; its composer is not in the
-/// accessibility tree either. Driving the window is not a shortcut around a
-/// real API — it is the only interface the app has.
+/// scripting dictionary, no local port, no local database, and its `hatch://`
+/// scheme drops every host it is handed. Its threads live on Meta's servers
+/// behind an authenticated socket. Typing into the window is not a shortcut
+/// past an API — it is the only interface the app has.
 ///
-/// The composer is addressed as an offset from the window's bottom-left
-/// corner, because that is the one anchor a chat UI keeps when the window is
-/// resized. It is stored per agent so a layout change is a settings edit
-/// rather than a new build.
+/// It does not click anything, and it stores no coordinates.
+///
+/// That was the first design and it was wrong: an offset from the window's
+/// bottom-left corner cannot be got right without a screenshot and some
+/// arithmetic, it is wrong again the moment a toolbar or a side panel appears,
+/// and being wrong looks exactly like the permission being missing. It was
+/// also unnecessary. A chat window puts the caret in its message box when you
+/// switch to it — that is what makes it a chat window — so raising the app is
+/// the whole of "aim". Muse focuses its composer on activation; so do Slack,
+/// Messages and every other app in this shape.
+///
+/// Where the app does publish its message box, Spaces focuses that element
+/// directly and reads it back afterwards, which is the difference between
+/// believing the send worked and knowing it did.
 ///
 /// Text arrives by clipboard rather than keystroke: a brief is longer than
 /// anyone wants typed one event at a time, and paste cannot interleave with
-/// whatever the app does between characters. The previous contents go back.
+/// whatever the app does between characters. The previous clipboard goes back.
 #[tauri::command]
 async fn send_to_app(
     bundle_id: String,
     app_name: String,
     text: String,
-    composer_dx: f64,
-    composer_dy: f64,
     submit: bool,
 ) -> Result<AppSendResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -762,9 +1018,12 @@ async fn send_to_app(
         let fail = |problem: String| {
             Ok(AppSendResult {
                 delivered: false,
+                verified: false,
+                method: String::new(),
                 problem,
                 previous_app: String::new(),
                 window: [0.0; 4],
+                composer: [0.0; 4],
                 clicked: [0.0; 2],
             })
         };
@@ -783,34 +1042,114 @@ async fn send_to_app(
         };
 
         let was_front = frontmost_pid();
-        let mut frame = [0.0f64; 4];
-        let mut point = [0.0f64; 2];
+        /*
+         * The clipboard is loaded first, before anything is activated or
+         * clicked, and put back last.
+         *
+         * Setting it just before pressing ⌘V looks tidier and is a race. A
+         * synthetic keystroke is delivered asynchronously, and an app that has
+         * just been brought forward can take most of a second to get round to
+         * it — long enough that Muse pasted whatever had been on the clipboard
+         * *before* the send, having read the pasteboard after Spaces put the
+         * old contents back. Widening the window on both sides costs nothing
+         * and removes the race rather than shortening it.
+         */
+        let previous_clipboard = set_clipboard(&text);
+        let frame;
+        let mut box_frame = [0.0f64; 4];
+        let point;
+        let method;
+        // Three states, not two: `None` is "could not tell", which is a
+        // different thing from "looked and it was not there" and leads to
+        // different wording — and to whether return is pressed at all.
+        let seen: Option<bool>;
 
         unsafe {
-            let app = AXUIElementCreateApplication(pid);
-            if app.is_null() {
+            use core_foundation::base::{CFType, TCFType};
+            let raw = AXUIElementCreateApplication(pid);
+            if raw.is_null() {
                 return fail(format!("macOS would not describe {name}'s windows."));
             }
-            raise(app);
-            std::thread::sleep(Duration::from_millis(350));
+            let app = CFType::wrap_under_create_rule(raw);
+            raise(&app);
+            activate(&bundle_id, &name);
+            // Long enough for the app to come forward and put the caret where
+            // it puts it. This is the aiming step, and the only one.
+            std::thread::sleep(Duration::from_millis(500));
 
-            let Some((wx, wy, ww, wh)) = first_window_frame(app) else {
+            let Some(window) = target_window(&app) else {
                 return fail(format!("{name} is running but has no window Spaces can address."));
+            };
+            let Some((wx, wy, ww, wh)) = ax_frame(&window) else {
+                return fail(format!("{name}'s window would not say where it is."));
             };
             frame = [wx, wy, ww, wh];
 
-            let (cx, cy) = (wx + composer_dx, wy + wh - composer_dy);
+            /*
+             * Put the caret in the message box.
+             *
+             * Setting `AXFocused` is the polite way and works when the app
+             * publishes the element. When it does not — Muse's composer is
+             * absent from its accessibility tree entirely — a click is the
+             * only thing that focuses a web composer: activating the app does
+             * not, and Muse will swallow every keystroke sent to an unfocused
+             * window without a word. So click either way, at the box when
+             * there is one and at the shape of a chat window when there is
+             * not.
+             */
+            let composer = find_composer(&window);
+            let (cx, cy) = match &composer {
+                Some(found) => {
+                    let (x, y, w, h) = found.frame;
+                    box_frame = [x, y, w, h];
+                    method = "composer".to_string();
+                    ax_set_true(&found.element, "AXFocused");
+                    (x + w / 2.0, y + h / 2.0)
+                }
+                None => {
+                    method = "shape".to_string();
+                    composer_guess(wx, wy, ww, wh)
+                }
+            };
             point = [cx, cy];
-            let previous_clipboard = set_clipboard(&text);
-            click(cx, cy);
+            click(point[0], point[1]);
             std::thread::sleep(Duration::from_millis(220));
+
             key(KEY_V, true);
-            std::thread::sleep(Duration::from_millis(320));
-            if submit {
+            std::thread::sleep(Duration::from_millis(700));
+
+            /*
+             * Read it back before sending, while there is still something to
+             * read: submitting empties the box.
+             *
+             * The two sources are not equally trustworthy, and treating them
+             * as though they were produces a confident lie. Reading the
+             * composer found by the walk is authoritative both ways — it is
+             * the right element by construction. Reading "whatever is focused"
+             * only proves a positive: Muse reports a focused element that is
+             * not its composer and never contains the text, so believing its
+             * negative would report every successful send as a failure, and
+             * would stop the real hand-off pressing return.
+             *
+             * So: a match from either source is proof. A mismatch is only
+             * proof from the box itself; otherwise the answer is "cannot tell",
+             * which is a thing this type can say.
+             */
+            seen = match composer.as_ref().and_then(|found| ax_string(&found.element, "AXValue")) {
+                Some(value) => Some(contains_trimmed(&value, &text)),
+                None => match focused_text(&app) {
+                    Some(value) if contains_trimmed(&value, &text) => Some(true),
+                    _ => None,
+                },
+            };
+
+            // Don't press return into a box Spaces has just read and found
+            // empty — that is the one case where sending is known to do
+            // something other than send this message.
+            if submit && seen != Some(false) {
                 key(KEY_RETURN, false);
-                std::thread::sleep(Duration::from_millis(180));
+                std::thread::sleep(Duration::from_millis(250));
             }
-            set_clipboard(&previous_clipboard);
 
             // Put the user back where they were. Stealing focus is unavoidable
             // — the app only accepts input when it is frontmost — but keeping
@@ -819,33 +1158,63 @@ async fn send_to_app(
                 if back != pid {
                     let previous = AXUIElementCreateApplication(back);
                     if !previous.is_null() {
-                        raise(previous);
+                        raise(&CFType::wrap_under_create_rule(previous));
                     }
                 }
             }
         }
 
-        // Never a gate — only a note. Whether the events were delivered is
-        // something only the target app can show; this says whether macOS was
-        // likely to have dropped them on the way.
+        restore_clipboard(&previous_clipboard);
+
+        // Never a gate — only a note. macOS drops synthetic input from an
+        // untrusted process without telling anyone, so an unverified send by a
+        // process with no permission has an obvious first suspect.
         let trusted = unsafe { AXIsProcessTrusted() != 0 };
+        let problem = match seen {
+            Some(true) => String::new(),
+            _ if !trusted => format!(
+                "macOS reports no Accessibility permission for Spaces, so it may have dropped the \
+                 paste. If nothing appeared in {name}, that is why."
+            ),
+            Some(false) => format!(
+                "Spaces pasted into {name} and then read its message box, which did not contain \
+                 the text. {name} may have had something else focused."
+            ),
+            None => format!(
+                "{name} does not publish its message box, so Spaces clicked where a chat window \
+                 keeps one and cannot read back what happened next. Look at {name} once: if the \
+                 line is there, this works, and it will keep working — the point is measured from \
+                 the window every time, so it follows the window around."
+            ),
+        };
+
         Ok(AppSendResult {
             delivered: true,
-            problem: if trusted {
-                String::new()
-            } else {
-                format!(
-                    "macOS also reports no Accessibility permission for Spaces, so it may have \
-                     dropped the click and the paste. If nothing appeared in {name}, that is why."
-                )
-            },
+            verified: seen == Some(true),
+            method,
+            problem,
             previous_app: String::new(),
             window: frame,
+            composer: box_frame,
             clicked: point,
         })
     })
     .await
     .map_err(|e| format!("task failed: {e}"))?
+}
+
+/// Whether a composer's contents include what was pasted.
+///
+/// Not equality: a box that already had a draft in it keeps the draft, and
+/// some apps normalise whitespace or newlines on the way in. Comparing the
+/// first line is enough to tell "the paste landed" from "nothing happened",
+/// which is the only question being asked.
+fn contains_trimmed(seen: &str, sent: &str) -> bool {
+    let needle: String = sent.trim().lines().next().unwrap_or_default().trim().to_string();
+    if needle.is_empty() {
+        return false;
+    }
+    seen.contains(&needle)
 }
 
 /// Which agent/GitHub CLIs are available on this machine.

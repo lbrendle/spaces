@@ -299,16 +299,17 @@ test("only harnesses Spaces has verified are offered", async () => {
 });
 
 test("an agent Spaces cannot launch is still actually sent to", async () => {
-  const [external, agents, rust] = await Promise.all([
+  const [external, agents, rust, capabilities] = await Promise.all([
     readFile(new URL("../src/external.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
     readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8"),
+    readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
   ]);
 
   // Muse has no CLI, no scripting dictionary, no local port and no usable URL
-  // route, and its composer is not in the accessibility tree. Driving the
-  // window is the only interface it has — and a brief nobody opens is not a
-  // teammate, so the hand-off has to deliver, not just write a file.
+  // route. Driving the window is the only interface it has — and a brief
+  // nobody opens is not a teammate, so the hand-off has to deliver, not just
+  // write a file.
   assert.match(external, /export async function deliverToApp/);
   assert.match(agents, /await deliverToApp\(/);
   assert.match(rust, /async fn send_to_app/);
@@ -347,11 +348,76 @@ test("an agent Spaces cannot launch is still actually sent to", async () => {
   assert.doesNotMatch(driving, /Command::new\("\/usr\/bin\/osascript"\)/);
   assert.doesNotMatch(driving, /tell application "System Events"/);
   assert.match(driving, /AXUIElementCreateApplication/);
-  assert.match(driving, /CGEvent/);
   assert.match(driving, /lsappinfo/);
 
   // And the permission is checked in-process, where the answer is about Spaces.
   assert.match(rust, /fn AXIsProcessTrusted/);
   assert.match(driving, /AXIsProcessTrusted\(\)/);
-  assert.match(rust, /Privacy & Security/);
+  // The recovery instructions are shown by the UI layer, so that is where the
+  // sentence has to be — asserting it against the Rust passes for years and
+  // proves nothing.
+  assert.match(external, /Privacy & Security/);
+
+  /*
+   * A send has to be able to say whether it worked.
+   *
+   * The first version clicked a stored offset and returned `delivered: true`
+   * unconditionally, which is indistinguishable from doing nothing: the panel
+   * said it had worked while the message box stayed empty. Spaces now looks
+   * for the composer in the app's own accessibility tree, and reads it back
+   * afterwards — `verified` is the only field allowed to mean "it arrived".
+   */
+  assert.match(rust, /unsafe fn find_composer/);
+  assert.match(driving, /ax_string\(&found\.element, "AXValue"\)/);
+  assert.match(external, /verified: boolean/);
+  assert.match(handoff, /delivery\.verified/);
+
+  /*
+   * Nothing about where the message box is may be stored.
+   *
+   * The first version kept the composer's offset from the window's bottom-left
+   * corner in the agent's settings. Nobody can answer that without a
+   * screenshot and some arithmetic; it is wrong again the moment the window
+   * moves or a side panel opens; and being wrong looks exactly like the
+   * permission being missing. Every one of those is a property of *storing*
+   * the number, not of clicking — so the click stays and the setting does not.
+   * It is measured from the window on every send.
+   *
+   * Muse is why the click stays: its composer is not in the accessibility tree
+   * at all, activating the app does not focus it, and it swallows every
+   * keystroke sent to an unfocused window in silence.
+   */
+  assert.doesNotMatch(rust, /composer_dx|composer_dy/);
+  assert.doesNotMatch(external, /composerDx|composerDy/);
+  assert.doesNotMatch(capabilities, /composer_dx|composer_dy/);
+  assert.match(driving, /fn composer_guess\(wx: f64, wy: f64, ww: f64, wh: f64\)/);
+  assert.match(driving, /"composer"/);
+  assert.match(driving, /"shape"/);
+  // And an app is activated, not merely raised: `AXFrontmost` moves a window
+  // in front without making its app active, and an inactive app's composer
+  // never takes the caret.
+  assert.match(driving, /fn activate\(/);
+
+  /*
+   * A read-back may only say "no" when it read the real thing.
+   *
+   * Muse reports a focused element that is not its composer and never holds
+   * the pasted text. Treating that as a negative reported every successful
+   * send as a failure — and, worse, suppressed the return press that makes it
+   * a send at all. A match from anywhere is proof; a mismatch is proof only
+   * from the box itself, and otherwise the answer is "cannot tell".
+   */
+  assert.match(driving, /Some\(value\) if contains_trimmed\(&value, &text\) => Some\(true\),\n\s*_ => None,/);
+  // The search that remains is bounded: it only buys a read-back, and an
+  // Electron chat window will happily spend seconds saying it has nothing.
+  assert.match(driving, /WALK_BUDGET/);
+
+  /*
+   * Never `AXWindows[0]`. An app that has been running a while has more than
+   * one window and the order is arbitrary — Muse keeps a stale "Log in" window
+   * on another Space, which is first in the list and entirely wrong.
+   */
+  assert.match(driving, /unsafe fn target_window/);
+  assert.match(driving, /AXFocusedWindow/);
+  assert.doesNotMatch(driving, /fn first_window_frame/);
 });

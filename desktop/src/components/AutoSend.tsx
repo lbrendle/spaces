@@ -1,16 +1,17 @@
 /**
- * AutoSend — the two things standing between "configured" and "working".
+ * AutoSend — the one thing standing between "configured" and "working".
  *
- * Driving another app needs a macOS permission and a click point, and both
- * fail silently: without the grant macOS simply drops the input, and a click
- * point that is off by a hundred points lands in the conversation instead of
- * the message box. Neither is discoverable from a form full of numbers.
+ * Driving another app needs a macOS permission, and it fails silently: without
+ * the grant macOS simply drops the input, and nothing anywhere says so. There
+ * used to be a second thing, a click point measured from the window's corner,
+ * and getting rid of it is why this panel is now short — Spaces raises the app
+ * and pastes into whatever it focuses, which for a chat window is its message
+ * box. There is nothing to calibrate.
  *
- * So this panel answers both out loud. It says whether the permission is
- * granted and offers the system's own prompt — which opens the right pane and
- * puts Spaces in the list, leaving one toggle instead of a file picker. And it
- * types a line into the app without sending it, so somebody can watch the test
- * land in the right box before trusting it with real work.
+ * So: whether the permission is granted, with the system's own prompt — which
+ * opens the right pane and puts Spaces in the list, leaving one toggle instead
+ * of a file picker. And a line typed into the app without sending it, read
+ * back where the app allows that, so the answer is evidence.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -165,34 +166,37 @@ export function AutoSend({ agent }: { agent: Agent }) {
       )}
 
       <div className="as-row">
-        <button
-          type="button"
-          className="btn tiny"
-          onClick={() => void runTest()}
-          disabled={testing}
-        >
+        <button type="button" className="btn tiny" onClick={() => void runTest()} disabled={testing}>
           {testing ? <Spinner /> : null} Type a test line into {app}
         </button>
-        <span className="as-hint">
-          Types, but does not send — so you can see whether it lands in the message box. Worth
-          trying even when the line above says the permission is missing; that report goes stale.
-        </span>
       </div>
+      <span className="as-hint">
+        Types but does not send, and reads the box back where {app} allows that. Nothing here is
+        calibrated — where to click is worked out from the window each time — so this is a check,
+        not a setting. Worth trying even when the line above says the permission is missing; that
+        report goes stale.
+      </span>
 
       {result && (
-        <p className={`as-result ${result.delivered ? "ok" : "bad"}`}>
-          {result.delivered
-            ? `Clicked and pasted. Spaces cannot see inside ${app}, so look at its message box: if the line is not there, the click missed and the numbers below need changing.`
+        <p className={`as-result ${result.verified ? "ok" : result.delivered ? "warn" : "bad"}`}>
+          {result.verified
+            ? `The line is in ${app}'s message box — Spaces put it there and read it back. Clear it when you like; nothing was sent.`
             : result.problem || "Nothing happened, and macOS gave no reason."}
         </p>
       )}
       {/* The measurements are the whole point of the test. Without them,
-          "it did not work" leaves nothing to act on but guesswork. */}
-      {result?.window && result.clicked && (
+          "it did not work" leaves nothing to act on but guesswork — and which
+          of the two routes was taken decides what there is to act on. */}
+      {result?.window && (
         <p className="as-measure">
           {app}&apos;s window: {Math.round(result.window[2])}×{Math.round(result.window[3])} at (
-          {Math.round(result.window[0])}, {Math.round(result.window[1])}). Spaces clicked (
-          {Math.round(result.clicked[0])}, {Math.round(result.clicked[1])}).
+          {Math.round(result.window[0])}, {Math.round(result.window[1])}).{" "}
+          {result.clicked
+            ? `Spaces clicked (${Math.round(result.clicked[0])}, ${Math.round(result.clicked[1])}) — ` +
+              (result.method === "composer"
+                ? "the message box, found in the window's own contents."
+                : `where a chat window keeps its composer, because ${app} does not publish one.`)
+            : ""}
         </p>
       )}
     </div>

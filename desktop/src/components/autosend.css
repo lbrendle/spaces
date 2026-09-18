@@ -58,7 +58,9 @@
   max-width: var(--measure);
 }
 .as-result.ok { color: var(--green); }
-.as-result.bad { color: var(--yellow); }
+/* Typed, but not read back: not a failure and not a success either. */
+.as-result.warn { color: var(--yellow); }
+.as-result.bad { color: var(--red); }
 
 /* The measured numbers, for when the click missed and somebody has to say
    by how much. Monospaced so two attempts line up when compared. */

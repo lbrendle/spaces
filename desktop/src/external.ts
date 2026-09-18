@@ -42,9 +42,6 @@ export interface ExternalConfig {
   handoffDir: string;
   /** Type the ask into the app's composer and send it, not just write a file. */
   autosend: boolean;
-  /** Where the composer is, in points from the window's bottom-left corner. */
-  composerDx: number;
-  composerDy: number;
 }
 
 export function externalConfig(agent: Agent): ExternalConfig {
@@ -53,10 +50,6 @@ export function externalConfig(agent: Agent): ExternalConfig {
     const v = values[key];
     return typeof v === "string" ? v.trim() : "";
   };
-  const num = (key: string, fallback: number) => {
-    const parsed = Number(str(key));
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-  };
   return {
     app: (agent.model ?? "").trim(),
     bundleId: str("bundle_id"),
@@ -64,8 +57,6 @@ export function externalConfig(agent: Agent): ExternalConfig {
     gitAuthor: str("git_author"),
     handoffDir: str("handoff") || ".hq/inbox",
     autosend: values.autosend === true,
-    composerDx: num("composer_dx", 160),
-    composerDy: num("composer_dy", 34),
   };
 }
 
@@ -291,19 +282,38 @@ export async function handOff(req: HandOffRequest): Promise<HandOffResult> {
 
 export interface Delivery {
   /**
-   * Spaces clicked and pasted. Not "the app received it" — a window Spaces
-   * cannot introspect is the reason this exists — so the caller must not
-   * report arrival on the strength of this alone.
+   * Spaces clicked and pasted. On its own this is only "the events were
+   * posted" — read `verified` for whether the text was then found in the box.
    */
   delivered: boolean;
+  /**
+   * The composer was read back afterwards and had the text in it. This is the
+   * only field that means the message arrived. It stays false for an app that
+   * does not expose its message box, where nobody but a human can tell.
+   */
+  verified: boolean;
+  /**
+   * "composer" when Spaces found the message box in the app's own window
+   * contents and focused it, "focus" when it relied on the app focusing its
+   * own box — which is what a chat window does when you switch to it. Both
+   * work; only the first can prove it.
+   */
+  method: "composer" | "shape" | "";
   /** "" when it worked; otherwise one sentence for the channel. */
   problem: string;
   /** The app Spaces put back in front afterwards. */
   previousApp: string;
   /** Target window in screen points: x, y, width, height. */
   window?: [number, number, number, number];
+  /** The message box, when the app published one: x, y, width, height. */
+  composer?: [number, number, number, number];
   /** Where Spaces clicked, in screen points. */
   clicked?: [number, number];
+}
+
+/** A `Delivery` that never left the building. */
+function refused(problem: string): Delivery {
+  return { delivered: false, verified: false, method: "", problem, previousApp: "" };
 }
 
 /** Whether Spaces is allowed to drive other applications on this Mac. */
@@ -362,6 +372,7 @@ export function composerMessage(opts: {
  * blocks a feature that would have worked.
  */
 async function explain(problem: string): Promise<string> {
+  if (!problem) return "";
   if (await automationReady()) return problem;
   return `${problem} If this keeps happening, check Spaces is switched on in System Settings → Privacy & Security → Accessibility — and if it already is, switch it off and on again, which re-records the entry against the current signature.`.trim();
 }
@@ -376,90 +387,73 @@ async function explain(problem: string): Promise<string> {
  * to see and clear.
  */
 export async function testDelivery(agent: Agent): Promise<Delivery> {
-  const config = externalConfig(agent);
-  if (!config.app && !config.bundleId) {
-    return {
-      delivered: false,
-      problem: "Name the app first — Spaces does not know what to type into.",
-      previousApp: "",
-    };
-  }
-  try {
-    const raw = await invoke("send_to_app", {
-      bundleId: config.bundleId,
-      appName: config.app,
-      text: "Spaces can type here. (Test message — nothing was sent.)",
-      composerDx: config.composerDx,
-      composerDy: config.composerDy,
-      submit: false,
-    });
-    const result = (raw ?? {}) as Record<string, unknown>;
-    const delivered = result.delivered === true;
-    const nums = (v: unknown, n: number) =>
-      Array.isArray(v) && v.length === n ? (v.map(Number) as number[]) : undefined;
-    return {
-      delivered,
-      problem: delivered ? "" : await explain(String(result.problem ?? "")),
-      previousApp: String(result.previous_app ?? result.previousApp ?? ""),
-      window: nums(result.window, 4) as Delivery["window"],
-      clicked: nums(result.clicked, 2) as Delivery["clicked"],
-    };
-  } catch (e) {
-    return { delivered: false, problem: await explain(String(e)), previousApp: "" };
-  }
+  return send(agent, "Spaces can type here. (Test message — nothing was sent.)", false);
 }
 
 /**
- * Hand the ask to the app directly.
+ * Hand the ask to the app directly, and press send.
  *
  * Muse has no CLI, no scripting dictionary, no local port, and a URL scheme
- * that routes nothing usable; its composer is not in the accessibility tree
- * either. Typing into the window is not a shortcut past an API — it is the
- * only interface the app has, and leaving a file for somebody to notice is not
- * an agent.
+ * that routes nothing usable. Typing into the window is not a shortcut past an
+ * API — it is the only interface the app has, and leaving a file for somebody
+ * to notice is not an agent.
  *
- * Returns rather than throws: a hand-off that could not be delivered still
- * happened — the brief is on disk and the git baseline is recorded — so the
- * caller reports the problem and carries on.
+ * Silently does nothing when the agent has auto-send off: that is a setting,
+ * not a failure, and the caller has already written the brief.
  */
 export async function deliverToApp(
   agent: Agent,
   message: string
 ): Promise<Delivery> {
+  if (!externalConfig(agent).autosend) return refused("");
+  return send(agent, message, true);
+}
+
+/**
+ * The one call that drives the app, for both the test and the real hand-off.
+ *
+ * They differ in exactly two ways — what is typed, and whether return is
+ * pressed — and everything else has to stay identical, or the test stops being
+ * evidence about the thing it is testing.
+ *
+ * Returns rather than throws: a hand-off that could not be delivered still
+ * happened — the brief is on disk and the git baseline is recorded — so the
+ * caller reports the problem and carries on.
+ */
+async function send(agent: Agent, text: string, submit: boolean): Promise<Delivery> {
   const config = externalConfig(agent);
-  if (!config.autosend) {
-    return { delivered: false, problem: "", previousApp: "" };
-  }
   if (!config.app && !config.bundleId) {
-    return {
-      delivered: false,
-      problem: `${agent.name} has auto-send on but no app named, so Spaces does not know what to type into.`,
-      previousApp: "",
-    };
+    return refused(
+      submit
+        ? `${agent.name} has auto-send on but no app named, so Spaces does not know what to type into.`
+        : "Name the app first — Spaces does not know what to type into."
+    );
   }
 
   try {
     const raw = await invoke("send_to_app", {
       bundleId: config.bundleId,
       appName: config.app,
-      text: message,
-      composerDx: config.composerDx,
-      composerDy: config.composerDy,
-      submit: true,
+      text,
+      submit,
     });
     const result = (raw ?? {}) as Record<string, unknown>;
     const delivered = result.delivered === true;
+    const method = result.method === "composer" || result.method === "shape" ? result.method : "";
     const nums = (v: unknown, n: number) =>
       Array.isArray(v) && v.length === n ? (v.map(Number) as number[]) : undefined;
     return {
       delivered,
-      problem: delivered ? "" : await explain(String(result.problem ?? "")),
+      verified: result.verified === true,
+      method,
+      problem: await explain(String(result.problem ?? "")),
       previousApp: String(result.previous_app ?? result.previousApp ?? ""),
       window: nums(result.window, 4) as Delivery["window"],
+      composer: nums(result.composer, 4) as Delivery["composer"],
       clicked: nums(result.clicked, 2) as Delivery["clicked"],
     };
   } catch (e) {
-    return { delivered: false, problem: await explain(String(e)), previousApp: "" };
+    return refused(await explain(String(e)));
   }
 }
 
