@@ -13,6 +13,20 @@
   padding: var(--space-5) var(--pane-x) calc(var(--space-6) * 2);
 }
 
+/*
+ * Nothing in this column may shrink.
+ *
+ * `main-pane` is a flex column, and a flex item's default is to compress
+ * rather than overflow its parent — so the list quietly gave up height
+ * instead of making the pane scroll. What that looked like was the last row
+ * sliced through the middle by the container's own border, with the "show
+ * more" button stranded below it and no scrollbar anywhere. Keeping their
+ * natural height is what hands the overflow to `scroll-pane`.
+ */
+.im > * {
+  flex: 0 0 auto;
+}
+
 .im-head {
   display: flex;
   align-items: flex-start;
