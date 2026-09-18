@@ -325,10 +325,16 @@ function availabilityOf(agent: Agent): Availability {
   // "will reply in a minute" and "will get a brief and reply when someone opens
   // its app" is the whole point of addressing it.
   if (meta.wire === "external") {
+    // Two genuinely different things happen depending on one setting, and the
+    // composer is where somebody decides whether to press send — so it has to
+    // say which one they are about to get.
+    const autosend = /(?:^|\s)autosend=true(?:\s|$)/.test(agent.cli_args || "");
     return {
       blocked: true,
-      label: "hand-off",
-      note: `${handle} runs in ${agent.model || "its own app"}, which Spaces doesn't launch. Addressing it leaves a brief in the repository rather than starting a turn.`,
+      label: autosend ? "auto-send" : "hand-off",
+      note: autosend
+        ? `${handle} runs in ${agent.model || "its own app"}, which Spaces doesn't launch. Addressing it types the ask into that app and sends it — the app comes forward for a second to do it.`
+        : `${handle} runs in ${agent.model || "its own app"}, which Spaces doesn't launch. Addressing it leaves a brief in the repository rather than starting a turn.`,
     };
   }
   // An HTTP engine answers on a port rather than from PATH, and asking costs a
