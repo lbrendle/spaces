@@ -539,6 +539,23 @@ export interface HandOffOutcome {
 const REPLY_LIMIT = 6000;
 
 /**
+ * Paths Spaces creates itself, which are never anybody's work.
+ *
+ * `.spaces-workspaces/` is where the per-agent worktrees live and `.hq/` is
+ * the generated blackboard; both appear as untracked changes in the checkout
+ * and neither was written by the agent being asked about. Left in, the first
+ * external hand-off after a worktree is created reports "Muse: 1 uncommitted
+ * file — .spaces-workspaces/", which is Spaces describing its own plumbing
+ * back to the person as though a teammate had done it.
+ */
+const SPACES_OWNED = [".spaces-workspaces/", ".hq-workspaces/", ".hq/"];
+
+function spacesOwned(path: string): boolean {
+  const clean = path.replace(/^\.\//, "");
+  return SPACES_OWNED.some((own) => clean === own.slice(0, -1) || clean.startsWith(own));
+}
+
+/**
  * The agent's written answer, if it left one.
  *
  * Read from the project root rather than the agent's working directory: the
@@ -599,7 +616,9 @@ export async function settleHandOff(
   ).catch(() => null);
 
   const was = new Set(baseline.dirty);
-  const newlyDirty = (activity?.dirtyFiles ?? []).filter((f) => !was.has(f));
+  const newlyDirty = (activity?.dirtyFiles ?? []).filter(
+    (f) => !was.has(f) && !spacesOwned(f)
+  );
   const commits = baseline.sha ? activity?.commits ?? [] : [];
   return {
     commits,
@@ -607,6 +626,25 @@ export async function settleHandOff(
     reply,
     untouched: commits.length === 0 && newlyDirty.length === 0 && !reply,
   };
+}
+
+/**
+ * Whether any of these agents has left an answer waiting.
+ *
+ * One small file read each, and no git — which is the point. Settling a
+ * hand-off shells out to git several times, so it cannot run every few
+ * seconds; noticing that a file now has something in it can. Muse answers in
+ * about five seconds and was then sat on for up to forty-five, which reads as
+ * the agent being slow when it is only the workspace being asleep.
+ */
+export async function replyWaiting(
+  project: Project | undefined,
+  agents: readonly Agent[]
+): Promise<boolean> {
+  for (const agent of agents) {
+    if ((await readReply(project, agent)).trim()) return true;
+  }
+  return false;
 }
 
 /**

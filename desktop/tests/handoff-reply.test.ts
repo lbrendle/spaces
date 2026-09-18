@@ -194,3 +194,73 @@ test("a late reply can still start the teammate it names", async () => {
     "the hand-off must be settled before anything is chained from it"
   );
 });
+
+/*
+ * Muse answers in about five seconds. Spaces then sat on it for up to
+ * forty-five, because the only sweep that could notice also shelled out to git
+ * and so could not run often. From the channel that is indistinguishable from
+ * a slow agent — the answer exists, readable on disk, and nobody looks.
+ */
+test("an answer is noticed in seconds, without git running in seconds", async () => {
+  const [src, ext] = await Promise.all([
+    agents(),
+    readFile(new URL("../src/external.ts", import.meta.url), "utf8"),
+  ]);
+
+  // Two cadences, because the two checks cost different things.
+  const poll = Number(src.match(/const HANDOFF_POLL_MS = ([\d_]+)/)?.[1].replace(/_/g, "") ?? 0);
+  const git = Number(src.match(/const HANDOFF_GIT_MS = ([\d_]+)/)?.[1].replace(/_/g, "") ?? 0);
+  assert.ok(poll > 0 && poll <= 10_000, `the fast tick is not fast (${poll}ms)`);
+  assert.ok(git >= poll * 4, "the git sweep must be much rarer than the file check");
+
+  const watch = src.slice(src.indexOf("export function initHandOffWatch"));
+  const body = watch.slice(0, watch.indexOf("\n}\n"));
+  // The fast path reads files and skips; only the slow path reaches git.
+  assert.match(body, /const withGit = Date\.now\(\) - lastGit >= HANDOFF_GIT_MS/);
+  assert.match(body, /if \(!withGit\) \{[\s\S]*?replyWaiting\(project, externals\)[\s\S]*?continue;/);
+  // Nothing outstanding stays free.
+  assert.match(body, /if \(!rows\.length\) return;/);
+
+  // And the cheap check really is cheap: files only, no git.
+  const fn = ext.slice(ext.indexOf("export async function replyWaiting"));
+  const waiting = fn.slice(0, fn.indexOf("\n}\n"));
+  assert.match(waiting, /readReply\(project, agent\)/);
+  assert.doesNotMatch(waiting, /activityOf|git\(/);
+});
+
+/*
+ * Two ways the channel got told things that were not true.
+ *
+ * `.spaces-workspaces/` is where Spaces puts the per-agent worktrees, so the
+ * first hand-off after one is created reported "Muse: 1 uncommitted file —
+ * .spaces-workspaces/": Spaces describing its own plumbing back to the person
+ * as a teammate's work. And every open hand-off asks the same question, so
+ * asking twice in a minute produced two identical reports seconds apart.
+ */
+test("Spaces' own directories are never reported as an agent's work", async () => {
+  const src = await readFile(new URL("../src/external.ts", import.meta.url), "utf8");
+
+  assert.match(src, /const SPACES_OWNED = \[/);
+  for (const own of [".spaces-workspaces/", ".hq/"]) {
+    assert.ok(src.includes(`"${own}"`), `${own} is not excluded`);
+  }
+  // Applied where the agent's new work is decided, not merely defined.
+  const settle = src.slice(src.indexOf("export async function settleHandOff"));
+  assert.match(settle.slice(0, settle.indexOf("\n}\n")), /!was\.has\(f\) && !spacesOwned\(f\)/);
+
+  // A leading "./" must not let a path through.
+  const fn = src.slice(src.indexOf("function spacesOwned"));
+  assert.match(fn.slice(0, fn.indexOf("\n}")), /replace\(/);
+});
+
+test("one report per agent per sweep, however many hand-offs are open", async () => {
+  const src = await agents();
+  const fn = src.slice(src.indexOf("export async function reportHandOffs"));
+  const body = fn.slice(0, fn.indexOf("\n  return reported;"));
+
+  assert.match(body, /let said = false;/);
+  assert.match(body, /said = true;/);
+  // The extras are settled rather than left open, or they would be retried for
+  // ever and report again the moment anything did change.
+  assert.match(body, /if \(said\) \{\s*\n\s*await store\.patchRun\(row\.id, \{ meta: "external work landed" \}\);/);
+});

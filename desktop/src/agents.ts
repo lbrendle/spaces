@@ -34,6 +34,7 @@ import {
   handOff,
   handoffPath,
   consumeReply,
+  replyWaiting,
   settleHandOff,
 } from "./external";
 import { checkpointAfter, checkpointBefore, runDiff } from "./gitflow";
@@ -2139,8 +2140,22 @@ export async function reportHandOffs(projectId: string): Promise<number> {
 
   for (const agent of externals) {
     const open = await store.openHandOffsFor(agent.id).catch(() => []);
+    /*
+     * One report per agent per sweep.
+     *
+     * `openHandOffsFor` returns every hand-off still waiting, newest first,
+     * and they all ask the same question: what has this agent done since. Ask
+     * someone twice in a minute and both are open, so the same work was
+     * announced once per hand-off — two identical messages, seconds apart.
+     * The newest baseline is the accurate one; the rest are settled quietly.
+     */
+    let said = false;
     for (const row of open) {
       if (!channelIds.has(row.channel_id)) continue;
+      if (said) {
+        await store.patchRun(row.id, { meta: "external work landed" });
+        continue;
+      }
       const outcome = await settleHandOff(project, agent, {
         sha: row.commit_before,
         dirty: row.files_changed ? row.files_changed.split("\n").filter(Boolean) : [],
@@ -2180,6 +2195,7 @@ export async function reportHandOffs(projectId: string): Promise<number> {
       });
       // Mark it settled so the same work is never reported twice.
       await store.patchRun(row.id, { meta: "external work landed" });
+      said = true;
       if (outcome.reply) await consumeReply(project, agent);
 
       /*
@@ -2213,8 +2229,17 @@ export async function reportHandOffs(projectId: string): Promise<number> {
   return reported;
 }
 
-/** How often to look for external teammates that have answered. */
-const HANDOFF_POLL_MS = 45_000;
+/**
+ * How often to look for an answer, and how often to look at git.
+ *
+ * Two cadences because the two checks cost wildly different things. Reading a
+ * reply file is a few bytes; settling a hand-off shells out to git several
+ * times per agent. Muse answers in about five seconds and was then sat on for
+ * up to forty-five, which reads as the agent being slow when it is only the
+ * workspace being asleep.
+ */
+const HANDOFF_POLL_MS = 4_000;
+const HANDOFF_GIT_MS = 45_000;
 
 /**
  * Notice when an external teammate answers, without being asked to look.
@@ -2232,6 +2257,8 @@ const HANDOFF_POLL_MS = 45_000;
 export function initHandOffWatch(): () => void {
   let stopped = false;
   let running = false;
+  // Far enough back that the first tick looks at git too.
+  let lastGit = 0;
 
   const tick = async () => {
     // Overlapping sweeps would run git against the same tree twice and could
@@ -2246,8 +2273,21 @@ export function initHandOffWatch(): () => void {
            INNER JOIN channels ON channels.id = runs.channel_id
           WHERE runs.meta LIKE '%awaiting external agent%'`
       );
+      if (!rows.length) return;
+
+      const store = useStore.getState();
+      const externals = store.agents.filter((agent) => isExternal(agent.kind));
+      // Work that only shows up in git can wait for the slow cadence; a
+      // written answer should not.
+      const withGit = Date.now() - lastGit >= HANDOFF_GIT_MS;
+      if (withGit) lastGit = Date.now();
+
       for (const row of rows) {
         if (stopped) return;
+        if (!withGit) {
+          const project = store.projects.find((p) => p.id === row.project_id);
+          if (!(await replyWaiting(project, externals).catch(() => false))) continue;
+        }
         await reportHandOffs(row.project_id).catch(() => 0);
       }
     } catch {
