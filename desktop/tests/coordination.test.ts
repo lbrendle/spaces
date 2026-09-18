@@ -158,6 +158,49 @@ test("an agent that never sees the checkout is not credited with its tools", asy
   assert.match(view, /never sees this checkout's config/);
 });
 
+/*
+ * Reach — the browser and the screen — is off until somebody says otherwise,
+ * and the refusal is enforced where the agent actually asks.
+ *
+ * A capability declared in the editor and not checked in the tool is a
+ * setting that looks like a control and is not one. The check belongs next to
+ * the action, because the UI is not what an agent talks to.
+ */
+test("an agent reaches outside its directory only when it has been let", async () => {
+  const [ops, caps] = await Promise.all([
+    readFile(new URL("../src/hqops.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(caps, /const REACH_OPTION/);
+  assert.match(caps, /default: false/);
+  // Every tool that leaves the project asks first.
+  const reaching = [
+    "spaces_browse",
+    "spaces_browser_read",
+    "spaces_browser_controls",
+    "spaces_browser_click",
+    "spaces_browser_type",
+    "spaces_screen_read",
+    "spaces_screen_type",
+  ];
+  for (const name of reaching) {
+    const at = ops.indexOf(`name: "${name}"`);
+    assert.ok(at > 0, `${name} is missing`);
+    const body = ops.slice(at, ops.indexOf("\n  },", at));
+    assert.match(body, /reachRefusal\(ctx\)/, `${name} does not check reach`);
+  }
+
+  // Typing into another app also needs the macOS grant, and says so rather
+  // than posting keystrokes macOS will silently drop.
+  const typing = ops.slice(ops.indexOf('name: "spaces_screen_type"'));
+  assert.match(typing.slice(0, typing.indexOf("\n  },")), /screenAllowed\(\)/);
+
+  // And Spaces will not type a password into a web page.
+  const browser = await readFile(new URL("../src/browsertools.ts", import.meta.url), "utf8");
+  assert.match(browser, /type === "password"/);
+});
+
 test("the doctor never upgrades an unknown sign-in state to ready", async () => {
   const doctor = await readFile(new URL("../src/doctor.ts", import.meta.url), "utf8");
 

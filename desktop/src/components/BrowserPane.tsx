@@ -6,8 +6,11 @@ import {
   browserClose,
   browserNavigate,
   browserOpen,
+  browserDock,
   browserEval,
+  browserIsFloating,
   browserLabel,
+  browserPopout,
   browserUrl,
   browserVisibility,
   normalizeBrowserInput,
@@ -15,6 +18,8 @@ import {
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconContract,
+  IconExpand,
   IconGlobe,
   IconRefresh,
 } from "./icons";
@@ -62,6 +67,13 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
    * browser tool an agent has; if the title is right, so is the bridge.
    */
   const [pageTitle, setPageTitle] = useState("");
+  /*
+   * True while the browser is in its own floating window.
+   *
+   * The pane must not recreate its webview while that is the case — there is
+   * only one browser, and two would be two different pages that look like one.
+   */
+  const [floating, setFloating] = useState(false);
   const [ready, setReady] = useState(!native);
 
   const enqueue = useCallback((fn: () => Promise<unknown>) => {
@@ -82,8 +94,18 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
     });
   }, [label]);
 
+  // A browser can already be floating when this pane mounts — after switching
+  // channels, or on the next launch — so ask rather than assume.
+  useEffect(() => {
+    void browserIsFloating(label).then(setFloating).catch(() => {});
+  }, [label]);
+
   useEffect(() => {
     if (!native) return;
+    // Floating means the browser already exists in its own window. Opening a
+    // second one here would put two different pages on screen that both claim
+    // to be this project's browser.
+    if (floating) return;
     let live = true;
     let settleTimer = 0;
 
@@ -127,7 +149,7 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
         await browserClose(label).catch(() => {});
       });
     };
-  }, [enqueue, firstUrl, label, native, place]);
+  }, [enqueue, firstUrl, floating, label, native, place]);
 
   useEffect(() => {
     if (!native) return;
@@ -225,6 +247,30 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
     }
   }
 
+  async function popOut() {
+    setError("");
+    try {
+      const url = await browserPopout(label);
+      setFloating(true);
+      if (url) setAddress(url);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+
+  async function dock() {
+    setError("");
+    try {
+      const url = await browserDock(label);
+      if (url) setAddress(url);
+      // Clearing this lets the open effect run again and rebuild the webview
+      // in the pane, at wherever the floating window had got to.
+      setFloating(false);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+
   async function act(action: "back" | "forward" | "reload") {
     setError("");
     if (!native && action === "reload") {
@@ -286,8 +332,15 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
             {pageTitle}
           </span>
         )}
-        <span className={"cc-browser-state" + (ready ? " ready" : "")}>
-          {ready ? "live" : "opening"}
+        <button
+          className="icon-btn"
+          title={floating ? "Put the browser back in this panel" : "Float the browser above everything"}
+          onClick={() => void (floating ? dock() : popOut())}
+        >
+          {floating ? <IconContract size={15} /> : <IconExpand size={15} />}
+        </button>
+        <span className={"cc-browser-state" + (ready || floating ? " ready" : "")}>
+          {floating ? "floating" : ready ? "live" : "opening"}
         </span>
       </div>
       {error && <div className="banner warn cc-browser-error">{error}</div>}
@@ -299,7 +352,16 @@ export function BrowserPane({ projectId, initialUrl, active }: BrowserPaneProps)
             src={fallbackUrl.replace(/#spaces-reload=\d+$/, "")}
           />
         )}
-        {native && !ready && !error && (
+        {native && floating && (
+          <div className="cc-browser-loading">
+            <IconGlobe size={22} />
+            This browser is floating above your other windows.
+            <button className="btn tiny" onClick={() => void dock()}>
+              Put it back
+            </button>
+          </div>
+        )}
+        {native && !floating && !ready && !error && (
           <div className="cc-browser-loading">
             <IconGlobe size={22} />
             Opening the project browser…

@@ -98,3 +98,27 @@ export async function browserEval<T = unknown>(
 export function browserLabel(projectId: string): string {
   return `spaces-browser-${projectId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
+
+/**
+ * Float the project browser above everything, in its own small window.
+ *
+ * Returns the address it is showing. The floating window *is* the browser —
+ * the webview moves rather than being duplicated — so the pane and every tool
+ * an agent calls keep addressing the same page.
+ */
+export async function browserPopout(label: string): Promise<string> {
+  if (!isTauri()) return "";
+  return invoke<string>("browser_popout", { label });
+}
+
+/** Put it back, and say where it had got to. */
+export async function browserDock(label: string): Promise<string> {
+  if (!isTauri()) return "";
+  return invoke<string>("browser_dock", { label });
+}
+
+/** Whether this project's browser is floating right now. */
+export async function browserIsFloating(label: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  return invoke<boolean>("browser_floating", { label }).catch(() => false);
+}

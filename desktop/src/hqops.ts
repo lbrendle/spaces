@@ -27,6 +27,8 @@ import { useStore } from "./store";
 // `typeInto`, not `type`: a named import called `type` reads as TypeScript's
 // type-only modifier, which is a coin toss nobody should have to call.
 import { click, controls, goTo, readPage, typeInto } from "./browsertools";
+import { readApp, screenAllowed, typeIntoApp } from "./screen";
+import { parseArgs } from "./capabilities";
 import { getDb } from "./db";
 import { describeEntity, searchEntities } from "./entities";
 import { LINK_KINDS } from "./links";
@@ -446,6 +448,22 @@ async function resolvedMediaList(
 }
 
 const REF_HELP = 'either "type:id" as printed in .hq/, or an exact title';
+
+/**
+ * Whether this agent has been let out of its working directory.
+ *
+ * Off unless somebody turned it on for that agent, and checked here rather
+ * than in the UI, because the UI is not what an agent talks to. A tool that
+ * exists but refuses is also better than a tool that is absent: the refusal
+ * says what to ask the person for.
+ */
+function reachRefusal(ctx: OpContext): string {
+  const agent = useStore.getState().agents.find((a) => a.id === ctx.agentId);
+  if (!agent) return "Spaces cannot tell which agent is calling, so it will not act outside the project.";
+  const values = parseArgs(agent.kind, agent.cli_args ?? "");
+  if (values.reach === true) return "";
+  return `${agent.name} is not allowed to use the browser or the screen. Turn on "Can use the browser and the screen" in this agent's settings.`;
+}
 
 /* ── the registry ─────────────────────────────────────────────── */
 
@@ -2566,6 +2584,8 @@ export const OPERATIONS: Operation[] = [
       { name: "url", type: "string", required: true, describe: "An address, or a search phrase." },
     ],
     async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
       if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser to open." };
       try {
         const page = await goTo(ctx.projectId, str(args, "url"));
@@ -2589,6 +2609,8 @@ export const OPERATIONS: Operation[] = [
     readOnly: true,
     params: [],
     async run(_args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
       if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
       try {
         const page = await readPage(ctx.projectId);
@@ -2610,6 +2632,8 @@ export const OPERATIONS: Operation[] = [
     readOnly: true,
     params: [],
     async run(_args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
       if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
       try {
         const list = await controls(ctx.projectId);
@@ -2630,6 +2654,8 @@ export const OPERATIONS: Operation[] = [
       { name: "text", type: "string", required: true, describe: "The words on the link or button." },
     ],
     async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
       if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
       try {
         return { ok: true, message: await click(ctx.projectId, str(args, "text")) };
@@ -2649,9 +2675,75 @@ export const OPERATIONS: Operation[] = [
       { name: "text", type: "string", required: true, describe: "What to put in it." },
     ],
     async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
       if (!ctx.projectId) return { ok: false, message: "That run has no project, so there is no browser." };
       try {
         return { ok: true, message: await typeInto(ctx.projectId, str(args, "field"), str(args, "text")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
+
+  /* ── the rest of the Mac ─────────────────────────────────────── */
+  //
+  // The same two abilities Spaces already uses to hand work to an app with no
+  // API: look at a window, type into one. Both need the agent's reach switched
+  // on, and typing needs the macOS Accessibility grant Spaces itself was
+  // given — so the failure, when there is one, names the thing to go and fix.
+
+  {
+    name: "spaces_screen_read",
+    describe:
+      "Read what another application on this Mac is showing, as text. Use it to check the state of an app you cannot query any other way — a simulator, a desktop client, a tool with no API.",
+    effect: "auto",
+    readOnly: true,
+    params: [
+      { name: "app", type: "string", required: true, describe: "The application's name, e.g. \"Simulator\" or \"Muse\"." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      try {
+        return { ok: true, message: await readApp(str(args, "app")) };
+      } catch (e) {
+        return { ok: false, message: String(e) };
+      }
+    },
+  },
+
+  {
+    name: "spaces_screen_type",
+    describe:
+      "Type into another application on this Mac: Spaces brings it forward, clicks its message box and pastes. Needs macOS Accessibility permission for Spaces. Spaces will not type a password.",
+    effect: "auto",
+    params: [
+      { name: "app", type: "string", required: true, describe: "The application's name." },
+      { name: "text", type: "string", required: true, describe: "What to type." },
+      { name: "send", type: "boolean", describe: "Press return afterwards. Defaults to false." },
+    ],
+    async run(args, ctx) {
+      const refusal = reachRefusal(ctx);
+      if (refusal) return { ok: false, message: refusal };
+      if (!(await screenAllowed())) {
+        return {
+          ok: false,
+          message:
+            "macOS has not granted Spaces Accessibility permission, so anything typed would be dropped. Ask the person to turn Spaces on in System Settings → Privacy & Security → Accessibility.",
+        };
+      }
+      try {
+        const result = await typeIntoApp(str(args, "app"), str(args, "text"), args.send === true);
+        if (result.verified) return { ok: true, message: "Typed, and read back from the box." };
+        if (result.delivered) {
+          return {
+            ok: true,
+            message: `Typed, but ${str(args, "app")} does not publish its message box so Spaces could not confirm it landed. ${result.problem}`.trim(),
+          };
+        }
+        return { ok: false, message: result.problem || "Nothing happened, and macOS gave no reason." };
       } catch (e) {
         return { ok: false, message: String(e) };
       }

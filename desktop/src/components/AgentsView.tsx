@@ -168,6 +168,12 @@ function HarnessCaps({ kind }: { kind: string }) {
             : "MCP, from the config Spaces writes in its working directory.",
     ],
     [
+      "Reach",
+      caps.reach === "none"
+        ? "Runs in its own app, so Spaces has no tools to lend it — it works through the repository."
+        : "Can be given the workspace browser and the screen, per agent, in Reach below. Off unless you turn it on.",
+    ],
+    [
       "Live output",
       caps.toolEvents
         ? "Tool calls and edits stream into the run inspector."

@@ -1835,6 +1835,110 @@ async fn send_to_app(
     .map_err(|e| format!("task failed: {e}"))?
 }
 
+/// How much of an app's window a read will walk, and return.
+///
+/// The same reasoning as the composer search: an app's accessibility tree
+/// holds everything it has ever rendered, and the caller is an agent's tool
+/// call with somebody waiting behind it.
+const SCREEN_NODES: usize = 4000;
+const SCREEN_BUDGET: Duration = Duration::from_millis(800);
+const SCREEN_CHARS: usize = 12_000;
+
+/// Read what an application is showing, as text.
+///
+/// This is the counterpart to typing into one. Spaces could already drive an
+/// app it cannot otherwise reach; it could not look at one, which meant an
+/// agent acting on a window was acting blind and reporting its own hopes.
+///
+/// Reads the accessibility tree rather than taking a screenshot: it is what
+/// the app itself publishes, it needs no screen recording permission, and it
+/// comes back as text an agent can actually reason about instead of an image
+/// it has to describe to itself first. What an app does not publish, this
+/// cannot see — which is a real limit, and one Muse demonstrates.
+#[tauri::command]
+async fn screen_read(app_name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let name = app_name.trim().to_string();
+        if name.is_empty() {
+            return Err("name the app to read".to_string());
+        }
+        let pid: i32 = Command::new("/usr/bin/pgrep")
+            .arg("-x")
+            .arg(&name)
+            .output()
+            .ok()
+            .and_then(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .and_then(|line| line.trim().parse().ok())
+            })
+            .ok_or_else(|| format!("{name} is not running."))?;
+
+        unsafe {
+            use core_foundation::base::{CFType, TCFType};
+            let raw = AXUIElementCreateApplication(pid);
+            if raw.is_null() {
+                return Err(format!("macOS would not describe {name}'s windows."));
+            }
+            let app = CFType::wrap_under_create_rule(raw);
+            let window = target_window(&app)
+                .ok_or_else(|| format!("{name} has no window Spaces can read."))?;
+
+            let mut out = String::new();
+            let mut stack = vec![window];
+            let mut seen = 0usize;
+            let deadline = Instant::now() + SCREEN_BUDGET;
+
+            while let Some(element) = stack.pop() {
+                seen += 1;
+                if seen > SCREEN_NODES
+                    || out.len() > SCREEN_CHARS
+                    || (seen.is_multiple_of(64) && Instant::now() > deadline)
+                {
+                    break;
+                }
+                let role = ax_string(&element, "AXRole").unwrap_or_default();
+                // The attribute that carries the words differs by role, and a
+                // button's label is in its title while a field's is in its
+                // value. Taking the first that answers keeps this one pass.
+                let text = match role.as_str() {
+                    "AXStaticText" | "AXTextArea" | "AXTextField" => ax_string(&element, "AXValue"),
+                    "AXButton" | "AXMenuItem" | "AXCheckBox" | "AXRadioButton" | "AXLink" => {
+                        ax_string(&element, "AXTitle")
+                            .or_else(|| ax_string(&element, "AXDescription"))
+                    }
+                    _ => None,
+                };
+                if let Some(text) = text {
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        if !role.starts_with("AXStatic") && !role.starts_with("AXText") {
+                            out.push_str(&format!("[{}] ", role.trim_start_matches("AX")));
+                        }
+                        out.push_str(text);
+                        out.push('\n');
+                    }
+                }
+                for child in ax_children(&element) {
+                    stack.push(child);
+                }
+            }
+
+            if out.trim().is_empty() {
+                return Err(format!(
+                    "{name} publishes nothing readable — some apps, Muse among them, put almost \
+                     none of their window in the accessibility tree."
+                ));
+            }
+            out.truncate(SCREEN_CHARS);
+            Ok(out)
+        }
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 /// Whether a composer's contents include what was pasted.
 ///
 /// Not equality: a box that already had a draft in it keeps the draft, and
@@ -3234,12 +3338,86 @@ fn pty_kill(state: State<'_, LivePtys>, session_id: String) -> Result<(), String
 /// call site, so the two cannot drift apart again.
 const PROJECT_BROWSER_PREFIX: &str = "spaces-browser-";
 
+/// Suffix for the same browser while it is floating in its own window.
+///
+/// Popping out has to be invisible to everything that addresses the browser —
+/// the pane, and every tool an agent calls. So the floating window keeps the
+/// project's label with this on the end, and resolution tries both: a browser
+/// that stops answering because somebody moved it into the corner of the
+/// screen would be a worse feature than not having the corner at all.
+const PIP_SUFFIX: &str = "-pip";
+
 fn project_browser(app: &AppHandle, label: &str) -> Result<tauri::Webview, String> {
     if !label.starts_with(PROJECT_BROWSER_PREFIX) {
         return Err("not a Spaces project browser".into());
     }
     app.get_webview(label)
+        .or_else(|| app.get_webview(&format!("{label}{PIP_SUFFIX}")))
         .ok_or_else(|| format!("project browser {label} is not open"))
+}
+
+/// Float the project browser above everything, in its own small window.
+///
+/// The window *is* the browser rather than a window containing a copy of it:
+/// one webview, moved, so there is never a second page pretending to be the
+/// first. What that costs is the page's own state — it reloads at the same
+/// address — and what it buys is that every tool, and the pane, keep talking
+/// to the thing the person is actually looking at.
+#[tauri::command]
+async fn browser_popout(app: AppHandle, label: String) -> Result<String, String> {
+    let pip = format!("{label}{PIP_SUFFIX}");
+    if let Some(existing) = app.get_webview_window(&pip) {
+        let _ = existing.set_focus();
+        return existing
+            .url()
+            .map(|u| u.to_string())
+            .map_err(|e| format!("could not read the browser address: {e}"));
+    }
+
+    let browser = project_browser(&app, &label)?;
+    let url = browser
+        .url()
+        .map_err(|e| format!("could not read the browser address: {e}"))?;
+    browser.close().map_err(|e| e.to_string())?;
+
+    tauri::WebviewWindowBuilder::new(&app, &pip, tauri::WebviewUrl::External(url.clone()))
+        .title("Spaces — browser")
+        .inner_size(520.0, 400.0)
+        .min_inner_size(260.0, 200.0)
+        .always_on_top(true)
+        .resizable(true)
+        .skip_taskbar(false)
+        .build()
+        .map_err(|e| format!("could not float the browser: {e}"))?;
+    Ok(url.to_string())
+}
+
+/// Put the floating browser back, and say where it had got to.
+#[tauri::command]
+async fn browser_dock(app: AppHandle, label: String) -> Result<String, String> {
+    let pip = format!("{label}{PIP_SUFFIX}");
+    let Some(window) = app.get_webview_window(&pip) else {
+        return Ok(String::new());
+    };
+    // Read before closing: afterwards there is nothing to ask.
+    let url = window.url().map(|u| u.to_string()).unwrap_or_default();
+    /*
+     * `destroy`, not `close`.
+     *
+     * `close` asks the window to close and waits for the event loop to run the
+     * close-requested handling — from inside a command, that is the loop this
+     * call is already holding, so it never returns. The symptom is precisely
+     * nothing: no error to show, no state change, a button that appears dead.
+     * `destroy` takes the window down without the round trip.
+     */
+    window.destroy().map_err(|e| e.to_string())?;
+    Ok(url)
+}
+
+/// Whether this project's browser is currently floating.
+#[tauri::command]
+fn browser_floating(app: AppHandle, label: String) -> bool {
+    app.get_webview_window(&format!("{label}{PIP_SUFFIX}")).is_some()
 }
 
 fn browser_http_url(value: &str) -> Result<tauri::Url, String> {
@@ -3764,6 +3942,7 @@ pub fn run() {
             accessibility_trusted,
             request_accessibility,
             send_to_app,
+            screen_read,
             scan_agent_sessions,
             read_agent_session,
             check_app,
@@ -3782,6 +3961,9 @@ pub fn run() {
             browser_close,
             browser_navigate,
             browser_eval,
+            browser_popout,
+            browser_dock,
+            browser_floating,
             browser_action,
             browser_url
         ])

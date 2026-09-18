@@ -109,6 +109,22 @@ export interface HarnessCaps {
   models: "suggestions" | "dynamic" | "free";
   /** Spaces streams its output live rather than learning about it afterwards. */
   streaming: boolean;
+  /**
+   * Whether this agent can reach outside its own process — the screen, and the
+   * workspace browser — through Spaces.
+   *
+   * "spaces" means Spaces lends it the ones it has: the built-in browser, and
+   * reading or typing into another app under the Accessibility permission
+   * Spaces itself was granted. That is the only kind Spaces can honestly
+   * describe, because it is the only kind it provides. Whatever a harness does
+   * with its own computer-use tooling is between it and its own sandbox, and
+   * claiming to model that would be the same mistake as telling people Muse
+   * reads a config file it has never opened.
+   *
+   * "none" is for an agent Spaces never launches: it runs in its own app, so
+   * it cannot be handed Spaces's tools at all.
+   */
+  reach: "spaces" | "none";
 }
 
 /**
@@ -159,6 +175,34 @@ export interface HarnessMeta {
 }
 
 /* ── Manifest ─────────────────────────────────────────────────── */
+
+/**
+ * Letting an agent out of the terminal.
+ *
+ * Off by default, and one switch rather than several, because the question a
+ * person is actually answering is "may this teammate touch things outside its
+ * own working directory". Splitting that into browser-yes/screen-no invites
+ * nobody to think about it and makes the risky half arrive unnoticed.
+ *
+ * Reading a window needs the same macOS Accessibility grant as typing into
+ * one, which Spaces already asks for and reports on; the agent editor says so
+ * next to this switch rather than letting it fail silently later.
+ */
+const REACH_OPTION: HarnessOption = {
+  key: "reach",
+  label: "Can use the browser and the screen",
+  help:
+    "Lets this agent drive the workspace browser and read or type into other apps on this Mac, through Spaces. Everything happens in the browser you can see, and typing into another app needs Accessibility permission. Off means it stays in its working directory.",
+  control: "boolean",
+  kind: "json",
+  default: false,
+  group: "Reach",
+  chip: true,
+  risky: {
+    true:
+      "This agent will be able to open pages and act in other applications on this Mac. It cannot enter passwords — Spaces refuses that — but everything else it does is real.",
+  },
+};
 
 const CLAUDE_OPTIONS: readonly HarnessOption[] = [
   {
@@ -263,6 +307,7 @@ const CLAUDE_OPTIONS: readonly HarnessOption[] = [
     placeholder: "./.claude/settings.json",
     group: "Advanced",
   },
+  REACH_OPTION,
 ];
 
 const CODEX_OPTIONS: readonly HarnessOption[] = [
@@ -362,6 +407,7 @@ const CODEX_OPTIONS: readonly HarnessOption[] = [
     placeholder: 'model_reasoning_effort="high"',
     group: "Advanced",
   },
+  REACH_OPTION,
 ];
 
 
@@ -437,6 +483,7 @@ const CURSOR_OPTIONS: readonly HarnessOption[] = [
     default: true,
     group: "Permissions",
   },
+  REACH_OPTION,
 ];
 
 
@@ -539,6 +586,7 @@ export const HARNESSES: readonly HarnessMeta[] = [
       usage: true,
       worktrees: true,
       models: "suggestions",
+      reach: "spaces",
       streaming: true,
     },
     probe: { bin: "claude", versionArgs: ["--version"], installHint: "claude.com/claude-code" },
@@ -560,6 +608,7 @@ export const HARNESSES: readonly HarnessMeta[] = [
       usage: true,
       worktrees: true,
       models: "suggestions",
+      reach: "spaces",
       streaming: true,
     },
     probe: { bin: "codex", versionArgs: ["--version"], installHint: "npm i -g @openai/codex" },
@@ -581,6 +630,7 @@ export const HARNESSES: readonly HarnessMeta[] = [
       usage: true,
       worktrees: true,
       models: "suggestions",
+      reach: "spaces",
       streaming: true,
     },
     probe: {
@@ -614,6 +664,7 @@ export const HARNESSES: readonly HarnessMeta[] = [
       usage: false,
       worktrees: true,
       models: "free",
+      reach: "none",
       streaming: false,
     },
   },
