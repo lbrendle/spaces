@@ -361,6 +361,19 @@ export async function deliverToApp(
     };
   }
 
+  // Ask the cheap question first. Without Accessibility permission macOS does
+  // not refuse, it never answers — so attempting the send would stall the
+  // channel for the whole 20-second cap before saying anything useful.
+  if (!(await automationReady())) {
+    return {
+      delivered: false,
+      problem:
+        "Spaces does not have Accessibility permission, so macOS will not let it type into another app. " +
+        "Grant it in System Settings → Privacy & Security → Accessibility, then try again.",
+      previousApp: "",
+    };
+  }
+
   try {
     const raw = await invoke("send_to_app", {
       bundleId: config.bundleId,
