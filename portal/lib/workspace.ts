@@ -162,17 +162,7 @@ function oneOf<T extends string>(
  * `oneOf` falls back silently, so a kind missing here does not fail loudly —
  * it quietly turns somebody's Cursor agent into a Codex one on the next sync.
  */
-export const AGENT_BACKENDS = [
-  "claude",
-  "codex",
-  "cursor",
-  "gemini",
-  "aider",
-  "opencode",
-  "ritz",
-  "external",
-  "custom",
-] as const;
+export const AGENT_BACKENDS = ["claude", "codex", "cursor", "ritz", "external"] as const;
 
 function jsonArray(value: string): string[] {
   try {

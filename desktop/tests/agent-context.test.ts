@@ -130,14 +130,12 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
     readFile(new URL("../src/components/ChatView.tsx", import.meta.url), "utf8"),
   ]);
 
-  // The kind is a registry, not a closed union: a fork can add a harness
-  // without editing this type, and an unknown one must still load.
-  assert.match(types, /BuiltinAgentKind =[\s\S]*"custom"/);
+  // The supported set is curated, and lives in the registry rather than here.
+  // The type stays open only so a row from a newer build still loads.
+  assert.match(types, /BuiltinAgentKind =[\s\S]*"external"/);
   assert.match(types, /AgentKind = BuiltinAgentKind \| \(string & \{\}\)/);
   assert.match(config, /localAiName/);
   assert.match(config, /VITE_SPACES_LOCAL_AI_URL/);
-  assert.match(capabilities, /label: "Custom CLI"/);
-  assert.match(capabilities, /label: "Executable"[\s\S]*storage: "model"/);
   assert.match(capabilities, /label: "Endpoint"[\s\S]*transportOnly: true/);
   assert.match(capabilities, /label: "Health route"[\s\S]*transportOnly: true/);
   assert.match(capabilities, /function ritzBase/);
@@ -166,8 +164,6 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
     /remote\.visibility,[\s\S]*now\(\),[\s\S]*thisDevice,[\s\S]*\]\s*\)/,
   );
   assert.match(settings, /global default/i);
-  assert.match(agents, /program: agent\.model\.trim\(\)/);
-  assert.match(agents, /Choose an executable for this Custom CLI agent/);
   assert.match(settings, /Open-source runtime/);
   assert.match(rust, /async fn check_program/);
   assert.match(rust, /async fn read_upa_spaces_token/);
@@ -178,8 +174,8 @@ test("forks can configure and import arbitrary local agent harnesses", async () 
   // The portal's allowlist silently rewrites an unlisted backend, so it has to
   // carry every kind the desktop registry ships.
   assert.match(portal, /export const AGENT_BACKENDS/);
-  for (const kind of ["claude", "codex", "cursor", "gemini", "aider", "opencode", "ritz", "external", "custom"]) {
-    assert.match(portal, new RegExp(`"${kind}",`), `portal AGENT_BACKENDS is missing ${kind}`);
+  for (const kind of ["claude", "codex", "cursor", "ritz", "external"]) {
+    assert.match(portal, new RegExp(`"${kind}"`), `portal AGENT_BACKENDS is missing ${kind}`);
   }
 });
 

@@ -24,22 +24,18 @@ export interface Channel {
 /**
  * The harness an agent runs on.
  *
- * Deliberately open. Spaces ships first-class definitions for the harnesses it
- * can drive, but the set is a registry (capabilities.ts), not a closed union —
- * a fork, a new vendor CLI, or a GUI agent like Muse can be added as data
- * without touching this type. `(string & {})` keeps editor autocomplete on the
- * built-ins while still accepting any registered id.
+ * Spaces supports a curated set, each one verified against the harness itself,
+ * and the set lives in the registry (capabilities.ts) rather than here. The
+ * type stays open — `(string & {})` — only so a row written by a newer build or
+ * a paired device still loads; an id this build does not know is treated as an
+ * agent Spaces cannot launch, never as a command to run.
  */
 export type BuiltinAgentKind =
   | "claude"
   | "codex"
   | "cursor"
-  | "gemini"
-  | "aider"
-  | "opencode"
   | "ritz"
-  | "external"
-  | "custom";
+  | "external";
 
 export type AgentKind = BuiltinAgentKind | (string & {});
 

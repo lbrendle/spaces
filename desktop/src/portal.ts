@@ -1068,9 +1068,9 @@ export async function syncPortal(): Promise<PortalConnection | null> {
     for (const remote of body.agents ?? []) {
       // An unregistered backend silently became "codex", so an agent synced
       // from a newer build came back as a different harness than it left as.
-      // harnessFor() degrades to the Custom CLI shape instead, which runs the
-      // agent's own executable rather than somebody else's.
-      const kind = harnessKinds().includes(remote.backend) ? remote.backend : "custom";
+      // It becomes external instead: still a visible teammate, and Spaces
+      // starts no process for a value this build does not understand.
+      const kind = harnessKinds().includes(remote.backend) ? remote.backend : "external";
       const effort = remote.effort.trim();
       const cliArgs = remote.cliArgs?.length
         ? remote.cliArgs

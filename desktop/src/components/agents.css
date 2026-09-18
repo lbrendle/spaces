@@ -1436,3 +1436,11 @@
 @media (max-width: 600px) {
   .ag-caps-row { grid-template-columns: 1fr; gap: 0; }
 }
+
+/* The heading that separates "what it runs on" from "what it is for". */
+.ag-blank-subtitle {
+  margin: var(--space-5) 0 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: var(--ls-title);
+}

@@ -61,19 +61,22 @@ durable router/queue ── one lane per (channel, agent)
     └─ current project/team/channel instructions
              │
              ▼
- Claude · Codex · Cursor · … · Local HTTP · External app · Custom CLI
+ Claude · Codex · Cursor · Local HTTP · External app (Muse, Zed, …)
              │
       MCP or local CLI fallback
              ▼
       one operation registry
 ```
 
-The harness set is a registry, not a fixed list. Each entry declares its
-transport, how it is launched, how its stream is parsed, whether it can resume,
-and how the Spaces MCP surface reaches it; adding one is data plus an adapter,
-and nothing else in the app branches on which harness an agent runs. Spaces
-keeps native adapters for the CLIs members already have authenticated on their
-Mac, so no provider API key is involved and no session moves into the portal.
+The harness set is a registry: each entry declares its transport, how it is
+launched, how its stream is parsed, whether it can resume, and how the Spaces
+MCP surface reaches it, and nothing else in the app branches on which harness
+an agent runs. The set is curated rather than open — every entry is verified
+against the harness itself, and there is no generic "run this executable"
+escape hatch, so a kind this build does not recognise becomes an agent Spaces
+will not launch rather than an arbitrary command. Spaces keeps native adapters
+for the CLIs members already have authenticated on their Mac, so no provider
+API key is involved and no session moves into the portal.
 
 Three transports, not one:
 

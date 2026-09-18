@@ -491,16 +491,7 @@ async fn run_git_ex(
 ///
 /// The registry in desktop/src/capabilities.ts is the source of truth; this is
 /// its executable list, and tests/coordination.test.ts fails if the two drift.
-const HARNESS_BINS: [&str; 8] = [
-    "claude",
-    "codex",
-    "cursor-agent",
-    "gemini",
-    "aider",
-    "opencode",
-    "gh",
-    "node",
-];
+const HARNESS_BINS: [&str; 5] = ["claude", "codex", "cursor-agent", "gh", "node"];
 
 /// Which agent/GitHub CLIs are available on this machine.
 #[tauri::command]
@@ -802,14 +793,11 @@ fn parse_agent_profile(path: &Path, kind: &str) -> Option<DiscoveredAgentProfile
                 match key.trim() {
                     "name" if !value.is_empty() => name = value,
                     "description" => description = value,
-                    "model" if kind != "custom" => model = value,
+                    "model" => model = value,
                     _ => {}
                 }
             }
         }
-    }
-    if kind == "custom" {
-        model = "opencode".to_string();
     }
     if persona.is_empty() {
         persona = description.clone();
@@ -825,8 +813,8 @@ fn parse_agent_profile(path: &Path, kind: &str) -> Option<DiscoveredAgentProfile
 }
 
 /// Discover agent instruction profiles from the conventional user and project
-/// locations used by Claude Code, Codex, OpenCode and tool-neutral repos.
-/// Read-only, bounded, and restricted to fixed subdirectories.
+/// locations used by Claude Code, Codex and tool-neutral repos. Read-only,
+/// bounded, and restricted to fixed subdirectories.
 #[tauri::command]
 async fn discover_agent_profiles(project_roots: Vec<String>) -> Vec<DiscoveredAgentProfile> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -839,10 +827,6 @@ async fn discover_agent_profiles(project_roots: Vec<String>) -> Vec<DiscoveredAg
             (
                 PathBuf::from(&home).join(".codex/agents"),
                 "codex".to_string(),
-            ),
-            (
-                PathBuf::from(&home).join(".config/opencode/agents"),
-                "custom".to_string(),
             ),
         ];
         for root in project_roots.into_iter().take(50) {

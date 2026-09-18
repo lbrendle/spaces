@@ -37,6 +37,7 @@ import { Avatar, Field, Modal, Spinner } from "./ui";
 import { SaveState, useCloseGuard } from "./SaveState";
 import { EntityAvatarStack, EntityChip } from "./EntityChip";
 import { HarnessMark } from "./Face";
+import { Integrations } from "./Integrations";
 import { RadioChips } from "./LinkPicker";
 import { IconPlus, IconX, IconInfo, IconGear, IconBolt, IconSearch, IconCheck } from "./icons";
 import {
@@ -286,7 +287,7 @@ function HarnessDoctor({ kind, agent }: { kind: string; agent: Agent | null }) {
     void check(false);
   }, [check]);
 
-  const bin = meta.probe?.bin ?? (kind === "custom" ? (agent?.model ?? "").trim() : "");
+  const bin = harnessBin(kind);
 
   return (
     <div className="ag-doctor">
@@ -346,9 +347,6 @@ function unavailableNote(kind: string, name: string, runtime = ""): string {
   }
   if (meta.wire === "external") {
     return `Spaces doesn't launch ${meta.label.toLowerCase()} agents — ${handle} works in its own app and meets Spaces in the repository.`;
-  }
-  if (kind === "custom") {
-    return `That custom executable isn't available on this machine, so ${handle} can't run here. Configure its command or host it on a teammate's device.`;
   }
   const bin = harnessBin(kind) || kind;
   const where = meta.probe?.installHint ? ` Install it from ${meta.probe.installHint}.` : "";
@@ -531,7 +529,7 @@ export function AgentsView() {
         authentication: String(values.authentication || "trusted-local-origin"),
       };
     }),
-    agents.filter((a) => a.kind === "custom").map((a) => a.model)
+    []
   );
 
   // The window is the wrong thing to measure: the sidebar and the inspector
@@ -1046,6 +1044,14 @@ function RosterBlank({
           ? "Everything an agent is — what it owns, what it is told before every run, what it may do to your machine — is on the right once you choose one."
           : "An agent is a name, a persona and a runtime. Start from a shape and edit everything afterwards; the persona is the single biggest lever on whether it is useful."}
       </p>
+      {/* The supported agents first, because "which of these can I run" is the
+          question people arrive with — the role presets below only matter once
+          they have decided what it runs on. */}
+      <Integrations />
+      <h3 className="ag-blank-subtitle">Or start from a shape</h3>
+      <p className="ag-blank-text">
+        Each of these is a persona and a set of responsibilities on whichever runtime you pick.
+      </p>
       <div className="ag-preset-row">
         {PRESETS.map((p) => (
           <button key={p.id} type="button" className="ag-preset" onClick={() => onPreset(p)}>
@@ -1119,7 +1125,7 @@ function AboutAgents() {
             <div>
               <dt>Each one runs on the machine that has its runtime.</dt>
               <dd>
-                <code>claude</code>, <code>codex</code>, and Custom CLI agents run from somebody's PATH; {config().localAiName} is an
+                <code>claude</code>, <code>codex</code> and <code>cursor-agent</code> run from somebody's PATH; {config().localAiName} is an
                 engine answering on {RITZ_BASE.replace("http://", "")}. An agent can work while at
                 least one host with that runtime is online — which is why a card can say it is
                 unavailable <em>from here</em> and still be perfectly usable by a teammate.
@@ -2244,7 +2250,7 @@ function AgentEditor({
   const preview = commandPreview(kind, values);
   const risks = riskNotes(kind, values);
   const serialized = serializeArgs(kind, values);
-  const customProgram = String(values.model ?? "");
+  const modelValue = String(values.model ?? "");
   const currentRitzBase = ritzBase(values);
   const runtimes = useRuntimes(
     kind === "ritz" ? [{
@@ -2252,9 +2258,9 @@ function AgentEditor({
       healthRoute: ritzHealthRoute(values),
       authentication: String(values.authentication || "trusted-local-origin"),
     }] : [],
-    kind === "custom" ? [customProgram] : []
+    []
   );
-  const availability = runtimes.of(kind, kind === "ritz" ? currentRitzBase : customProgram);
+  const availability = runtimes.of(kind, kind === "ritz" ? currentRitzBase : modelValue);
   /**
    * The doctor has to check what is on screen, not what was last saved —
    * otherwise typing a bundle id or an endpoint and watching the verdict not
@@ -2589,10 +2595,9 @@ function AgentEditor({
               that changes what the agent can do — not who makes it. */}
           <select value={kind} onChange={(e) => changeKind(e.target.value as HarnessKind)}>
             <optgroup label="Command-line agents">
-              {HARNESSES.filter((h) => h.wire === "cli" && h.kind !== "custom").map((h) => (
+              {HARNESSES.filter((h) => h.wire === "cli").map((h) => (
                 <option key={h.kind} value={h.kind}>
                   {h.label}
-                  {h.verified ? "" : " (flags unverified)"}
                 </option>
               ))}
             </optgroup>
@@ -2602,9 +2607,6 @@ function AgentEditor({
                   {h.label}
                 </option>
               ))}
-            </optgroup>
-            <optgroup label="Anything else">
-              <option value="custom">{harnessFor("custom").label}</option>
             </optgroup>
           </select>
         </Field>

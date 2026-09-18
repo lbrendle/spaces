@@ -44,7 +44,7 @@ agent credentials off the computer that owns them.
 
 | Work together | Build with agents | Keep the company memory |
 | --- | --- | --- |
-| Shared channels, mentions, reactions, projects, issues, boards, people, roles, teams, inbox, and calendars | Claude Code, Codex, Cursor Agent and any other CLI agent, plus GUI agents like Muse that Spaces never launches; model/effort controls, resumable project chat, live process output, approval queues, worktrees, terminals, and browser panes | Nested Knowledge folders, imported vaults, native notes, wikilinks, backlinks, full-text search, stable agent citations, documents, decisions, and project memory |
+| Shared channels, mentions, reactions, projects, issues, boards, people, roles, teams, inbox, and calendars | One-click Claude Code, Codex, Cursor Agent and Muse, plus a self-hosted HTTP engine; model/effort controls, resumable project chat, live process output, approval queues, worktrees, terminals, and browser panes | Nested Knowledge folders, imported vaults, native notes, wikilinks, backlinks, full-text search, stable agent citations, documents, decisions, and project memory |
 
 | Operate the company | Connect each person | Ship from the same source |
 | --- | --- | --- |
@@ -57,8 +57,8 @@ Every project keeps its conversation and runtime state attached to the project:
 - terminal panes persist while you move between chat, browser, Git, and editor
   surfaces;
 - an embedded browser stays scoped to the same project workspace;
-- Claude Code, Codex, Cursor Agent or any other local CLI agent can run in
-  isolated worktrees or the project checkout;
+- Claude Code, Codex and Cursor Agent can run in isolated worktrees or the
+  project checkout, each on the account already signed in on that Mac;
 - agents Spaces cannot launch — Muse, the Cursor app, a terminal you drive
   yourself — join the same project as real teammates: Spaces reads their branch
   and diff out of git, briefs them through a hand-off file, and reports what
@@ -119,10 +119,13 @@ ordinary sync.
 
 ## Agents have native workspace tools
 
-Spaces routes Claude, Codex, any stdin/stdout Custom CLI, and a configurable
-local HTTP engine through one versioned event-harness contract. Existing
-Markdown agent profiles can be imported from conventional Claude, Codex,
-OpenCode, and project-local folders. Each turn carries an explicit
+Spaces routes Claude Code, Codex, Cursor Agent, a configurable local HTTP
+engine, and agents it cannot launch at all through one versioned event-harness
+contract. The supported set is curated rather than open: each one is verified
+against the harness itself — a CLI's own `--help`, an app's bundle identifier —
+because an integration nobody checked fails on the first turn instead of at
+setup. Existing Markdown agent profiles can be imported from conventional
+Claude, Codex, and project-local folders. Each turn carries an explicit
 `[Spaces Context]` block with the run,
 agent, project, channel, triggering event, reply destination, and working
 directory. Sessions remain scoped to one `(channel, agent)` pair; a durable

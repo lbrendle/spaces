@@ -220,12 +220,6 @@ export interface AgentAdapter {
   /** Fold one already-parsed stream event into the run's state. The JSON parse
    *  and the non-JSON passthrough are shared, in handleLine. */
   parseLine(obj: any, run: RunState): void;
-  /**
-   * Fold one *non-JSON* line. Harnesses that print prose rather than a stream
-   * protocol use this to keep their progress chatter out of the reply. Without
-   * it, handleLine keeps the line verbatim, which is right for a bare CLI.
-   */
-  parseText?(line: string, run: RunState): void;
 }
 
 const claudeAdapter: AgentAdapter = {
@@ -409,90 +403,6 @@ const cursorAdapter: AgentAdapter = {
 };
 
 /**
- * Harnesses that print prose rather than a stream protocol.
- *
- * Aider, Gemini CLI and OpenCode all write their answer to stdout mixed with
- * progress chatter and banners. There is no structured stream to fold, so the
- * adapter's job is the opposite of the JSON ones: decide which lines are the
- * reply. `noise` matches what to drop; everything else is kept in order.
- *
- * These definitions are unverified — Spaces has not run their `--help` on this
- * machine — which is why the editor labels them as such and the flags sit in
- * one editable field.
- */
-function textHarness(opts: {
-  id: AgentKind;
-  program: string;
-  promptDelivery?: "stdin" | "argv";
-  noise: RegExp;
-  args: (agent: Agent) => string[];
-}): AgentAdapter {
-  return {
-    id: opts.id,
-    program: opts.program,
-    promptDelivery: opts.promptDelivery ?? "stdin",
-
-    buildArgs(agent) {
-      return [...opts.args(agent), ...tokenize(agent.cli_args ?? "")];
-    },
-
-    extractSessionId() {
-      return "";
-    },
-
-    // Some of these emit a JSON line when configured to; fold it if it looks
-    // like an answer rather than ignoring it.
-    parseLine(obj, run) {
-      const text = obj.text ?? obj.response ?? obj.content ?? obj.message;
-      if (typeof text === "string" && text.trim()) {
-        run.parts.push(text);
-        run.liveActivity = "";
-        pushActivity(run, "text", text.slice(0, 200));
-      }
-    },
-
-    parseText(line, run) {
-      const trimmed = line.trim();
-      if (!trimmed || opts.noise.test(trimmed)) {
-        if (trimmed) run.liveActivity = `⚙︎ ${trimmed.slice(0, 60)}`;
-        return;
-      }
-      if (!run.parts.length) run.parts.push("");
-      run.parts[0] += (run.parts[0] ? "\n" : "") + line;
-      run.liveActivity = "";
-    },
-  };
-}
-
-const geminiAdapter = textHarness({
-  id: "gemini",
-  program: "gemini",
-  noise: /^(Loaded cached credentials|Data collection is|Flushing|\[dotenv|>\s*$)/i,
-  args: (agent) => (agent.model ? ["--model", agent.model] : []),
-});
-
-const aiderAdapter = textHarness({
-  id: "aider",
-  program: "aider",
-  promptDelivery: "argv",
-  noise:
-    /^(Aider v|Model[s]?:|Git repo:|Repo-map:|Use \/help|Added .* to the chat|Tokens:|Applied edit to|Commit [0-9a-f]{7}|Warning:|Scanning repo)/i,
-  args: (agent) => [
-    "--no-pretty",
-    "--no-stream",
-    ...(agent.model ? ["--model", agent.model] : []),
-    "--message",
-  ],
-});
-
-const opencodeAdapter = textHarness({
-  id: "opencode",
-  program: "opencode",
-  noise: /^(@?opencode|Loading|Initializing|\s*$)/i,
-  args: (agent) => ["run", ...(agent.model ? ["--model", agent.model] : [])],
-});
-
-/**
  * An agent Spaces does not launch.
  *
  * Muse, the Cursor app, Zed's agent, a Claude Code terminal someone drives by
@@ -520,48 +430,6 @@ const externalAdapter: AgentAdapter = {
 
   parseLine() {
     // nothing streams; external.ts drives the run to completion directly
-  },
-};
-
-/**
- * Product-neutral escape hatch for local agent harnesses. The executable is
- * stored in Agent.model so it syncs through the existing schema; cli_args is
- * passed through exactly. A custom CLI reads the prompt from stdin and may
- * print plain text or common JSON/JSONL message shapes.
- */
-const customAdapter: AgentAdapter = {
-  id: "custom",
-  program: "",
-
-  buildArgs(agent) {
-    return tokenize(agent.cli_args ?? "");
-  },
-
-  extractSessionId(obj) {
-    return String(obj.session_id ?? obj.sessionId ?? obj.thread_id ?? "");
-  },
-
-  parseLine(obj, run) {
-    const candidate =
-      obj.text ??
-      obj.message?.content ??
-      obj.message ??
-      obj.content ??
-      obj.delta?.content ??
-      obj.delta?.text ??
-      obj.choices?.[0]?.delta?.content ??
-      obj.choices?.[0]?.message?.content;
-    if (typeof candidate === "string" && candidate) {
-      run.parts.push(candidate);
-      run.liveActivity = "";
-      pushActivity(run, "text", candidate.slice(0, 200));
-    }
-    if (obj.tool || obj.tool_name || obj.name && obj.type === "tool") {
-      const name = String(obj.tool ?? obj.tool_name ?? obj.name);
-      pushActivity(run, "tool", name);
-      run.liveActivity = `⚙︎ using ${name}…`;
-    }
-    if (obj.error) pushActivity(run, "stderr", String(obj.error).slice(0, 300));
   },
 };
 
@@ -738,21 +606,19 @@ const ADAPTERS: Record<string, AgentAdapter> = {
   claude: claudeAdapter,
   codex: codexAdapter,
   cursor: cursorAdapter,
-  gemini: geminiAdapter,
-  aider: aiderAdapter,
-  opencode: opencodeAdapter,
   ritz: ritzAdapter,
   external: externalAdapter,
-  custom: customAdapter,
 };
 
+/**
+ * An unknown kind — an agent row synced from a newer build, or from a paired
+ * device that supports a harness this one does not — is treated as external.
+ * It stays a visible teammate with a branch and a hand-off, and Spaces starts
+ * no process for it. Running an unrecognised value as an executable is the one
+ * thing that must not happen here.
+ */
 export function adapterFor(agent: Agent): AgentAdapter {
-  if (agent.kind === "custom") {
-    return { ...customAdapter, program: agent.model.trim() };
-  }
-  // An unknown kind — an agent row synced from a newer build or a fork — runs
-  // as a custom CLI rather than silently behaving like Claude.
-  return ADAPTERS[agent.kind] ?? { ...customAdapter, program: agent.model.trim() };
+  return ADAPTERS[agent.kind] ?? externalAdapter;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1021,10 +887,10 @@ function handleLine(run: RunState, line: string) {
   try {
     obj = JSON.parse(trimmed);
   } catch {
-    // Not a stream protocol. A prose harness gets to say which lines are the
-    // answer; a bare CLI keeps the line verbatim.
-    if (adapter.parseText) adapter.parseText(line, run);
-    else run.raw.push(line);
+    // Not a stream protocol. Every supported harness emits one, so a plain line
+    // is either a warning or a crash message — keep it verbatim rather than
+    // guessing at which half of it was meant to be the reply.
+    run.raw.push(line);
     return;
   }
   const sid = adapter.extractSessionId(obj);
@@ -2091,9 +1957,6 @@ export async function runAgent(
   });
 
   try {
-    if (!remote && agent.kind === "custom" && !adapter.program) {
-      throw new Error("Choose an executable for this Custom CLI agent before running it.");
-    }
     if (!remote && adapter.transport === "external") {
       return await runHandOff({
         run,

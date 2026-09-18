@@ -532,7 +532,7 @@ export function FirstRunChecklist() {
     {
       id: "agent",
       title: "Add an agent",
-      hint: "A named Claude Code, Codex, local HTTP, or Custom CLI teammate. It runs on whichever machine hosts it.",
+      hint: "A named Claude Code, Codex, Cursor, local HTTP or external-app teammate. It runs on whichever machine hosts it.",
       done: agents.length > 0,
       run: () => setView({ type: "agents" }),
     },

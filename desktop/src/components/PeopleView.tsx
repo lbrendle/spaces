@@ -69,12 +69,8 @@ const HARNESS_GLYPH: Record<string, string> = {
   claude: "✳",
   codex: "◈",
   cursor: "➤",
-  gemini: "✦",
-  aider: "△",
-  opencode: "❲",
   ritz: "◉",
   external: "▣",
-  custom: "⌘",
 };
 
 /**
@@ -82,7 +78,7 @@ const HARNESS_GLYPH: Record<string, string> = {
  * Keyed by executable — the Cursor harness is `cursor`, its binary is
  * `cursor-agent` — and kept in step with HARNESS_BINS in lib.rs.
  */
-const KNOWN_TOOLS = ["claude", "codex", "cursor-agent", "gemini", "aider", "opencode", "gh"] as const;
+const KNOWN_TOOLS = ["claude", "codex", "cursor-agent", "gh"] as const;
 
 const ROLES: { role: MemberRole; label: string; help: string }[] = [
   { role: "owner", label: "Owner", help: "Set this workspace up." },
@@ -1479,7 +1475,6 @@ function BringAgentPanel({
   const [visibility, setVisibility] = useState<AgentVisibility>(
     existing?.visibility === "private" ? "private" : "workspace"
   );
-  const [customProgram, setCustomProgram] = useState(existing?.kind === "custom" ? existing.model : "");
   const [busy, setBusy] = useState(false);
 
   const chosen = target === "new" ? null : agents.find((a) => a.id === target) ?? null;
@@ -1500,7 +1495,7 @@ function BringAgentPanel({
       : undefined;
 
   const canSave = target === "new"
-    ? !!clean && !nameClash && (kind !== "custom" || !!customProgram.trim())
+    ? !!clean && !nameClash
     : !!chosen;
   const agentLabel = target === "new" ? clean || "The agent" : chosen?.name ?? "The agent";
 
@@ -1520,7 +1515,7 @@ function BringAgentPanel({
         const created = await store.addAgent({
           name: clean,
           kind,
-          model: kind === "custom" ? customProgram.trim() : String(values.model ?? "").trim(),
+          model: String(values.model ?? "").trim(),
           cli_args: serializeArgs(kind, values),
         });
         await store.updateAgent(created.id, ownership);
@@ -1634,16 +1629,6 @@ function BringAgentPanel({
               />
               <p className="pe-hint">{meta.blurb}</p>
             </div>
-            {kind === "custom" && (
-              <Field label="Executable">
-                <input
-                  value={customProgram}
-                  onChange={(event) => setCustomProgram(event.target.value)}
-                  placeholder="aider or /absolute/path/to/my-agent"
-                  spellCheck={false}
-                />
-              </Field>
-            )}
           </>
         ) : (
           <p className="pe-hint">

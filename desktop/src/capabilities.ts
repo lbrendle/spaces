@@ -616,19 +616,6 @@ const RITZ_OPTIONS: readonly HarnessOption[] = [
   },
 ];
 
-const CUSTOM_OPTIONS: readonly HarnessOption[] = [
-  {
-    key: "model",
-    label: "Executable",
-    help: "Command name on PATH or an absolute executable path. Spaces sends the prompt on stdin and reads stdout.",
-    control: "text",
-    kind: "flag",
-    storage: "model",
-    placeholder: "aider",
-    group: "Command",
-    chip: true,
-  },
-];
 
 /* ── Cursor Agent ─────────────────────────────────────────────── */
 
@@ -703,96 +690,8 @@ const CURSOR_OPTIONS: readonly HarnessOption[] = [
   },
 ];
 
-/* ── Gemini CLI ───────────────────────────────────────────────── */
 
-const GEMINI_OPTIONS: readonly HarnessOption[] = [
-  {
-    key: "model",
-    label: "Model",
-    help: "Model id. Blank uses the Gemini CLI default.",
-    control: "text",
-    kind: "flag",
-    flag: "--model",
-    alias: "-m",
-    storage: "model",
-    suggestions: ["gemini-2.5-pro", "gemini-2.5-flash"],
-    placeholder: "gemini-2.5-pro",
-    group: "Model",
-    chip: true,
-  },
-  {
-    key: "yolo",
-    label: "Auto-approve tools",
-    help: "Accepts every tool call without asking. Required for headless runs.",
-    control: "boolean",
-    kind: "flag",
-    flag: "--yolo",
-    default: true,
-    group: "Permissions",
-    chip: true,
-    risky: {
-      true: "Every tool call runs unattended. Pair it with an isolated worktree.",
-    },
-  },
-];
 
-/* ── Aider ────────────────────────────────────────────────────── */
-
-const AIDER_OPTIONS: readonly HarnessOption[] = [
-  {
-    key: "model",
-    label: "Model",
-    help: "Any model string Aider accepts, including provider prefixes.",
-    control: "text",
-    kind: "flag",
-    flag: "--model",
-    storage: "model",
-    suggestions: ["sonnet", "gpt-5", "o3"],
-    placeholder: "sonnet",
-    group: "Model",
-    chip: true,
-  },
-  {
-    key: "yes",
-    label: "Auto-confirm",
-    help: "Answers Aider's confirmation prompts, which a headless run cannot.",
-    control: "boolean",
-    kind: "flag",
-    flag: "--yes-always",
-    default: true,
-    group: "Permissions",
-    chip: true,
-  },
-  {
-    key: "auto_commits",
-    label: "Aider commits",
-    help: "Off hands committing to Spaces, so every turn is bracketed by one Spaces checkpoint instead of two histories.",
-    control: "boolean",
-    kind: "flag",
-    flag: "--no-auto-commits",
-    default: true,
-    group: "Git",
-  },
-];
-
-/* ── OpenCode ─────────────────────────────────────────────────── */
-
-const OPENCODE_OPTIONS: readonly HarnessOption[] = [
-  {
-    key: "model",
-    label: "Model",
-    help: "provider/model as OpenCode names it.",
-    control: "text",
-    kind: "flag",
-    flag: "--model",
-    alias: "-m",
-    storage: "model",
-    suggestions: ["anthropic/claude-sonnet-4-5", "openai/gpt-5"],
-    placeholder: "anthropic/claude-sonnet-4-5",
-    group: "Model",
-    chip: true,
-  },
-];
 
 /* ── External (an agent Spaces does not launch) ───────────────── */
 
@@ -938,69 +837,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     },
   },
   {
-    kind: "gemini",
-    label: "Gemini CLI",
-    blurb: "Runs the gemini CLI non-interactively in the project checkout.",
-    vendor: "Google",
-    wire: "cli",
-    base: "gemini --prompt",
-    rawLabel: "Raw flags",
-    rawHelp: "Everything above, serialized. Check them against `gemini --help` — Spaces has not verified this harness on your Mac.",
-    rawPlaceholder: "--yolo",
-    caps: {
-      resume: false,
-      mcp: "config-file",
-      toolEvents: false,
-      usage: false,
-      worktrees: true,
-      models: "suggestions",
-      streaming: true,
-    },
-    probe: { bin: "gemini", versionArgs: ["--version"], installHint: "npm i -g @google/gemini-cli" },
-  },
-  {
-    kind: "aider",
-    label: "Aider",
-    blurb: "Runs aider in message mode against the project checkout.",
-    vendor: "Aider",
-    wire: "cli",
-    base: "aider --message",
-    rawLabel: "Raw flags",
-    rawHelp: "Everything above, serialized. Check them against `aider --help` — Spaces has not verified this harness on your Mac.",
-    rawPlaceholder: "--no-stream --no-pretty",
-    caps: {
-      resume: false,
-      mcp: "none",
-      toolEvents: false,
-      usage: false,
-      worktrees: true,
-      models: "suggestions",
-      streaming: true,
-    },
-    probe: { bin: "aider", versionArgs: ["--version"], installHint: "pip install aider-install" },
-  },
-  {
-    kind: "opencode",
-    label: "OpenCode",
-    blurb: "Runs opencode as a one-shot in the project checkout.",
-    vendor: "SST",
-    wire: "cli",
-    base: "opencode run",
-    rawLabel: "Raw flags",
-    rawHelp: "Everything above, serialized. Check them against `opencode run --help` — Spaces has not verified this harness on your Mac.",
-    rawPlaceholder: "--agent build",
-    caps: {
-      resume: false,
-      mcp: "config-file",
-      toolEvents: false,
-      usage: false,
-      worktrees: true,
-      models: "suggestions",
-      streaming: true,
-    },
-    probe: { bin: "opencode", versionArgs: ["--version"], installHint: "opencode.ai" },
-  },
-  {
     kind: "ritz",
     label: `${config().localAiName} (HTTP)`,
     blurb: `A configurable local or self-hosted engine at ${RITZ_BASE} — no vendor lock-in.`,
@@ -1041,47 +877,28 @@ export const HARNESSES: readonly HarnessMeta[] = [
       streaming: false,
     },
   },
-  {
-    kind: "custom",
-    label: "Custom CLI",
-    blurb: "Runs any local stdin/stdout agent or harness in the project checkout.",
-    wire: "cli",
-    verified: true,
-    base: "<executable>",
-    rawLabel: "Arguments",
-    rawHelp: "Arguments passed after the executable. The prompt is sent on stdin; plain text or JSON-line output is accepted.",
-    rawPlaceholder: "--json --yes",
-    caps: {
-      resume: false,
-      mcp: "config-file",
-      toolEvents: true,
-      usage: false,
-      worktrees: true,
-      models: "free",
-      streaming: true,
-    },
-  },
 ];
 
 const MANIFEST: Record<string, readonly HarnessOption[]> = {
   claude: CLAUDE_OPTIONS,
   codex: CODEX_OPTIONS,
   cursor: CURSOR_OPTIONS,
-  gemini: GEMINI_OPTIONS,
-  aider: AIDER_OPTIONS,
-  opencode: OPENCODE_OPTIONS,
   ritz: RITZ_OPTIONS,
   external: EXTERNAL_OPTIONS,
-  custom: CUSTOM_OPTIONS,
 };
 
 /**
- * Unknown kinds degrade to the Custom CLI shape rather than crashing: an agent
- * row synced from a newer build, or from a fork with harnesses this one has
- * never heard of, still opens and still runs.
+ * Unknown kinds degrade to "external" — a teammate Spaces does not launch.
+ *
+ * An agent row can arrive from a newer build or a paired device with a harness
+ * this one has never heard of, and it still has to open rather than crash. The
+ * old fallback ran the agent's `model` column as an executable, which is a bad
+ * thing to do with a value this build does not understand. Treating it as
+ * external keeps the agent visible — it holds a branch, takes hand-offs, shows
+ * up in the overlap check — and launches nothing.
  */
 function norm(kind: string): HarnessKind {
-  return MANIFEST[kind] ? kind : "custom";
+  return MANIFEST[kind] ? kind : "external";
 }
 
 /** Every harness that can be spawned or attached, in picker order. */
@@ -1107,13 +924,13 @@ export function isExternal(kind: string): boolean {
  * instead returns undefined forever, which reads as "still checking" and never
  * resolves; that was true of every harness added after the original two.
  *
- * `model` supplies the executable for a Custom CLI, where it is the user's own.
- * Returns "" for harnesses with no binary at all.
+ * Returns "" for harnesses Spaces does not launch. The `model` argument is
+ * accepted and ignored: no supported harness takes its executable from the
+ * agent row any more, and callers still pass it.
  */
-export function harnessBin(kind: string, model = ""): string {
+export function harnessBin(kind: string, _model = ""): string {
   const meta = harnessFor(kind);
   if (meta.wire !== "cli") return "";
-  if (norm(kind) === "custom") return model.trim();
   return meta.probe?.bin ?? "";
 }
 
@@ -1399,7 +1216,6 @@ export function carryOver(fromKind: string, toKind: string, values: OptionValues
     if (!text) continue;
     if (opt.choices && !opt.choices.includes(text)) continue;
     if (opt.key === "model") {
-      if (norm(fromKind) === "custom" || norm(toKind) === "custom") continue;
       const prev = optionFor(fromKind, "model");
       const fromList = Boolean(prev?.suggestions?.includes(text)) || prev?.dynamic !== undefined;
       const crossWire = harnessFor(fromKind).wire !== harnessFor(toKind).wire;
@@ -1433,14 +1249,14 @@ export function commandPreview(kind: string, values: OptionValues): string {
   const k = norm(kind);
   const modelOpt = optionFor(k, "model");
   const model = asText(values.model).trim();
-  const parts = [k === "custom" ? quoteArg(model || "<executable>") : meta.base];
+  const parts = [meta.base];
   if (model && modelOpt?.flag) parts.push(modelOpt.flag, quoteArg(model));
   const args = serializeArgs(k, values);
   if (args) parts.push(args);
-  // codex reads the prompt from stdin via a trailing "-"; cursor-agent and
-  // aider have no stdin reader and take it as the last argument instead.
+  // codex reads the prompt from stdin via a trailing "-"; cursor-agent has no
+  // stdin reader and takes it as the last argument instead.
   if (k === "codex") parts.push("-");
-  else if (k === "cursor" || k === "aider") parts.push("<prompt>");
+  else if (k === "cursor") parts.push("<prompt>");
   return parts.join(" ");
 }
 

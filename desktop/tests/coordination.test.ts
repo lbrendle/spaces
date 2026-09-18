@@ -156,7 +156,7 @@ test("the harness registry is the single source of truth for every layer", async
     capabilities.indexOf("const MANIFEST")
   );
   const registry = [...harnesses.matchAll(/^\s{4}kind: "([a-z]+)",$/gm)].map((m) => m[1]);
-  assert.ok(registry.length >= 9, `expected the full registry, found ${registry.join(", ")}`);
+  assert.ok(registry.length >= 5, `expected the full registry, found ${registry.join(", ")}`);
 
   // Each one needs an adapter, or runAgent silently falls back to a bare CLI.
   const registered = [...adapters.matchAll(/^\s{2}([a-z]+): \w+Adapter,$/gm)].map((m) => m[1]);
@@ -173,13 +173,13 @@ test("the harness registry is the single source of truth for every layer", async
   // The portal rewrites an unlisted backend to "codex" without complaining, so
   // a kind missing there comes back from a sync as a different agent.
   for (const kind of registry) {
-    assert.match(portal, new RegExp(`"${kind}",`), `portal AGENT_BACKENDS is missing "${kind}"`);
+    assert.match(portal, new RegExp(`"${kind}"`), `portal AGENT_BACKENDS is missing "${kind}"`);
   }
 
   // check_tools answers PATH questions for the chat composer. It is keyed by
   // executable, so compare against the probe bins rather than the kinds.
   const bins = [...capabilities.matchAll(/bin: "([a-z-]+)"/g)].map((m) => m[1]);
-  assert.ok(bins.length >= 6, `expected probe bins, found ${bins.join(", ")}`);
+  assert.ok(bins.length >= 3, `expected probe bins, found ${bins.join(", ")}`);
   for (const bin of bins) {
     assert.match(rust, new RegExp(`"${bin}"`), `HARNESS_BINS in lib.rs is missing "${bin}"`);
   }
@@ -263,5 +263,37 @@ test("every harness option can be written and read back", async () => {
         `option "${key}" is kind:"flag" with no flag token — it will serialize as a bare value and never parse back. Use kind:"json" for a setting that is not a CLI flag.`
       );
     }
+  }
+});
+
+test("only harnesses Spaces has verified are offered", async () => {
+  const [capabilities, integrations, agents] = await Promise.all([
+    readFile(new URL("../src/capabilities.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/integrations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/agents.ts", import.meta.url), "utf8"),
+  ]);
+
+  // The generic escape hatch is gone: no kind may run an executable taken from
+  // the agent row, because nothing validates that value.
+  for (const gone of ["custom", "gemini", "aider", "opencode"]) {
+    assert.doesNotMatch(
+      capabilities.slice(capabilities.indexOf("export const HARNESSES")),
+      new RegExp(`kind: "${gone}"`),
+      `"${gone}" should no longer be a harness`
+    );
+  }
+  assert.doesNotMatch(agents, /program: agent\.model/);
+
+  // An unrecognised kind must become a teammate Spaces does not launch, never
+  // a command. That is the whole safety property of dropping the escape hatch.
+  assert.match(capabilities, /return MANIFEST\[kind\] \? kind : "external"/);
+  assert.match(agents, /ADAPTERS\[agent\.kind\] \?\? externalAdapter/);
+
+  // Every integration has to name a harness that actually exists.
+  const kinds = [...capabilities.matchAll(/^\s{4}kind: "([a-z]+)",$/gm)].map((m) => m[1]);
+  const used = [...integrations.matchAll(/\n    kind: "([a-z]+)",/g)].map((m) => m[1]);
+  assert.ok(used.length >= 5, `expected integrations, found ${used.length}`);
+  for (const kind of used) {
+    assert.ok(kinds.includes(kind), `integration points at unknown harness "${kind}"`);
   }
 });

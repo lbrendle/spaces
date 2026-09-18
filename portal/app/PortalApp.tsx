@@ -4496,12 +4496,8 @@ function DialogFields({
             <option value="claude">Claude Code</option>
             <option value="codex">Codex</option>
             <option value="cursor">Cursor Agent</option>
-            <option value="gemini">Gemini CLI</option>
-            <option value="aider">Aider</option>
-            <option value="opencode">OpenCode</option>
             <option value="ritz">Local HTTP</option>
             <option value="external">External app</option>
-            <option value="custom">Custom CLI</option>
           </select>
         </Field>
         <Field label="Model" hint="Blank uses the harness default.">
