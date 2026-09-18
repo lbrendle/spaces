@@ -150,12 +150,6 @@ export interface HarnessMeta {
   probe?: HarnessProbe;
   /** Who makes it — shown on the picker so a long list stays scannable. */
   vendor?: string;
-  /**
-   * True when the flags below were checked against this harness's own --help.
-   * A declared-but-unverified harness still runs; the editor just says so
-   * rather than implying Spaces knows its CLI by heart.
-   */
-  verified?: boolean;
 }
 
 /* ── Ritz (local engine) ──────────────────────────────────────── */
@@ -764,7 +758,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     blurb: "Runs the claude CLI in the project checkout, on your Claude subscription.",
     vendor: "Anthropic",
     wire: "cli",
-    verified: true,
     base: "claude -p --output-format stream-json --verbose",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
@@ -786,7 +779,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     blurb: "Runs codex exec in the project checkout, on your ChatGPT subscription.",
     vendor: "OpenAI",
     wire: "cli",
-    verified: true,
     base: "codex exec --json",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
@@ -808,7 +800,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     blurb: "Runs cursor-agent headless in the project checkout, on your Cursor account.",
     vendor: "Cursor",
     wire: "cli",
-    verified: true,
     base: "cursor-agent -p --output-format stream-json",
     rawLabel: "Raw flags",
     rawHelp: "Everything above, serialized. Edit it and the controls follow; unknown flags are kept and passed through untouched.",
@@ -841,7 +832,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     label: `${config().localAiName} (HTTP)`,
     blurb: `A configurable local or self-hosted engine at ${RITZ_BASE} — no vendor lock-in.`,
     wire: "http",
-    verified: true,
     base: `POST ${RITZ_CHAT_URL}`,
     rawLabel: "Raw body fields",
     rawHelp: "The JSON body fields, as key=value pairs. Edit them and the controls follow; unknown fields are kept and sent as-is.",
@@ -862,7 +852,6 @@ export const HARNESSES: readonly HarnessMeta[] = [
     blurb:
       "A teammate Spaces does not launch — Muse, Cursor, Zed or a terminal you drive yourself. It joins through the shared repo and .hq, and Spaces tracks its branch, its diff and its hand-offs.",
     wire: "external",
-    verified: true,
     base: "(not launched by Spaces)",
     rawLabel: "Attachment settings",
     rawHelp: "How Spaces recognises this agent's work and where it leaves briefs for it.",

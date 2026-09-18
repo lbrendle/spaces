@@ -236,9 +236,7 @@ async function checkCli(kind: string, program: string): Promise<HarnessHealth> {
     path,
     version,
     state: "ready",
-    detail: version
-      ? `${bin} ${version}.${meta.verified ? "" : " Spaces has not verified this harness's flags — check them against its own --help."}`
-      : `${bin} is installed.`,
+    detail: version ? `${bin} ${version}.` : `${bin} is installed.`,
   };
 }
 

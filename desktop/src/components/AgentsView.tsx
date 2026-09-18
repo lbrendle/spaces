@@ -259,7 +259,6 @@ function HarnessCaps({ kind }: { kind: string }) {
  * unknown rather than rounded up.
  */
 function HarnessDoctor({ kind, agent }: { kind: string; agent: Agent | null }) {
-  const meta = harnessFor(kind);
   const [health, setHealth] = useState<HarnessHealth | null>(null);
   const [busy, setBusy] = useState(false);
   const [help, setHelp] = useState("");
@@ -306,30 +305,31 @@ function HarnessDoctor({ kind, agent }: { kind: string; agent: Agent | null }) {
         </button>
       </div>
 
-      {!meta.verified && (
-        <div className="ag-doctor-unverified">
-          Spaces has not verified {meta.label}&apos;s flags. The defaults below are a starting
-          point — read its own help and correct them if they have moved.
-          {bin && (
-            <button
-              type="button"
-              className="btn tiny ghost"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  setHelp(await harnessHelp(bin));
-                } catch (e) {
-                  setHelp(String(e));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Read {bin} --help
-            </button>
-          )}
-        </div>
+      {/* The raw-flags field below accepts anything, so the harness's own list
+          of flags is worth having to hand — and it is the installed version's
+          list, not whatever was true when Spaces shipped. */}
+      {bin && (
+        <button
+          type="button"
+          className="btn tiny ghost ag-doctor-help-btn"
+          disabled={busy}
+          onClick={async () => {
+            if (help) {
+              setHelp("");
+              return;
+            }
+            setBusy(true);
+            try {
+              setHelp(await harnessHelp(bin));
+            } catch (e) {
+              setHelp(String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {help ? "Hide" : `What flags does this ${bin} accept?`}
+        </button>
       )}
 
       {help && <pre className="ag-doctor-help">{help}</pre>}
