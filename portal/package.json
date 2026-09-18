@@ -28,7 +28,7 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
+    "@vitejs/plugin-rsc": "0.5.35",
     "eslint": "10.8.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.8.0",
@@ -36,7 +36,7 @@
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
-    "vinext": "0.0.50",
+    "vinext": "1.0.0-beta.10",
     "vite": "8.1.5",
     "wrangler": "4.135.0"
   },
