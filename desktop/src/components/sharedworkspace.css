@@ -342,3 +342,7 @@ button.sw-fact.dirty:hover { text-decoration: underline; }
   margin-left: var(--space-2);
   vertical-align: baseline;
 }
+
+/* A binary-only branch has no add/delete split to draw, so it gets weight
+   without a colour that would claim one. */
+.sw-lane-fill.neutral { background: var(--text-faint); }

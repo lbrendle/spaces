@@ -455,15 +455,29 @@ export async function integrationPlan(
     );
 
     if (!check.clean) {
+      // Why it is blocked decides what to do about it, and the two answers are
+      // different work: a branch that conflicts with the base has to be rebased
+      // now, while one that only conflicts because others land first is fine
+      // until it is second in the queue. Testing against the bare base costs
+      // one more in-memory merge and is the only way to tell them apart —
+      // asserting "lands fine on its own" without checking is how someone gets
+      // sent to rebase against the wrong thing.
+      const alone =
+        landed === 0 || check.error
+          ? check
+          : await mergeCheck(project, lane.branch, map.base).catch(() => check);
+
       plan.blocked.push({
         lane,
         position,
         order: 0,
-        check,
+        // Report the merge the note is about, so the listed paths and the
+        // sentence above them can never describe different merges.
+        check: check.error || alone.clean ? check : alone,
         note: check.error
           ? `Spaces could not test this merge: ${check.error}`
-          : landed === 0
-            ? `Conflicts with ${map.base} in ${check.conflicts.length} file${check.conflicts.length === 1 ? "" : "s"}. Rebase it before it can land.`
+          : !alone.clean
+            ? `Conflicts with ${map.base} itself, in ${alone.conflicts.length} file${alone.conflicts.length === 1 ? "" : "s"}. Rebase it before it can land.`
             : `Lands fine on its own, but conflicts once ${landed} earlier branch${landed === 1 ? "" : "es"} ${landed === 1 ? "is" : "are"} in. Whoever goes second rebases.`,
       });
       continue;

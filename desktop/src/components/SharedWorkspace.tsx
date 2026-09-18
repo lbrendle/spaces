@@ -247,9 +247,17 @@ function Lane({
   openDiff: (title: string, dir: string) => void;
 }) {
   const size = lane.adds + lane.dels;
-  // A shared scale, floored so a one-line change is still a visible mark
-  // rather than nothing at all.
-  const width = size ? `${Math.max(4, Math.round((size / widest) * 100))}%` : "0";
+  // numstat reports "-" for a binary file, so a branch of nothing but images
+  // has real commits, real files, and zero line changes. Drawn on the line
+  // scale it is an empty bar, which reads as "did nothing" — the opposite of
+  // the truth. Give it the floor width and a neutral fill instead, since
+  // there is no add/delete split to show.
+  const binaryOnly = size === 0 && lane.committedFiles.length > 0;
+  const width = size
+    ? `${Math.max(4, Math.round((size / widest) * 100))}%`
+    : binaryOnly
+      ? "4%"
+      : "0";
   const addShare = size ? (lane.adds / size) * 100 : 0;
 
   return (
@@ -267,8 +275,15 @@ function Lane({
         </div>
       </div>
 
-      <div className="sw-lane-bar" aria-hidden="true">
-        <div className="sw-lane-fill" style={{ width }}>
+      <div
+        className="sw-lane-bar"
+        title={
+          binaryOnly
+            ? `${lane.committedFiles.length} file${lane.committedFiles.length === 1 ? "" : "s"}, no text changes to measure`
+            : `+${lane.adds} −${lane.dels} across ${lane.committedFiles.length} file${lane.committedFiles.length === 1 ? "" : "s"}`
+        }
+      >
+        <div className={`sw-lane-fill${binaryOnly ? " neutral" : ""}`} style={{ width }}>
           <div className="sw-lane-add" style={{ width: `${addShare}%` }} />
         </div>
       </div>
@@ -300,8 +315,11 @@ function Lane({
       {lane.lastSubject && <div className="sw-lane-subject">{lane.lastSubject}</div>}
       {!lane.readable && (
         <div className="sw-lane-subject warn">
-          Spaces cannot read {lane.workdir || "this agent's directory"} — set its working
-          directory so its work shows up here.
+          {lane.kind === "external"
+            ? // Only an external agent has a directory somebody chose, so only
+              // it can be pointed somewhere better.
+              `Spaces cannot read ${lane.workdir || "this agent's directory"} — set its working directory so its work shows up here.`
+            : "No workspace yet. It gets its own worktree the first time it runs on this project."}
         </div>
       )}
     </div>

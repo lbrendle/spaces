@@ -215,3 +215,22 @@ test("a hand-off with no baseline claims no commits", async () => {
   assert.match(settle, /if \(!baseline\.sha\)/);
   assert.match(settle, /return \{ commits: \[\], newlyDirty/);
 });
+
+test("a blocked branch is not called clean-on-its-own without testing that", async () => {
+  const coordination = await readFile(new URL("../src/coordination.ts", import.meta.url), "utf8");
+
+  // Caught live: a branch that conflicts with the base *itself* was reported as
+  // "lands fine on its own, but conflicts once N earlier branches are in",
+  // purely because it happened to be tested after something else landed. The
+  // two states call for different work, so the base has to be tested too.
+  const plan = coordination.slice(coordination.indexOf("export async function integrationPlan"));
+  assert.match(plan, /const alone =/);
+  assert.match(plan, /mergeCheck\(project, lane\.branch, map\.base\)/);
+  assert.match(plan, /!alone\.clean/);
+  assert.match(plan, /Conflicts with \$\{map\.base\} itself/);
+
+  // And the optimistic wording must be behind that check, never the default.
+  const optimistic = plan.indexOf("Lands fine on its own");
+  const tested = plan.indexOf("!alone.clean");
+  assert.ok(tested !== -1 && tested < optimistic, "the base check must gate the optimistic note");
+});

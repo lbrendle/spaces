@@ -822,7 +822,8 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
   {
     key: "workdir",
     label: "Working directory",
-    help: "Where this agent edits code. Blank means the project checkout. Set it to a worktree path if it works on its own branch.",
+    help:
+      "Where this agent edits code. A directory of its own — a second checkout or a worktree — is what lets Spaces tell its commits from everyone else's. Blank means the shared project checkout, where it can only be credited with uncommitted changes.",
     control: "text",
     kind: "flag",
     placeholder: "/Users/you/code/project",
@@ -831,7 +832,8 @@ const EXTERNAL_OPTIONS: readonly HarnessOption[] = [
   {
     key: "git_author",
     label: "Git author match",
-    help: "Substring matched against commit author name or email, so Spaces can attribute commits to this agent. Blank falls back to the working directory.",
+    help:
+      "Substring matched against commit author name or email. Use it when this agent shares a checkout but commits under its own identity — most local agents commit as you, so check `git log` before relying on it. With neither this nor a working directory of its own set, Spaces will not attribute any commit to this agent rather than guess.",
     control: "text",
     kind: "flag",
     placeholder: "muse",
@@ -920,6 +922,11 @@ export const HARNESSES: readonly HarnessMeta[] = [
       versionArgs: ["--version"],
       // `cursor-agent status` is documented in its own --help as "View
       // authentication status", and exits non-interactively.
+      //
+      // Verified on a signed-out machine: it prints "Not logged in" and exits
+      // **0**. So the exit code says nothing here, and the doctor's text check
+      // is what catches it. No authOkMatch: the signed-in wording has not been
+      // seen, and guessing it would turn a working agent into a false alarm.
       authArgs: ["status"],
       installHint: "cursor.com/cli",
     },
