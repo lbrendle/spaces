@@ -35,8 +35,22 @@ test("agent harnesses receive a stable platform contract and event identity", as
   assert.match(contract, /\[Spaces Context\]/);
   assert.match(contract, /current.*block is authoritative/i);
   assert.match(contract, /final assistant response is published automatically/i);
-  assert.match(contract, /GUI Computer Use approval belongs to the host harness task/i);
-  assert.match(contract, /never tell someone to approve an app in Spaces/i);
+  /*
+   * Two different things called "computer use", and the contract has to keep
+   * them apart now that both exist.
+   *
+   * Spaces lends an agent its own browser and screen tools, under the agent's
+   * reach switch and the Accessibility grant Spaces itself was given. A
+   * harness's own GUI computer use is separate and belongs to the host task —
+   * a headless channel run cannot show that approval, so an agent must never
+   * send somebody to Spaces for it. The contract said only the second for
+   * months; saying only the second is now false.
+   */
+  assert.match(contract, /spaces_browse/);
+  assert.match(contract, /spaces_screen_read/);
+  assert.match(contract, /will not type into a password field/i);
+  assert.match(contract, /own.*GUI Computer Use approval is a different thing/i);
+  assert.match(contract, /never ask someone to approve your harness's computer use in Spaces/i);
   assert.match(contract, /xcrun simctl io booted recordVideo/);
   assert.match(contract, /headless channel run cannot display that approval/i);
   assert.match(agents, /SPACES_BASE_PROMPT/);
