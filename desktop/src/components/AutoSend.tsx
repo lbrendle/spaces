@@ -25,9 +25,14 @@ import { Spinner } from "./ui";
 import "./autosend.css";
 
 /** How often to look again while waiting for the grant to land. */
-const POLL_MS = 1200;
-/** Long enough to find the toggle, short enough to stop eventually. */
-const POLL_LIMIT = 60;
+const POLL_MS = 1500;
+/**
+ * Five minutes. Granting this means leaving Spaces, finding a System Settings
+ * window macOS may have put on another desktop, and flipping a switch — a
+ * minute's timeout expires while somebody is still looking for it, and a panel
+ * that gave up is worse than one that never started.
+ */
+const POLL_LIMIT = 200;
 
 export function AutoSend({ agent }: { agent: Agent }) {
   const config = externalConfig(agent);
@@ -45,6 +50,24 @@ export function AutoSend({ agent }: { agent: Agent }) {
 
   useEffect(() => {
     void check();
+  }, [check]);
+
+  /*
+   * Coming back to Spaces is the strongest signal there is that somebody just
+   * finished with System Settings — stronger than any timer — so re-ask then.
+   * It also covers the case where the grant happened in an earlier session and
+   * this panel has never looked.
+   */
+  useEffect(() => {
+    const recheck = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", recheck);
+    };
   }, [check]);
 
   /*
@@ -102,7 +125,7 @@ export function AutoSend({ agent }: { agent: Agent }) {
             : trusted
               ? "Spaces has Accessibility permission, so it can type into other apps."
               : waiting
-                ? `Waiting for the toggle. Turn Spaces on in the list macOS just opened — this notices on its own.`
+                ? "Waiting for the toggle. Turn Spaces on in the Accessibility list macOS just opened — it may be on another desktop. This notices on its own, and again whenever you come back to Spaces."
                 : "Spaces does not have Accessibility permission. macOS will silently drop anything it tries to type into another app."}
         </span>
         {trusted === false && !waiting && (
