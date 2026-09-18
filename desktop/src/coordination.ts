@@ -189,14 +189,31 @@ async function laneFor(project: Project, agent: Agent, base: string): Promise<Ag
     ).slice(0, MAX_FILES_PER_LANE);
   }
 
-  // Which branch holds this agent's committed work. A spawned agent in an
-  // isolated project has a branch Spaces named; everyone else is on whatever
-  // their working directory has checked out.
-  const named = external ? "" : branchName(agent);
-  if (named && (await branchExists(root, named))) {
-    lane.branch = named;
-  } else if (usable) {
+  /*
+   * Which branch holds this agent's committed work — asked of the directory it
+   * works in, not of the naming convention.
+   *
+   * This used to prefer the name Spaces would choose whenever a branch by that
+   * name existed *anywhere in the repository*, which is not the same question
+   * as whether this agent is on it. A project deleted long ago leaves its
+   * worktrees behind still holding exactly those names, so every teammate was
+   * described to every other by a branch none of them was using, carrying that
+   * dead project's commit counts.
+   *
+   * Seen in a real round: Codex was told "Claude — hq/claude-7ccc2f, 2 commits
+   * ahead", while Claude's worktree was on hq/claude-7ccc2f-8d83d3 with
+   * nothing on it at all. Both numbers and both names were somebody else's.
+   *
+   * The working directory answers correctly either way: an isolated agent's is
+   * its worktree, and a shared one's is the checkout everybody is on.
+   */
+  if (usable) {
     lane.branch = (await safe(() => git(workdir, "rev-parse", "--abbrev-ref", "HEAD"))).trim();
+  }
+  if (!external && (!lane.branch || lane.branch === "HEAD")) {
+    // Only when the directory could not say: better the convention than nothing.
+    const named = branchName(agent);
+    if (await branchExists(root, named)) lane.branch = named;
   }
 
   if (!lane.branch || lane.branch === "HEAD" || lane.branch === base) {

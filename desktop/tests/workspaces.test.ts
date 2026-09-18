@@ -107,3 +107,36 @@ test("merging, pushing and status use the branch that is actually there", async 
     "the branch must be read before the worktree is removed"
   );
 });
+
+/*
+ * What agents are told about each other.
+ *
+ * The shared-workspace block names each teammate's branch and how far ahead it
+ * is. That branch was chosen by preferring the name Spaces *would* pick
+ * whenever a branch by that name existed anywhere in the repository — which is
+ * not the same question as whether the agent is on it.
+ *
+ * A project deleted long ago leaves its worktrees holding exactly those names.
+ * Observed in a real round: Codex was told "Claude — hq/claude-7ccc2f, 2
+ * commits ahead" while Claude's worktree was on hq/claude-7ccc2f-8d83d3 with
+ * nothing on it. Every agent was being briefed on a dead project's work under
+ * a live teammate's name — the worst kind of wrong, because it reads as fact.
+ */
+test("a teammate's branch is read from where it works, not from the convention", async () => {
+  const src = await readFile(new URL("../src/coordination.ts", import.meta.url), "utf8");
+
+  const at = src.indexOf("Which branch holds this agent's committed work");
+  assert.ok(at > 0, "the lane branch is no longer resolved here");
+  const body = src.slice(at, src.indexOf("if (!lane.branch || lane.branch === \"HEAD\" || lane.branch === base)", at));
+
+  // The working directory is asked first, unconditionally.
+  const headAt = body.indexOf('"rev-parse", "--abbrev-ref", "HEAD"');
+  const namedAt = body.indexOf("branchName(agent)");
+  assert.ok(headAt > 0, "the working directory is never consulted");
+  assert.ok(namedAt > headAt, "the naming convention must not win over the directory");
+
+  // And the convention is only a fallback for a directory that could not answer.
+  assert.match(body, /if \(!external && \(!lane\.branch \|\| lane\.branch === "HEAD"\)\)/);
+  // Crucially, existence of the branch no longer decides it on its own.
+  assert.doesNotMatch(body, /const named = external \? "" : branchName\(agent\)/);
+});
