@@ -29,3 +29,35 @@ test("replies land where the question was asked", async () => {
     assert.match(body, /const parentId = trigger\.parentId;/, `${fn} no longer inherits the thread`);
   }
 });
+
+/*
+ * And the channel has to show them.
+ *
+ * The follow-the-bottom effect fires when a reply arrives, which is before it
+ * has been laid out — markdown renders, a long answer expands, an image loads,
+ * and the bottom moves past where the scroll was heading. The reply lands
+ * below the fold and the channel looks like nothing happened.
+ *
+ * This never showed while replies were filed as threads, because the list did
+ * not grow. Putting them in the channel is what exposed it, and from the
+ * reader's seat "my agents stopped replying" and "the view did not move" are
+ * the same thing.
+ */
+test("the channel follows a reply while it is still growing", async () => {
+  const src = await readFile(new URL("../src/components/ChatView.tsx", import.meta.url), "utf8");
+
+  // The scroller itself is observed, not just a sentinel at the end of it.
+  assert.match(src, /const scrollerRef = useRef<HTMLDivElement>\(null\)/);
+  assert.match(src, /className="messages"\s*\n\s*ref=\{scrollerRef\}/);
+  assert.match(src, /new ResizeObserver\(/);
+
+  const at = src.indexOf("new ResizeObserver(");
+  const body = src.slice(at, src.indexOf("}, [channelId, roots.length]);", at));
+  // Reading history is still never interrupted.
+  assert.match(body, /if \(!atBottomRef\.current\) return;/);
+  // A smooth scroll restarted every frame never arrives, so this jumps.
+  assert.match(body, /el\.scrollTop = el\.scrollHeight;/);
+  // Children too: the growth is in the message that just rendered.
+  assert.match(body, /for \(const child of Array\.from\(el\.children\)\) observer\.observe\(child\)/);
+  assert.match(body, /observer\.disconnect\(\)/);
+});

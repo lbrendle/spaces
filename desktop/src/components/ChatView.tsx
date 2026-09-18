@@ -451,6 +451,7 @@ export function ChatView({ channelId }: { channelId: string }) {
   const [filesByRun, setFilesByRun] = useState<Record<string, string>>({});
   const [reactions, setReactions] = useState<Record<string, MessageReaction[]>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
 
   const roots = useMemo(() => msgs.filter((m) => !m.parent_id), [msgs]);
@@ -589,6 +590,34 @@ export function ChatView({ channelId }: { channelId: string }) {
     if (atBottomRef.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [channelId, roots.length, lastRoot?.content?.length]);
 
+  /*
+   * Keep following while the message that just arrived is still growing.
+   *
+   * The effect above fires when a reply appears, which is before it has been
+   * laid out: markdown renders, a long answer expands, an image loads, and the
+   * bottom moves further down than where the scroll was heading. The reply
+   * then sits below the fold and the channel looks like nothing happened —
+   * which is exactly how it looked, because until replies stopped being filed
+   * as threads the list never grew and this never showed.
+   *
+   * A ResizeObserver on the scroller re-pins it as the content settles, and
+   * only while the reader is already at the bottom, so scrolling up to read
+   * history is still never interrupted.
+   */
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!atBottomRef.current) return;
+      // Jump rather than animate: this runs repeatedly as content settles, and
+      // a smooth scroll restarted every frame never arrives.
+      el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    for (const child of Array.from(el.children)) observer.observe(child);
+    return () => observer.disconnect();
+  }, [channelId, roots.length]);
+
   if (!channel) return <div className="main-pane center-note">Channel not found.</div>;
   /* eslint-disable-next-line @typescript-eslint/no-use-before-define */
 
@@ -717,6 +746,7 @@ export function ChatView({ channelId }: { channelId: string }) {
         <div className="chat-main">
           <div
             className="messages"
+            ref={scrollerRef}
             onScroll={(e) => {
               const el = e.currentTarget;
               atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
