@@ -197,6 +197,18 @@ export interface ImportResult {
 }
 
 /**
+ * Directories with an import running, so two cannot run at once.
+ *
+ * The watcher and somebody clicking Import can reach the same folder at the
+ * same moment, and they need not agree: a catch-up runs in whatever mode was
+ * stored, while a click may be changing that mode. Both writing at once left a
+ * folder recorded as indexed while its channel was being filled — converging
+ * eventually, but only after saying two different things. One at a time is
+ * simpler than making them agree.
+ */
+const importing = new Set<string>();
+
+/**
  * Bring a directory's sessions into Spaces.
  *
  * Safe to run again: a session already imported is skipped unless its file has
@@ -204,6 +216,27 @@ export interface ImportResult {
  * one-shot. Nothing is ever written back to the session files.
  */
 export async function importGroup(
+  group: SessionGroup,
+  mode: ImportMode,
+  onProgress?: (p: ImportProgress) => void
+): Promise<ImportResult> {
+  if (importing.has(group.cwd)) {
+    throw new Error(`${group.name} is already being imported.`);
+  }
+  importing.add(group.cwd);
+  try {
+    return await runImport(group, mode, onProgress);
+  } finally {
+    importing.delete(group.cwd);
+  }
+}
+
+/** True while a directory is mid-import, so a catch-up can stand aside. */
+export function isImporting(cwd: string): boolean {
+  return importing.has(cwd);
+}
+
+async function runImport(
   group: SessionGroup,
   mode: ImportMode,
   onProgress?: (p: ImportProgress) => void
@@ -520,6 +553,9 @@ export async function catchUpWatched(): Promise<ImportResult[]> {
   for (const watch of watches) {
     const group = byCwd.get(watch.cwd);
     if (!group) continue;
+    // Somebody is importing this folder by hand right now; their choice of
+    // mode is the current one, and two writers would only disagree.
+    if (isImporting(watch.cwd)) continue;
     // Nothing new: every session is already recorded at its current size.
     if (group.imported >= group.sessions.length) continue;
     const mode: ImportMode = watch.mode === "browse" ? "browse" : "index";

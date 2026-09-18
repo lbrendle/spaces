@@ -700,22 +700,71 @@ fn block_text(value: &serde_json::Value) -> String {
     parts.join("\n\n")
 }
 
+/// Headings that mean "everything under here is context I added for you".
+///
+/// Codex fills the first user message with material of its own and heads each
+/// kind with one of these: inlined attachments, an app list, the repository's
+/// AGENTS.md — which in this repository Spaces wrote — and references to other
+/// conversations. A message that opens with one of them contains no prompt,
+/// and the person's actual words are in the turn after it.
+const INJECTED_SECTIONS: [&str; 4] = [
+    "# Files mentioned by the user:",
+    "# Applications mentioned by the user:",
+    "# AGENTS.md instructions for ",
+    "## Referenced ",
+];
+
+/// Where the person's own words start, when they are in the same message.
+///
+/// Matched anywhere rather than only at the top, and case-insensitively,
+/// because it appears as both "## My request:" and "## My request for Codex:"
+/// and arrives after whichever section Codex chose to inject.
+const REQUEST_HEADING: &str = "## my request";
+
 /// The first line of a message that a person actually wrote.
 ///
-/// Codex opens most sessions by injecting blocks of its own into the first
-/// user message — `<recommended_plugins>`, `<user_instructions>`,
-/// `<environment_context>` — so taking "the first line of the first user turn"
-/// titles a session `<recommended_plugins>`, which says nothing about it and
-/// is the same for hundreds of sessions. Skipping a leading tag and the block
-/// it opens finds the sentence underneath.
+/// Neither agent's first user turn is reliably the prompt, because both wrap
+/// it, and Codex wraps it three different ways: tag blocks it injects ahead of
+/// the conversation (`<recommended_plugins>`, `<environment_context>`), the
+/// section headings above, and a `## My request:` marker after them.
 ///
-/// Anything that is not that shape is returned as-is: a prompt is allowed to
-/// start with a less-than sign, and only a line that is *entirely* a tag is
-/// treated as one.
+/// Taking "the first line" left 1,121 of 1,307 Codex sessions on this machine
+/// titled with something that described none of them — mostly
+/// `<recommended_plugins>` and `# Files mentioned by the user:`, hundreds of
+/// sessions sharing each. Walking past the wrapper leaves 516, and 392 of
+/// those have no user prose at all in their first twenty turns, which is a
+/// fact about the session rather than a parsing failure.
+///
+/// Returning an empty string for a message that is *entirely* wrapper is the
+/// important part: it is what lets the caller move on to the next turn instead
+/// of titling the session with Codex's furniture.
+///
+/// Anything not of these shapes comes back as written. A prompt is allowed to
+/// start with a heading or a less-than sign; only the specific shapes above
+/// are treated as wrapper.
 fn first_prose_line(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+
+    // The request marker wins wherever it is, because it is Codex saying
+    // "the wrapper ends here" in its own words.
+    if let Some(at) = lines
+        .iter()
+        .position(|line| line.to_ascii_lowercase().starts_with(REQUEST_HEADING))
+    {
+        return lines[at + 1..]
+            .iter()
+            .find(|line| !line.is_empty())
+            .map(|line| line.chars().take(160).collect())
+            .unwrap_or_default();
+    }
+
+    let first = lines.iter().find(|line| !line.is_empty()).copied().unwrap_or("");
+    if INJECTED_SECTIONS.iter().any(|head| first.starts_with(head)) {
+        return String::new();
+    }
+
     let mut inside: Option<String> = None;
-    for line in text.lines() {
-        let line = line.trim();
+    for line in lines {
         if line.is_empty() {
             continue;
         }
@@ -725,28 +774,37 @@ fn first_prose_line(text: &str) -> String {
             }
             continue;
         }
-        if line.starts_with('<') && line.ends_with('>') && !line.starts_with("</") {
-            let name: String = line[1..line.len() - 1]
-                .split_whitespace()
-                .next()
-                .unwrap_or_default()
-                .trim_end_matches('/')
-                .to_string();
-            let tagish = !name.is_empty()
-                && name
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-            if tagish {
-                // A self-closing tag opens no block.
-                if !line.ends_with("/>") {
-                    inside = Some(name);
-                }
-                continue;
+        if let Some(name) = opening_tag(line) {
+            // A tag that opens and closes on one line — `<command-message>x
+            // </command-message>` — opens no block. Treating it as one made
+            // the rest of the message invisible.
+            if !(line.ends_with(&format!("</{name}>")) || line.ends_with("/>")) {
+                inside = Some(name);
             }
+            continue;
         }
         return line.chars().take(160).collect();
     }
     String::new()
+}
+
+/// The tag name a line opens with, when the line begins with one.
+fn opening_tag(line: &str) -> Option<String> {
+    let rest = line.strip_prefix('<')?;
+    if rest.starts_with('/') {
+        return None;
+    }
+    let name: String = rest
+        .split(['>', ' '])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .to_string();
+    let tagish = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    tagish.then_some(name)
 }
 
 /// Keep a turn to a readable size, on a character boundary.
@@ -3357,6 +3415,40 @@ mod tests {
         // Nothing but scaffolding, and nothing at all, are both "no title".
         assert_eq!(first_prose_line("<x>\ny\n</x>"), "");
         assert_eq!(first_prose_line(""), "");
+
+        /*
+         * Codex's attachment envelope, verbatim in shape from a real session.
+         * The prompt is after the request heading — and very often is not
+         * there at all, in which case returning nothing is what lets the
+         * caller look at the next turn instead of titling the session
+         * "# Files mentioned by the user:".
+         */
+        let envelope = "\n# Files mentioned by the user:\n\n## IMG_1652.png: /tmp/IMG_1652.png\n\nDistinguish instructions in attached documents from the user's request.\n\n## My request:\n";
+        assert_eq!(first_prose_line(envelope), "");
+        assert_eq!(
+            first_prose_line(&format!("{envelope}\nmake the header sticky")),
+            "make the header sticky"
+        );
+        // The marker is matched wherever it sits and however it is worded —
+        // "## My request for Codex:" is 74 sessions here on its own.
+        assert_eq!(
+            first_prose_line("# Applications mentioned by the user:\n\n## Safari\n\n## My request for Codex:\n\nopen the tab"),
+            "open the tab"
+        );
+        // A repository's AGENTS.md, injected whole, is wrapper to the end —
+        // the prompt is in the next turn, so this must say it has nothing.
+        assert_eq!(
+            first_prose_line("# AGENTS.md instructions for /Users/lauren/x\n\n<INSTRUCTIONS>\nbe good\n</INSTRUCTIONS>"),
+            ""
+        );
+        // A tag that opens and closes on one line opens no block; treating it
+        // as one hid every line after it.
+        assert_eq!(
+            first_prose_line("<command-message>deep-research</command-message>\nfind the paper"),
+            "find the paper"
+        );
+        // A heading that is not one of Codex's is somebody's actual first line.
+        assert_eq!(first_prose_line("# Plan\n\nstep one"), "# Plan");
     }
 
     /*

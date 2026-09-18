@@ -143,6 +143,18 @@ test("importing reads other agents' history without owning it", async () => {
   // would bury the project's actual notes.
   assert.match(sessions, /Earlier agent sessions/);
 
+  /*
+   * One import per folder at a time.
+   *
+   * The watcher and a click can reach the same folder together and need not
+   * agree: a catch-up runs in the stored mode while a click may be changing
+   * it. Both writing left a folder recorded as indexed while its channel was
+   * being filled — it converged, but only after saying two different things.
+   */
+  assert.match(sessions, /const importing = new Set<string>\(\)/);
+  assert.match(sessions, /if \(isImporting\(watch\.cwd\)\) continue;/);
+  assert.match(sessions, /importing\.delete\(group\.cwd\)/);
+
   // The watcher is local-only and must not be gated on portal pairing — a
   // machine that has never paired still has its own history to catch up on.
   assert.match(app, /initSessionWatch/);
